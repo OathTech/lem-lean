@@ -566,22 +566,25 @@ type pat_style = FunParam | MatchArm
             (if not (List.mem md !lean_local_modules) then
               lean_collected_imports := md :: !lean_collected_imports);
             (* Emit 'open' for:
-               - Local modules (defined in this file via Module) — they create namespaces
+               - Local modules (defined in this file) — they create namespaces
                - Library modules in library context — they have Lem_X namespaces
-               User modules from other files have no namespace; import alone suffices.
+               User modules from other files: NOT opened — use qualified references
+               (ModuleName.typeName) instead, matching Coq/OCaml behavior.
                In non-library (user) modules, skip inline opens for library imports —
                transitive_opens will emit them for both main and auxiliary files. *)
             if List.mem md !lean_local_modules then
               Output.flat [
                 from_string "open"; ws sk; from_string md; from_string "\n"
               ]
-            else if not (is_library_module md) then emp
-            else if is_user_module then emp
-            else
-              let ns = lean_ns_name md in
-              Output.flat [
-                from_string "open"; ws sk; from_string ns; from_string "\n"
-              ]
+            else if is_library_module md then begin
+              if is_user_module then emp  (* transitive_opens handles this *)
+              else
+                let ns = lean_ns_name md in
+                Output.flat [
+                  from_string "open"; ws sk; from_string ns; from_string "\n"
+                ]
+            end
+            else emp  (* User modules: qualified access, no open *)
           in
           if (not (in_target targets)) then emp else Output.flat (List.map handle_mod mod_descrs)
       | OpenImportTarget _ ->
@@ -1472,8 +1475,18 @@ type pat_style = FunParam | MatchArm
                 | Types.Tapp (_, path) ->
                     let n0 = Name.add_lskip (Path.get_name path) in
                     let n = B.type_path_to_name n0 path in
-                    Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n))
-                | _ -> assert false  (* unreachable: is_mutual_record_type requires Tapp *)
+                    let base = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n)) in
+                    let (mod_path, _) = Path.to_name_list path in
+                    match mod_path with
+                      | [mod_name] ->
+                        let mod_str = Name.to_string mod_name in
+                        let current = !lean_current_module_name in
+                        let capitalized = String.capitalize_ascii mod_str in
+                        if capitalized = current
+                        then base
+                        else String.concat "" [capitalized; "."; base]
+                      | _ -> base
+                | _ -> assert false
               in
               Output.flat ([
                 ws skips; from_string "("; from_string type_name_str; from_string ".mk"
@@ -1529,7 +1542,20 @@ type pat_style = FunParam | MatchArm
                     | Types.Tapp (_, path) ->
                         let n0 = Name.add_lskip (Path.get_name path) in
                         let n = B.type_path_to_name n0 path in
-                        Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n))
+                        let base = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n)) in
+                        let (mod_path, _) = Path.to_name_list path in
+                        (match mod_path with
+                          | [mod_name] ->
+                            let mod_str = Name.to_string mod_name in
+                            let current = !lean_current_module_name in
+                            let capitalized = String.capitalize_ascii mod_str in
+                            let result =
+                            if capitalized = current
+                            then base
+                            else String.concat "" [capitalized; "."; base]
+                            in
+                            result
+                          | _ -> base)
                     | _ -> assert false
                   in
                   Output.flat ([
@@ -2824,12 +2850,12 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
       let imports_output = Output.flat (List.map (fun m ->
         from_string (String.concat "" ["import "; m; "\n"])
       ) unique_imports) in
-      let ns_start = if is_library then
-        from_string (String.concat "" ["\nnamespace "; ns_name; "\n"])
-      else emp in
-      let ns_end = if is_library then
-        from_string (String.concat "" ["\nend "; ns_name; "\n"])
-      else emp in
+      (* All modules get namespace wrappers. Library modules use Lem_X names;
+         user modules use the module name directly (matching the filename).
+         This scopes definitions under ModuleName, matching Isabelle/HOL4 behavior
+         and preventing root-namespace collisions. *)
+      let ns_start = from_string (String.concat "" ["\nnamespace "; ns_name; "\n"]) in
+      let ns_end = from_string (String.concat "" ["\nend "; ns_name; "\n"]) in
       (* For non-library modules, open all imported library namespaces so that
          class/type names from transitive dependencies are in scope.
          This is needed because Lean namespaces don't re-export opens.
@@ -2868,15 +2894,15 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
             end else acc
           ) [] A.env.e_env in
           let lib_namespaces = List.rev lib_namespaces in
-          Output.flat (extra_import :: bridges_import :: List.map (fun ns ->
-            from_string (String.concat "" ["open "; ns; "\n"])
-          ) lib_namespaces)
+          (* No blanket 'open' for user modules — use qualified references
+             (ModuleName.typeName) instead, matching Coq/OCaml behavior. *)
+          Output.flat (extra_import :: bridges_import ::
+            List.map (fun ns ->
+              from_string (String.concat "" ["open "; ns; "\n"])
+            ) lib_namespaces)
         else
-          (* Just open namespaces for direct imports *)
-          let ns_list = List.filter_map (fun m ->
-            let ns = lean_ns_name m in
-            if ns <> m then Some ns else None
-          ) all_imports in
+          (* Open namespaces for all direct imports *)
+          let ns_list = List.map (fun m -> lean_ns_name m) all_imports in
           Output.flat (List.map (fun ns ->
             from_string (String.concat "" ["open "; ns; "\n"])
           ) ns_list)
@@ -2887,7 +2913,9 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
         from_string (String.concat "" ["open "; name_str; "\n"])
       ) !lean_auxiliary_opens in
       let opens_output = Output.flat opens in
+      (* Auxiliary file needs to open the main module's namespace *)
+      let aux_open_self = from_string (String.concat "" ["open "; ns_name; "\n"]) in
         ((to_rope (r"\"") lex_skip need_space @@ imports_output ^ transitive_opens ^ ns_start ^ lean_defs ^ ns_end ^ ws end_lex_skips),
-          to_rope (r"\"") lex_skip need_space @@ transitive_opens ^ opens_output ^ lean_defs_extra ^ ws end_lex_skips)
+          to_rope (r"\"") lex_skip need_space @@ transitive_opens ^ aux_open_self ^ opens_output ^ lean_defs_extra ^ ws end_lex_skips)
     ;;
   end

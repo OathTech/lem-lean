@@ -106,6 +106,8 @@ val get_imported_target_modules : Typed_ast.def list * Ast.lex_skips -> Imported
 (** [imported_modules_to_strings env targ dir imported_mods relative] is used together with [get_imported_target_modules]. Please see there. *)
 val imported_modules_to_strings : env -> Target.target -> string -> Imported_Modules_Set.t -> bool -> string list
 
+(** Set by the Lean backend before each file. Used to qualify cross-module references. *)
+val lean_current_module : string ref
 
 module Make(A : sig
   val env : env;; 

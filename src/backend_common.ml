@@ -366,8 +366,13 @@ let imported_modules_to_strings env target dir iml relative =
   let ms = Imported_Modules_Set.elements iml in
     List.flatten (List.map (imported_module_to_strings env target dir relative) ms)
 
-module Make(A : sig 
-  val env : env;; 
+(* Set by the Lean backend before each file's code generation.
+   Used by lean_requalify_ident inside the functor to determine
+   if a name is from the current module (no qualification needed). *)
+let lean_current_module : string ref = ref ""
+
+module Make(A : sig
+  val env : env;;
   val target : Target.target;;
   val dir : string;;
   val id_format_args : (bool -> Output.id_annot -> Ulib.Text.t -> Output.t) * Ulib.Text.t
@@ -389,23 +394,17 @@ let fix_module_name_list nl = begin
   let names = aux [] [] nl in
   (* For Lean, handle module qualifiers:
      - Library modules (LemLib.X) → flat namespace names (Lem_X)
-     - User modules (Loc, Bimap, etc.) → stripped entirely, since user modules
-       don't create namespaces in Lean (no namespace wrapper in generated files) *)
+     - User modules (Loc, Bimap, etc.) → kept as-is (they have namespace wrappers) *)
   match A.target with
   | Target.Target_no_ident (Target.Target_lean) ->
       let prefix = "LemLib." in
       let plen = String.length prefix in
-      let is_library n =
-        let s = Name.to_string n in
-        String.length s >= plen && String.sub s 0 plen = prefix
-      in
-      (* Keep only library module names, drop user module names *)
-      let lib_names = List.filter is_library names in
-      (* Convert LemLib.X → Lem_X *)
       List.map (fun n ->
         let s = Name.to_string n in
-        Name.from_string (String.concat "" ["Lem_"; String.sub s plen (String.length s - plen)])
-      ) lib_names
+        if String.length s >= plen && String.sub s 0 plen = prefix then
+          Name.from_string (String.concat "" ["Lem_"; String.sub s plen (String.length s - plen)])
+        else n
+      ) names
   | _ -> names
 end
 
@@ -413,6 +412,47 @@ let fix_module_prefix_ident (i : Ident.t) =
   let (ns, n) = Ident.to_name_list i in
   let ns' = fix_module_name_list ns in
   Ident.mk_ident (Ident.get_lskip i) ns' n
+
+(* For Lean: re-add module qualification from a Path.t when the ident has
+   been stripped to unqualified by search_module_suffix. This enables
+   qualified cross-module references (ModuleName.typeName) needed because
+   Lean user modules have namespace wrappers.
+   Only adds qualification for user modules from other files;
+   library modules and same-file references stay as-is. *)
+let lean_requalify_ident (canonical_path : Path.t) (i : Ident.t) : Ident.t =
+  match A.target with
+  | Target.Target_no_ident (Target.Target_lean) ->
+    let (ns, _) = Ident.to_name_list i in
+    if ns <> [] then i  (* Already qualified — don't double-qualify *)
+    else
+      let (mod_path, _name) = Path.to_name_list canonical_path in
+      begin match mod_path with
+        | [] -> i  (* No module path — local or builtin *)
+        | [mod_name] ->
+          let mod_str = Name.to_string mod_name in
+          let current = !lean_current_module in
+          let capitalized = String.capitalize_ascii mod_str in
+          (* Check if this is a library module by looking for its Coq rename
+             in the module environment. Library modules are handled by the
+             Lem_X namespace system, not user-module qualification. *)
+          let is_library =
+            try
+              let mod_path_t = Path.mk_path [] mod_name in
+              match Types.Pfmap.apply A.env.e_env mod_path_t with
+                | Some md ->
+                  Target.Targetmap.apply_target md.Typed_ast.mod_target_rep
+                    (Target.Target_no_ident Target.Target_coq) <> None
+                | None -> false
+            with _ -> false
+          in
+          if is_library then i  (* Library — handled by Lem_X namespace *)
+          else if capitalized = current then i  (* Same module — no qualification *)
+          else
+            (* Different user module — add qualification *)
+            Ident.mk_ident (Ident.get_lskip i) [Name.from_string capitalized] (Name.strip_lskip (Ident.get_name i))
+        | _ -> i  (* Multi-level path — leave as-is *)
+      end
+  | _ -> i
 
 let fix_module_ident (i : Ident.t) =
   let (ns, n) = Ident.to_name_list i in
@@ -441,18 +481,19 @@ let const_ref_to_name n0 use_ascii c =
 (* A version of const_id_to_ident that returns additionally, whether
    the ascii-alternative was used. This is handy for determining infix
    status. *)
-let const_id_to_ident_aux c_id ascii_alternative given_id_opt =   
+let const_id_to_ident_aux c_id ascii_alternative given_id_opt =
   let l = Ast.Trans (false, "const_id_to_ident", (Some c_id.id_locn)) in
   let c_descr = c_env_lookup l A.env.c_env c_id.descr in
   let org_ident = resolve_constant_id_ident l A.env A.target c_id in
   let (_, n, n_ascii_opt) = constant_descr_to_name A.target c_descr in
-  let (ascii_used, given_used, ident')  =    
+  let (ascii_used, given_used, ident')  =
     match (n_ascii_opt, ascii_alternative, given_id_opt) with
       | (Some ascii, true, _) -> (true, false, Ident.rename org_ident ascii)
       | (_, false, Some i) -> (false, true, Ident.replace_lskip i (Ident.get_lskip org_ident))
       | _  -> (false, false, Ident.rename org_ident n)
   in
   let ident = fix_module_prefix_ident ident' in
+  let ident = lean_requalify_ident c_descr.const_binding ident in
   (ascii_used, given_used, ident)
 ;;
 
@@ -578,11 +619,15 @@ let type_id_to_ident_aux (p : Path.t id) =
    let td = Types.type_defs_lookup l A.env.t_env p.descr in
    let org_type = resolve_type_id_ident l A.env p p.descr in
    match Target.Targetmap.apply_target td.Types.type_rename A.target with
-     | Some (_, n) -> (false, fix_module_prefix_ident (Ident.rename org_type n))
+     | Some (_, n) ->
+         let i = fix_module_prefix_ident (Ident.rename org_type n) in
+         (false, lean_requalify_ident p.descr i)
      | None -> begin
          match Target.Targetmap.apply_target td.Types.type_target_rep A.target with
            | Some (TYR_simple (_, _, i)) -> (true, Ident.replace_lskip i (Ident.get_lskip org_type))
-           | _ -> (false, fix_module_prefix_ident org_type)
+           | _ ->
+               let i = fix_module_prefix_ident org_type in
+               (false, lean_requalify_ident p.descr i)
        end
 
 let type_id_to_ident (p : Path.t id) = snd (type_id_to_ident_aux p)
