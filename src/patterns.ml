@@ -1898,9 +1898,10 @@ let add_no_toplevel_type s =
   let path = strs |> List.map Name.from_string |> Path.mk_path_list in
   no_toplevel := path :: !no_toplevel
 
-let check_toplevel_match (t : Types.src_t) =
+let rec check_toplevel_match (t : Types.src_t) =
   match t.term with
   | Typ_app (i, _) when List.exists (fun p -> Path.compare i.descr p == 0) !no_toplevel -> false
+  | Typ_tup ts -> Seplist.for_all check_toplevel_match ts
   | _ -> true
 
 
