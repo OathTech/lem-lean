@@ -1,6 +1,6 @@
 # Attempt to ask git for a version (tag or hash) but fall back on LEMRELEASE.
 # Note that opam builds from a tar ball so LEMRELEASE will be used in that case.
-LEMRELEASE:=2025-03-13
+LEMRELEASE:=2026-05-01
 LEMVERSION:=$(shell git describe --dirty --always 2>/dev/null || echo $(LEMRELEASE))
 
 DDIR=lem-$(LEMVERSION)

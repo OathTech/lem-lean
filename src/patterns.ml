@@ -17,7 +17,7 @@
 (*          Lars Hupel                                                    *)
 (*          Basile Clement                                                *)
 (*                                                                        *)
-(*  The Lem sources are copyright 2010-2025                               *)
+(*  The Lem sources are copyright 2010-2026                               *)
 (*  by the authors above and Institut National de Recherche en            *)
 (*  Informatique et en Automatique (INRIA).                               *)
 (*                                                                        *)
