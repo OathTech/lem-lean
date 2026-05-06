@@ -8,7 +8,11 @@ DEPS = $(patsubst %,%.uo,$(BARE_DEPS))
 .PHONY: all
 all: $(HOLHEAP_NAME) 
 
+# The command to build heaps has changed after Trindemossen-2 release, so allow
+# both for now, and we can drop the first after the next HOL release.
 $(HOLHEAP_NAME): $(DEPS)
 	rm -f $(HOLHEAP_NAME)
-	$(protect $(HOLDIR)/bin/buildheap) -o $@ $(BARE_DEPS)
+	if type $(protect $(HOLDIR)/bin/buildheap) >/dev/null 2>/dev/null; then \
+	  $(protect $(HOLDIR)/bin/buildheap) -o $@ $(BARE_DEPS); else \
+	  $(protect $(HOLDIR)/bin/hol) buildheap -o $@ $(BARE_DEPS); fi
 endif
