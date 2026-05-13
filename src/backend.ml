@@ -232,6 +232,7 @@ module type Target = sig
   val typ_var : Ulib.Text.t
   val typ_class_constraint_prefix_end : t
   val typ_with_sort : t -> Ulib.Text.t -> t
+  val typ_supports_wildcards : bool
 
   (* Length specifications *)
   val nexp_start : t
@@ -454,6 +455,7 @@ module Identity : Target = struct
   let typ_var = r"'"
   let typ_class_constraint_prefix_end = kwd "=>"
   let typ_with_sort _ _ = err "Type with sort not supported in ident backend"
+  let typ_supports_wildcards = true
 
   let nexp_start = emp
   let nexp_end = emp
@@ -683,6 +685,7 @@ module Tex : Target = struct
   let typ_var = r""
   let typ_class_constraint_prefix_end = kwd "\\Rightarrow"
   let typ_with_sort _ _ = err "Type with sort not supported in TeX backend"
+  let typ_supports_wildcards = true
 
   let nexp_start = emp
   let nexp_end = emp
@@ -1149,6 +1152,7 @@ module Hol : Target = struct
   let typ_var = r"'"
   let typ_class_constraint_prefix_end = kwd "=>"
   let typ_with_sort _ _ = err "Type with sort not supported in HOL backend"
+  let typ_supports_wildcards = false
 
   let nexp_start = kwd "(*"
   let nexp_end = kwd "*)"
@@ -1410,7 +1414,9 @@ let nexp n =
 
 let rec typ print_backend t = match t.term with
   | Typ_wild(s) ->
-      ws s ^ kwd "_"
+      if T.typ_supports_wildcards
+      then ws s ^ kwd "_"
+      else typ print_backend (C.t_to_src_t t.typ)
   | Typ_var(s,v) ->
       ws s ^ id Type_var (Ulib.Text.(^^^) T.typ_var (Tyvar.to_rope v))
   | Typ_fn(t1,s,t2) ->
