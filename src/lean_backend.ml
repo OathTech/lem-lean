@@ -1152,9 +1152,79 @@ type pat_style = FunParam | MatchArm
                   List.map (fun key -> Hashtbl.find tbl key) (List.rev !order)
                 in
                 let num_functions = List.length groups in
-                let is_truly_mutual = num_functions > 1 in
-                let def_keyword =
+                (* Acyclic de-mutualization (arc 3): a 'let rec ... and ...'
+                   block whose call graph is a DAG (ignoring self-loops) is
+                   emitted as SEQUENTIAL defs in dependency order — Lean's
+                   'mutual' is reserved for genuine cycles. Lem sources use
+                   rec-and chains freely for non-mutual defs; keeping them
+                   mutual both blocks per-member termination handling and
+                   forces fuel onto members that are not even recursive. *)
+                let group_cref g = match g with
+                  | (_, c, _, _, _, _) :: _ -> Some c
+                  | [] -> None in
+                let group_used g =
+                  List.fold_left (fun acc (_, _, _, _, _, e) ->
+                      let ue = add_exp_entities empty_used_entities e in
+                      ue.used_consts @ acc) [] g in
+                let group_self_recursive g = match group_cref g with
+                  | Some c -> List.mem c (group_used g)
+                  | None -> false in
+                let demutualized =
+                  if num_functions <= 1 then None
+                  else begin
+                    let arr = Array.of_list groups in
+                    let n = Array.length arr in
+                    let uses = Array.map group_used arr in
+                    let dep i j =
+                      i <> j
+                      && (match group_cref arr.(j) with
+                          | Some cj -> List.mem cj uses.(i)
+                          | None -> false) in
+                    (* Kahn's algorithm, stable: each round emits (in
+                       original order) every def whose dependencies are all
+                       emitted. No progress with nodes left = a cycle. *)
+                    let emitted = Array.make n false in
+                    let result = ref [] in
+                    let count = ref 0 in
+                    let progress = ref true in
+                    while !count < n && !progress do
+                      progress := false;
+                      for i = 0 to n - 1 do
+                        if not emitted.(i) then begin
+                          let ready = ref true in
+                          for j = 0 to n - 1 do
+                            if (not emitted.(j)) && dep i j then ready := false
+                          done;
+                          if !ready then begin
+                            emitted.(i) <- true;
+                            result := arr.(i) :: !result;
+                            incr count;
+                            progress := true
+                          end
+                        end
+                      done
+                    done;
+                    if !count = n then Some (List.rev !result) else None
+                  end in
+                let groups, is_truly_mutual = match demutualized with
+                  | Some sorted -> sorted, false
+                  | None -> groups, num_functions > 1 in
+                let auto_term_for g = match group_cref g with
+                  | Some c ->
+                    let cd = c_env_lookup Ast.Unknown A.env.c_env c in
+                    (match Target.Targetmap.apply_target cd.termination_setting
+                             (Target.Target_no_ident Target.Target_lean) with
+                     | Some (Ast.Termination_setting_automatic _) -> true
+                     | _ -> false)
+                  | None -> false in
+                let def_keyword_for g =
                   if inside_instance then emp
+                  else if demutualized <> None then
+                    (* de-mutualized member: keyword by ITS OWN recursion
+                       and ITS OWN termination declare *)
+                    (if group_self_recursive g && not (auto_term_for g) then
+                       from_string "partial def"
+                     else from_string "def")
                   else if is_recursive && not try_term then
                     from_string "partial def"
                   else
@@ -1329,7 +1399,7 @@ type pat_style = FunParam | MatchArm
                       let saved = !lean_reader_binder in
                       lean_reader_binder := lifted;
                       Fun.protect ~finally:(fun () -> lean_reader_binder := saved)
-                        (fun () -> (attr_for g, def_keyword, render_group g, emp))
+                        (fun () -> (attr_for g, def_keyword_for g, render_group g, emp))
                     | Some (n, c, s) ->
                       let base_name = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
                       let worker = String.concat "" [base_name; "_lemFuel"] in
@@ -1395,9 +1465,13 @@ type pat_style = FunParam | MatchArm
                     Output.flat (List.map (fun (_, _, _, w) -> w) bodies)
                   ]
                 else
+                  (* de-mutualized members need explicit separation: an
+                     and-member's leading skips carry no newline *)
+                  let sep = if demutualized <> None then from_string "\n" else emp in
                   Output.flat [
                     ws skips; rec_skips;
-                    Output.flat (List.map (fun (a, k, b, w) -> Output.flat [a; k; b; w]) bodies)
+                    Output.flat (List.map (fun (a, k, b, w) ->
+                        Output.flat [sep; a; k; b; w]) bodies)
                   ]
               else
                 from_string "\n/- removed recursive definition intended for another target -/"

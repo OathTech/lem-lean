@@ -468,3 +468,20 @@ let rec fuel_spin n x = if n = 0 then x else fuel_spin (n + 1) x
 declare {lean} fuel val fuel_spin = `fuelExhausted x`
 
 let uses_fuel_spin (k : nat) : nat = fuel_spin k (k + 1)
+
+(* === Section 14: acyclic de-mutualization (arc 3) === *)
+
+(* A 'let rec ... and ...' block whose call graph is a DAG (ignoring
+   self-loops) is emitted as SEQUENTIAL defs in dependency order — no
+   'mutual' block. Members with self-loops stay 'partial def' (or 'def'
+   under a termination declare); members with no self-call become plain
+   defs. Genuinely cyclic blocks (section 13's ping/pong) stay mutual. *)
+val dag_top : nat -> nat
+val dag_mid : list nat -> nat
+val dag_leaf : nat -> nat
+let rec dag_top n = dag_mid [n; n + 1]
+and dag_mid l = match l with | [] -> 0 | x :: xs -> dag_leaf x + dag_mid xs end
+and dag_leaf n = n * 2
+declare {lean} termination_argument dag_mid = automatic
+
+let uses_dag (k : nat) : nat = dag_top k
