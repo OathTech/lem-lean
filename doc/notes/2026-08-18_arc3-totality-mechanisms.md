@@ -65,3 +65,14 @@ section 13's cyclic pair as the stays-mutual regression check.
   Lean 4.29's automatic derivation even after de-mutualization — attach
   fires but the decreasing goal cannot chain through the pair match.
   Consumer-side policy: such defs take fuel (consumer decision log D6).
+
+## Post-audit notes (2026-08-18)
+
+- In a DE-MUTUALIZED (acyclic) block where fuel'd A calls fuel'd B, A's
+  body emits `(B_lemFuel lemFuel)` — the callee runs on the CALLER's
+  remaining fuel, not its own default budget (the block-level worker plan
+  covers the whole block). Sound (topo order scopes it; exhaustion is
+  loud) and load-bearing for genuinely mutual blocks; recorded because it
+  is observable at exhaustion.
+- Negative lane extended with reader_seed×fuel; multi-clause×fuel and
+  instance×fuel raises remain probe-less (recorded as thin coverage).
