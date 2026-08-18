@@ -1744,8 +1744,13 @@ type pat_style = FunParam | MatchArm
              fun_pattern_list inside_instance pats; ws skips; typ_opt;
              from_string " := match lemFuel with\n  | 0 => (";
              from_string sentinel;
-             from_string ")\n  | Nat.succ lemFuel =>\n    ";
-             body
+             (* the succ-arm body is parenthesized like the sentinel: a
+                hoisted infix head (e.g. a bind rendered prefix) followed by
+                argument lines at low indentation would otherwise escape the
+                match arm (arc-3 batch E: full_eval_pexpr) *)
+             from_string ")\n  | Nat.succ lemFuel => (";
+             body;
+             from_string ")"
            ]
          | None ->
            Output.flat [
