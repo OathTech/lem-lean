@@ -112,10 +112,13 @@ let lean_reader_binder : bool ref = ref false
 (* Fuel emission (declare {lean} fuel val f = `sentinel`): while rendering a
    fuel'd def's clause, lean_fuel_emit holds the sentinel text (consumed by
    funcl_aux: rename to worker, add the Nat binder, wrap the body) and
-   lean_fuel_worker holds (cref, worker name) so self-calls rewrite to
+   lean_fuel_workers holds (cref, worker name)s so self-calls rewrite to
    'worker lemFuel' (the decremented binder in scope). *)
 let lean_fuel_emit : string option ref = ref None
-let lean_fuel_worker : (Types.const_descr_ref * string) option ref = ref None
+(* All fuel'd defs of the block being rendered (one entry for a plain fuel'd
+   def; every member for a fuel'd mutual block — all-or-none, arc 3 B2).
+   Self- and cross-member calls rewrite to '(worker lemFuel)'. *)
+let lean_fuel_workers : (Types.const_descr_ref * string) list ref = ref []
 
 (* reader_seed (declare {lean} reader_seed val f): while rendering a
    seed-marked def's body, this holds the name of its first argument,
@@ -1223,6 +1226,29 @@ type pat_style = FunParam | MatchArm
                       from_string " : "; full_type; equations
                     ]
                 in
+                (* Block-level fuel plan (arc 3, B2): every fuel'd def of
+                   this block, so cross-member calls inside a fuel'd mutual
+                   block rewrite to '(worker lemFuel)' — each hop passes the
+                   decremented binder and Lean sees mutual structural
+                   recursion on fuel. All-or-none per mutual block: a
+                   non-fuel'd member calling a fuel'd sibling would use the
+                   wrapper and reset the fuel, defeating termination. *)
+                let fuel_plan =
+                  List.filter_map (function
+                    | [({term = n}, c, _, _, _, _)] when fuel_sentinel_for c <> None ->
+                        let base = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
+                        Some (c, String.concat "" [base; "_lemFuel"])
+                    | (({term = _}, c, _, _, _, _) :: _ :: _) when fuel_sentinel_for c <> None ->
+                        raise (Reporting_basic.err_general true Ast.Unknown
+                          "Lean backend: 'declare {lean} fuel val' on a multi-clause definition (unsupported)")
+                    | _ -> None) groups in
+                if is_truly_mutual && fuel_plan <> []
+                   && List.length fuel_plan <> List.length groups then
+                  raise (Reporting_basic.err_general true Ast.Unknown
+                    "Lean backend: fuel in a mutual block requires EVERY member to carry a 'declare {lean} fuel val' (all-or-none)");
+                let saved_plan = !lean_fuel_workers in
+                lean_fuel_workers := fuel_plan;
+                Fun.protect ~finally:(fun () -> lean_fuel_workers := saved_plan) @@ fun () ->
                 let bodies = List.map (fun g ->
                     (* Fuel emission (declare {lean} fuel val): single-clause,
                        non-mutual, non-instance, not reader-lifted (extend on
@@ -1289,9 +1315,9 @@ type pat_style = FunParam | MatchArm
                      | Some _ when inside_instance ->
                        raise (Reporting_basic.err_general true Ast.Unknown
                          "Lean backend: 'declare {lean} fuel val' inside an instance (unsupported)")
-                     | Some _ when is_truly_mutual ->
+                     | Some _ when is_truly_mutual && lifted ->
                        raise (Reporting_basic.err_general true Ast.Unknown
-                         "Lean backend: 'declare {lean} fuel val' in a mutual block (unsupported)")
+                         "Lean backend: 'declare {lean} fuel val' in a mutual block combined with reader lifting (unsupported; extend when needed)")
                      | _ -> ());
                     (* fuel x reader composes (arc 3, B1): the worker's fuel
                        binder is emitted BEFORE the reader binders, so the
@@ -1303,7 +1329,7 @@ type pat_style = FunParam | MatchArm
                       let saved = !lean_reader_binder in
                       lean_reader_binder := lifted;
                       Fun.protect ~finally:(fun () -> lean_reader_binder := saved)
-                        (fun () -> (attr_for g, def_keyword, render_group g))
+                        (fun () -> (attr_for g, def_keyword, render_group g, emp))
                     | Some (n, c, s) ->
                       let base_name = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
                       let worker = String.concat "" [base_name; "_lemFuel"] in
@@ -1313,13 +1339,13 @@ type pat_style = FunParam | MatchArm
                         if Types.TNset.cardinal tv = 0 then emp
                         else Output.flat [from_string " "; let_type_variables true tv] in
                       let saved_e = !lean_fuel_emit in
-                      let saved_w = !lean_fuel_worker in
                       let saved_rb = !lean_reader_binder in
                       lean_fuel_emit := Some s;
-                      lean_fuel_worker := Some (c, worker);
                       lean_reader_binder := lifted;
+                      (* worker name must agree with the block-level plan *)
+                      assert (List.assoc_opt c !lean_fuel_workers = Some worker);
                       Fun.protect ~finally:(fun () ->
-                          lean_fuel_emit := saved_e; lean_fuel_worker := saved_w;
+                          lean_fuel_emit := saved_e;
                           lean_reader_binder := saved_rb)
                         (fun () ->
                           let body = render_group g in
@@ -1350,7 +1376,10 @@ type pat_style = FunParam | MatchArm
                             pat_typ (C.t_to_src_t cd.const_type);
                             from_string " := "; from_string worker;
                             from_string " lemDefaultFuel\n"] in
-                          (attr_for g, from_string "def", Output.flat [body; wrapper]))
+                          (* Wrapper is returned separately: in a mutual
+                             block it must be emitted AFTER 'end', or it
+                             would join the recursion set (arc 3, B2). *)
+                          (attr_for g, from_string "def", body, wrapper))
                   ) groups in
                 let rec_skips =
                   if is_recursive && not inside_instance then
@@ -1360,13 +1389,15 @@ type pat_style = FunParam | MatchArm
                 if is_truly_mutual then
                   Output.flat [
                     ws skips; from_string "mutual\n"; rec_skips;
-                    concat_str "\n" (List.map (fun (a, k, b) -> Output.flat [a; k; b]) bodies);
-                    from_string "\nend"
+                    concat_str "\n" (List.map (fun (a, k, b, _) -> Output.flat [a; k; b]) bodies);
+                    from_string "\nend";
+                    (* fuel wrappers of a mutual block, after 'end' *)
+                    Output.flat (List.map (fun (_, _, _, w) -> w) bodies)
                   ]
                 else
                   Output.flat [
                     ws skips; rec_skips;
-                    Output.flat (List.map (fun (a, k, b) -> Output.flat [a; k; b]) bodies)
+                    Output.flat (List.map (fun (a, k, b, w) -> Output.flat [a; k; b; w]) bodies)
                   ]
               else
                 from_string "\n/- removed recursive definition intended for another target -/"
@@ -1738,9 +1769,10 @@ type pat_style = FunParam | MatchArm
                       else [Output.flat [l_out; meta_utf8 "  \xe2\x89\xa0  "; r_out]]
                     | _ ->
                       let is_fuel_self =
-                        match !lean_fuel_worker with
-                        | Some (fc, _) -> fc = cd.descr
-                        | None -> false in
+                        (* only while rendering a fuel'd body: elsewhere the
+                           lemFuel binder is not in scope *)
+                        !lean_fuel_emit <> None
+                        && List.mem_assoc cd.descr !lean_fuel_workers in
                       if is_fuel_self then
                         (* Self-call in a fuel'd worker: 'trans e0' reaches the
                            bare-Constant case, which rewrites to
@@ -1837,16 +1869,17 @@ type pat_style = FunParam | MatchArm
               let default_const_output () =
                 Output.concat emp (B.function_application_to_output (exp_to_locn e) (exp inside_instance) false e const [] (use_ascii_rep_for_const const.descr))
               in
-              begin match !lean_fuel_worker with
-              | Some (fc, w) when fc = const.descr ->
-                (* Self-call inside a fuel'd worker: recurse on the
-                   decremented fuel binder; a lifted worker also re-injects
-                   its reader binders (arc 3, B1). *)
+              begin match (if !lean_fuel_emit = None then None
+                           else List.assoc_opt const.descr !lean_fuel_workers) with
+              | Some w ->
+                (* Self- or cross-member call inside a fuel'd block: recurse
+                   on the decremented fuel binder; a lifted worker also
+                   re-injects its reader binders (arc 3, B1/B2). *)
                 let readers =
                   if !lean_reader_binder then reader_args_output () else emp in
                 Output.flat [from_string "("; from_string w;
                              from_string " lemFuel"; readers; from_string ")"]
-              | _ ->
+              | None ->
               if is_reader_cref const.descr then
                 (* Bare reference to the reader constant (unapplied):
                    eta-expand so the unit-function type is preserved. *)

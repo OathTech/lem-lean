@@ -443,3 +443,19 @@ let uses_fuel_env_loop (k : nat) : nat = fuel_env_loop k + k
 
 (* Bare reference passed to a HOF: wrapper partially applied to the reader. *)
 let maps_fuel_env (l : list nat) : list nat = List.map fuel_env_loop l
+
+(* === Section 13: fuel x mutual composition (arc 3, B2) === *)
+
+(* In a truly-mutual block, EITHER every member is fuel'd or none: fuel'd
+   workers share the fuel discipline — every cross-member call passes the
+   decremented fuel binder, so Lean sees mutual structural recursion on
+   fuel. Point-free wrappers at lemDefaultFuel are emitted AFTER the mutual
+   block (a wrapper inside the block would join the recursion set). *)
+val ping : nat -> nat
+val pong : nat -> nat
+let rec ping n = if n = 0 then 0 else pong (n - 1)
+and pong n = if n = 0 then 1 else ping (n + 1)
+declare {lean} fuel val ping = `991`
+declare {lean} fuel val pong = `992`
+
+let uses_pingpong (k : nat) : nat = ping k + pong k

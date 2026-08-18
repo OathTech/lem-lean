@@ -10,7 +10,26 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile
+lean: lean-generate lean-compile lean-negative
+
+# Negative probes: each negative/neg_*.lem MUST be rejected, and with the
+# error fragment declared in its first-line "(* EXPECT: ... *)" header —
+# a rejection for the wrong reason (e.g. a type error) is a FAIL.
+lean-negative:
+	@echo "=== Negative probes (must be rejected with the declared error) ==="
+	@fail=0; \
+	for f in negative/neg_*.lem; do \
+		exp=$$(sed -n 's/^(\* EXPECT: \(.*\) \*)$$/\1/p' $$f | head -1); \
+		out=$$($(LEM) $(LEMFLAGS) -lean $$f 2>&1); \
+		if [ $$? -eq 0 ]; then \
+			echo "  FAIL (accepted): $$f"; fail=1; \
+		elif ! echo "$$out" | grep -qF "$$exp"; then \
+			echo "  FAIL (rejected for the wrong reason): $$f"; \
+			echo "$$out" | head -3; fail=1; \
+		else \
+			echo "  OK (rejected as declared): $$f"; \
+		fi; \
+	done; exit $$fail
 
 # Generate all .lean files from .lem sources
 lean-generate: $(TESTS)

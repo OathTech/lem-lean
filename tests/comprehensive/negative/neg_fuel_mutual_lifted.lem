@@ -1,0 +1,14 @@
+(* EXPECT: in a mutual block combined with reader lifting *)
+open import Pervasives
+(* NEGATIVE probe (arc 3, B2): fuel'd mutual block combined with reader
+   lifting is unsupported -> the backend must reject. *)
+val neg_env : unit -> nat
+declare lean target_rep function neg_env u = 0
+declare {lean} reader val neg_env
+
+val neg_rping : nat -> nat
+val neg_rpong : nat -> nat
+let rec neg_rping n = if n = neg_env () then 0 else neg_rpong (n - 1)
+and neg_rpong n = if n = 0 then 1 else neg_rping (n + 1)
+declare {lean} fuel val neg_rping = `1`
+declare {lean} fuel val neg_rpong = `2`
