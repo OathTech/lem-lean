@@ -257,6 +257,12 @@ and const_descr =
     effectful : Target.Targetset.t;
     (** Targets for which this function's target_rep has side effects.
         Backends use this to prevent purity-based optimizations (e.g., CSE). *)
+
+    reader : Target.Targetset.t;
+    (** Targets for which this constant is an ambient READER: backends
+        thread its value as an extra parameter through every function that
+        (transitively) uses it, replacing calls with the parameter.
+        Currently implemented by the Lean backend only. *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -503,6 +509,7 @@ type declare_def =  (** Declarations *)
  | Decl_skip_instances        of lskips * targets_opt * lskips * lskips * Path.t id
  | Decl_extra_import          of lskips * targets_opt * lskips * lskips * string
  | Decl_effectful             of lskips * targets_opt * lskips * lskips * const_descr_ref id
+ | Decl_reader                of lskips * targets_opt * lskips * lskips * const_descr_ref id
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

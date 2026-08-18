@@ -507,6 +507,7 @@ declare_def =  (* declarations *)
  | Decl_skip_instances_decl of terminal * targets option * terminal * terminal * id
  | Decl_extra_import_decl of terminal * targets option * terminal * terminal * Ulib.UTF8.t
  | Decl_effectful_decl of terminal * targets option * terminal * terminal * id
+ | Decl_reader_decl of terminal * targets option * terminal * terminal * id
 
 
 type

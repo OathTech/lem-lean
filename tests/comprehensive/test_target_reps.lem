@@ -329,3 +329,30 @@ declare {lean} effectful val get_counter
 
 (* Call site should generate: runEffectful (get_counter ()) *)
 let use_counter (x : nat) : nat = get_counter () + x
+
+(* === Section 8: reader-lifted constants === *)
+
+(* Constants marked 'declare {lean} reader val' are ambient readers: every
+   function that (transitively) uses one takes the reader values as leading
+   extra parameters, and calls of the constant become the parameter. The
+   dynamic-rebinding combinator pattern (with_x) is NOT supported. *)
+val ambient_env : unit -> nat
+(* The lean target_rep is required to satisfy target-coverage checking but is
+   never emitted at applied call sites: reader lifting replaces them with the
+   threaded parameter. (Bare unapplied references eta-expand to the parameter,
+   not to this rep, as well.) *)
+declare lean target_rep function ambient_env u = 0
+declare {lean} reader val ambient_env
+
+(* Direct use: lifted, 'ambient_env ()' becomes the parameter. *)
+let reads_env (x : nat) : nat = ambient_env () + x
+
+(* Transitive use: lifted because it calls a lifted function. *)
+let reads_env_indirect (y : nat) : nat = reads_env (y + 1)
+
+(* Multi-clause + recursion through a lifted callee. *)
+let rec reads_env_rec (n : nat) : nat =
+  match n with
+    | 0 -> reads_env 0
+    | _ -> reads_env_rec (n - 1)
+  end

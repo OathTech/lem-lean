@@ -99,6 +99,73 @@ let lean_pending_abbrevs : Output.t list ref = ref []
    for self-references in premises (Lean requires explicit parameters). *)
 let lean_indreln_params : (Types.const_descr_ref * string) list ref = ref []
 
+(* Reader lifting (declare {lean} reader val): generated defs that
+   (transitively) use a reader constant take the reader values as leading
+   extra parameters; calls to the reader constant become the parameter.
+   lean_reader_lifted: crefs of lifted defs (grows monotonically; modules
+   are processed in dependency order, so callees are registered before
+   callers). lean_reader_binder: set while rendering a lifted def so the
+   three def-assembly sites emit the binder. *)
+let lean_reader_lifted : Types.Cdset.t ref = ref Types.Cdset.empty
+let lean_reader_binder : bool ref = ref false
+
+let lean_reader_is_reader env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  Targetset.mem Target_lean cd.reader
+
+let lean_reader_param_name env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  String.concat "" ["_lemReader_"; Name.to_string (Path.get_name cd.const_binding)]
+
+let lean_reader_params_cache : (Types.const_descr_ref * string) list option ref = ref None
+let lean_reader_get_params env =
+  match !lean_reader_params_cache with
+  | Some l -> l
+  | None ->
+    let l =
+      List.filter_map (fun cref ->
+          if lean_reader_is_reader env cref
+          then Some (cref, lean_reader_param_name env cref)
+          else None)
+        (c_env_all_consts env.c_env) in
+    let l = List.sort (fun (_, a) (_, b) -> String.compare a b) l in
+    lean_reader_params_cache := Some l; l
+
+(* Pre-pass over one module's defs: grow lean_reader_lifted to a fixpoint —
+   a def is lifted if it (transitively) uses a reader constant or a lifted
+   def. Must run BEFORE emission (defs renders last-to-first). The set
+   persists across modules (processed in dependency order). Instance defs
+   are never lifted (their methods cannot take extra parameters); an
+   instance method that uses a lifted/reader constant fails closed at
+   emission. Nested modules lift coarsely (all defs together — sound,
+   possibly-unused parameter). *)
+let lean_reader_prepass env (ds : def list) =
+  if lean_reader_get_params env <> [] then begin
+    let target = Target.Target_no_ident Target.Target_lean in
+    let infos = List.filter_map (fun (((d_aux, _), _, _) as d : def) ->
+        match d_aux with
+        | Instance _ -> None
+        | _ ->
+          let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
+          let used = (add_def_entities target false empty_used_entities d).used_consts_set in
+          Some (defined, used)) ds in
+    let changed = ref true in
+    while !changed do
+      changed := false;
+      List.iter (fun (defined, used) ->
+          if not (Types.Cdset.subset defined !lean_reader_lifted) then begin
+            let needs =
+              Types.Cdset.exists (lean_reader_is_reader env) used
+              || not (Types.Cdset.is_empty
+                        (Types.Cdset.inter used !lean_reader_lifted)) in
+            if needs then begin
+              lean_reader_lifted := Types.Cdset.union defined !lean_reader_lifted;
+              changed := true
+            end
+          end) infos
+    done
+  end
+
 (* Collect import for a qualified identifier from a target_rep.
    If the identifier has a module prefix (e.g., CerberusImpl.sizeof_ity),
    add the module to lean_collected_imports for the current file. *)
@@ -477,6 +544,33 @@ type pat_style = FunParam | MatchArm
           let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
           Targetset.mem Target_lean cd.effectful)
         ue.used_consts
+
+    (* --- Reader lifting helpers (declare {lean} reader val) ---
+       thin wrappers over the top-level env-parameterized versions;
+       the pre-pass lives at module-emission level (lean_reader_prepass). *)
+    let is_reader_cref = lean_reader_is_reader A.env
+    let reader_param_name = lean_reader_param_name A.env
+    let get_reader_params () = lean_reader_get_params A.env
+
+    (* A reader val has type unit -> T; the parameter carries T. *)
+    let reader_value_typ cref =
+      let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
+      match cd.const_type.Types.t with
+      | Types.Tfn (_, cod) -> cod
+      | _ -> cd.const_type
+
+    (* Does this expression force reader lifting of its enclosing def:
+       a direct reader use, or a call to an already-lifted def. *)
+    let exp_needs_reader (e : exp) : bool =
+      let ue = add_exp_entities empty_used_entities e in
+      List.exists (fun cref ->
+          is_reader_cref cref || Types.Cdset.mem cref !lean_reader_lifted)
+        ue.used_consts
+
+    let reader_args_output () =
+      Output.flat (List.map (fun (_, pname) ->
+          Output.flat [from_string " "; from_string pname])
+        (get_reader_params ()))
 
     let rec def_extra (inside_instance: bool) (callback: def list -> Output.t) (inside_module: bool) (m: def_aux) =
       match m with
@@ -932,6 +1026,16 @@ type pat_style = FunParam | MatchArm
                 let effectful_attr =
                   if (not inside_instance) && exp_contains_effectful e
                   then from_string "@[never_extract, noinline] " else emp in
+                let let_lifted =
+                  let lifted = List.exists (fun (_, cref) ->
+                      Types.Cdset.mem cref !lean_reader_lifted) name_map in
+                  if exp_needs_reader e && inside_instance then
+                    raise (Reporting_basic.err_general true Ast.Unknown
+                      "Lean backend: reader-lifted call inside an instance method (unsupported: instance fields cannot take extra parameters)");
+                  lifted && not inside_instance in
+                let saved_reader_binder = !lean_reader_binder in
+                lean_reader_binder := let_lifted;
+                Fun.protect ~finally:(fun () -> lean_reader_binder := saved_reader_binder) @@ fun () ->
                 let defs = List.map (fun (_orig_name, cref) ->
                   let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
                   let (_, renamed, _) = Typed_ast_syntax.constant_descr_to_name
@@ -940,7 +1044,8 @@ type pat_style = FunParam | MatchArm
                   let var_type = pat_typ (C.t_to_src_t cd.const_type) in
                   let defn = if inside_instance then emp else from_string "def " in
                   Output.flat [
-                    from_string "\n"; effectful_attr; defn; from_string name_str; constraints;
+                    from_string "\n"; effectful_attr; defn; from_string name_str;
+                    reader_binder_output (); constraints;
                     from_string "  : "; var_type;
                     from_string " :=\n  let "; pat_out; type_out;
                     ws sk; from_string " :="; exp_out;
@@ -988,6 +1093,20 @@ type pat_style = FunParam | MatchArm
                             exp_contains_effectful e) group
                   then from_string "@[never_extract, noinline] " else emp
                 in
+                (* Reader lifting: the lifted set is computed by the module
+                   pre-pass (see lean_reader_prepass); emission just consults
+                   membership. Instance fields cannot take extra parameters:
+                   fail closed if an instance method needs the reader. *)
+                let register_group group =
+                  let lifted = List.exists (fun (_, c, _, _, _, _) ->
+                      Types.Cdset.mem c !lean_reader_lifted) group in
+                  let needs = List.exists (fun (_, _, _, _, _, e) ->
+                      exp_needs_reader e) group in
+                  if needs && inside_instance then
+                    raise (Reporting_basic.err_general true Ast.Unknown
+                      "Lean backend: reader-lifted call inside an instance method (unsupported: instance fields cannot take extra parameters)");
+                  lifted && not inside_instance
+                in
                 let render_group group =
                   match group with
                   | [] -> emp
@@ -1028,10 +1147,16 @@ type pat_style = FunParam | MatchArm
                     let equations = Output.flat (List.map render_equation (first_clause :: rest_clauses)) in
                     Output.flat [
                       ws name_skips; from_string " "; name; tv_set_out; constraints_sep; constraints;
+                      reader_binder_output ();
                       from_string " : "; full_type; equations
                     ]
                 in
-                let bodies = List.map (fun g -> (attr_for g, render_group g)) groups in
+                let bodies = List.map (fun g ->
+                    let lifted = register_group g in
+                    let saved = !lean_reader_binder in
+                    lean_reader_binder := lifted;
+                    Fun.protect ~finally:(fun () -> lean_reader_binder := saved)
+                      (fun () -> (attr_for g, render_group g))) groups in
                 let rec_skips =
                   if is_recursive && not inside_instance then
                     ws skips'
@@ -1305,9 +1430,18 @@ type pat_style = FunParam | MatchArm
            misparses as a new field definition. *)
         let body = if inside_instance then flatten_newlines body else body in
         Output.flat [
-          ws name_skips; from_string " "; name; tv_set_sep; tv_set; constraints_sep; constraints; pat_skips;
+          ws name_skips; from_string " "; name; tv_set_sep; tv_set; constraints_sep; constraints;
+          reader_binder_output (); pat_skips;
           fun_pattern_list inside_instance pats; ws skips; typ_opt; from_string " := "; body
         ]
+    and reader_binder_output () =
+      if not !lean_reader_binder then emp else
+      Output.flat (List.map (fun (cref, pname) ->
+          Output.flat [
+            from_string " ("; from_string pname; from_string " : ";
+            pat_typ (C.t_to_src_t (reader_value_typ cref)); from_string ")"])
+        (get_reader_params ()))
+
     and funcl inside_instance i_ref_opt constraints tv_set ({term = n}, c, pats, typ_opt, skips, e) =
       let n =
         if inside_instance then
@@ -1395,6 +1529,19 @@ type pat_style = FunParam | MatchArm
                       if is_eq then [Output.flat [l_out; from_string "  =  "; r_out]]
                       else [Output.flat [l_out; meta_utf8 "  \xe2\x89\xa0  "; r_out]]
                     | _ ->
+                      if is_reader_cref cd.descr then
+                        (* Application of the reader constant itself: 'tagDefs ()'
+                           becomes the reader parameter. The only argument is unit. *)
+                        [from_string (reader_param_name cd.descr)]
+                      else if Types.Cdset.mem cd.descr !lean_reader_lifted then
+                        (* Call of a lifted def: `trans e0` reaches the bare-
+                           Constant case, which injects the reader parameters
+                           exactly once; just apply the original arguments. *)
+                        let func_out = trans e0 in
+                        let args_out = List.map trans args in
+                        [Output.flat (func_out
+                          :: List.map (fun a -> Output.flat [from_string " "; a]) args_out)]
+                      else
                       begin match List.assoc_opt cd.descr !lean_indreln_params with
                       | Some params_str ->
                         let func_out = trans e0 in
@@ -1450,6 +1597,17 @@ type pat_style = FunParam | MatchArm
               let default_const_output () =
                 Output.concat emp (B.function_application_to_output (exp_to_locn e) (exp inside_instance) false e const [] (use_ascii_rep_for_const const.descr))
               in
+              if is_reader_cref const.descr then
+                (* Bare reference to the reader constant (unapplied):
+                   eta-expand so the unit-function type is preserved. *)
+                Output.flat [from_string "(fun (_ : Unit) => ";
+                             from_string (reader_param_name const.descr); from_string ")"]
+              else if Types.Cdset.mem const.descr !lean_reader_lifted then
+                (* Bare reference to a lifted def (e.g. passed to a HOF):
+                   partially apply the reader parameters. *)
+                Output.flat [from_string "("; default_const_output ();
+                             reader_args_output (); from_string ")"]
+              else
               (* Class method constants used bare (no explicit arguments) need explicit
                  @ type application in Lean 4. Without it, Lean can't infer the class
                  type parameter for nullary methods like `size : {a : Type} → [Size a] → Nat`
@@ -3101,6 +3259,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
          since they don't have the namespace wrapper. *)
       if is_library then
         lean_namespace_stack := [ns_name];
+      lean_reader_prepass A.env ds;
       let lean_defs = defs false false ds in
       (* Drain any deferred abbrevs (e.g., abbrev mword after class Size) *)
       let deferred = Output.flat (List.rev !lean_pending_abbrevs) in
