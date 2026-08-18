@@ -278,6 +278,13 @@ and const_descr =
         sites render normally. Lets a typeclass-bounded target function
         serve exactly the sites where the instance resolves without any
         constraint propagation. Lean backend only. *)
+
+    reader_seed : Target.Targetset.t;
+    (** Targets for which this function SEEDS the ambient reader: the def
+        is not reader-lifted; instead its FIRST argument is used as the
+        injection value for reader-lifted callees (and reader-constant
+        reads) within its body. Lexically-scoped seeding — NOT dynamic
+        rebinding. Lean backend only. *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -527,6 +534,7 @@ type declare_def =  (** Declarations *)
  | Decl_reader                of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_fuel                  of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
  | Decl_ground_rep            of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
+ | Decl_reader_seed           of lskips * targets_opt * lskips * lskips * const_descr_ref id
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

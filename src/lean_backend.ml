@@ -117,9 +117,20 @@ let lean_reader_binder : bool ref = ref false
 let lean_fuel_emit : string option ref = ref None
 let lean_fuel_worker : (Types.const_descr_ref * string) option ref = ref None
 
+(* reader_seed (declare {lean} reader_seed val f): while rendering a
+   seed-marked def's body, this holds the name of its first argument,
+   which OVERRIDES the injected reader parameter name at every injection
+   site within — the def itself is not lifted (lexically-scoped seeding,
+   not dynamic rebinding). *)
+let lean_reader_seed_param : string option ref = ref None
+
 let lean_reader_is_reader env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
   Targetset.mem Target_lean cd.reader
+
+let lean_reader_is_seed env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  Targetset.mem Target_lean cd.reader_seed
 
 let lean_reader_param_name env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
@@ -165,8 +176,12 @@ let lean_reader_prepass env (ds : def list) =
       | Module (_, _, _, _, _, inner_ds, _) -> List.fold_left def_infos acc inner_ds
       | Val_def _ ->
         let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
-        let used = (add_def_entities target false empty_used_entities d).used_consts_set in
-        (defined, used) :: acc
+        (* reader_seed defs are never lifted: they inject their own first
+           argument internally, and their callers pass it explicitly. *)
+        if Types.Cdset.exists (lean_reader_is_seed env) defined then acc
+        else
+          let used = (add_def_entities target false empty_used_entities d).used_consts_set in
+          (defined, used) :: acc
       | _ -> acc in
     let infos = List.rev (List.fold_left def_infos [] ds) in
     let changed = ref true in
@@ -569,6 +584,7 @@ type pat_style = FunParam | MatchArm
        thin wrappers over the top-level env-parameterized versions;
        the pre-pass lives at module-emission level (lean_reader_prepass). *)
     let is_reader_cref = lean_reader_is_reader A.env
+    let is_seed_cref = lean_reader_is_seed A.env
     let reader_param_name = lean_reader_param_name A.env
     let get_reader_params () = lean_reader_get_params A.env
 
@@ -587,9 +603,16 @@ type pat_style = FunParam | MatchArm
           is_reader_cref cref || Types.Cdset.mem cref !lean_reader_lifted)
         ue.used_consts
 
+    (* Injection value name: the enclosing def's injected parameter, or —
+       inside a reader_seed def — its first argument. *)
+    let reader_inject_name pname =
+      match !lean_reader_seed_param with
+      | Some seed -> seed
+      | None -> pname
+
     let reader_args_output () =
       Output.flat (List.map (fun (_, pname) ->
-          Output.flat [from_string " "; from_string pname])
+          Output.flat [from_string " "; from_string (reader_inject_name pname)])
         (get_reader_params ()))
 
     (* Fuel sentinel for the Lean target, if declared for this constant. *)
@@ -1216,7 +1239,43 @@ type pat_style = FunParam | MatchArm
                                "Lean backend: 'declare {lean} fuel val' on a multi-clause definition (unsupported)")
                            | None -> None)
                       | [] -> None in
+                    (* reader_seed defs: not lifted; their first argument
+                       becomes the injection value for the body. Fail
+                       closed on every unsupported combination. *)
+                    let seed_info = match g with
+                      | [(_, c, pats, _, _, _)] when is_seed_cref c ->
+                          (match pats with
+                           | p :: _ ->
+                             (match p.term with
+                              | P_var n | P_var_annot (n, _) ->
+                                Some (Name.to_string (Name.strip_lskip n))
+                              | _ ->
+                                raise (Reporting_basic.err_general true Ast.Unknown
+                                  "Lean backend: reader_seed def's first argument must be a simple variable"))
+                           | [] ->
+                             raise (Reporting_basic.err_general true Ast.Unknown
+                               "Lean backend: reader_seed def must take the seed as its first argument"))
+                      | (( _, c, _, _, _, _) :: _) when is_seed_cref c ->
+                          raise (Reporting_basic.err_general true Ast.Unknown
+                            "Lean backend: reader_seed on a multi-clause or mutual definition (unsupported)")
+                      | _ -> None in
+                    (match seed_info with
+                     | Some _ when inside_instance ->
+                       raise (Reporting_basic.err_general true Ast.Unknown
+                         "Lean backend: reader_seed inside an instance (unsupported)")
+                     | Some _ when fuel_info <> None ->
+                       raise (Reporting_basic.err_general true Ast.Unknown
+                         "Lean backend: reader_seed combined with fuel (unsupported)")
+                     | _ -> ());
                     let lifted = register_group g in
+                    (match seed_info with
+                     | Some _ when lifted ->
+                       raise (Reporting_basic.err_general true Ast.Unknown
+                         "Lean backend: reader_seed def unexpectedly reader-lifted")
+                     | _ -> ());
+                    let saved_seed = !lean_reader_seed_param in
+                    lean_reader_seed_param := seed_info;
+                    Fun.protect ~finally:(fun () -> lean_reader_seed_param := saved_seed) @@ fun () ->
                     (match fuel_info with
                      | Some _ when inside_instance ->
                        raise (Reporting_basic.err_general true Ast.Unknown
@@ -1667,7 +1726,7 @@ type pat_style = FunParam | MatchArm
                       else if is_reader_cref cd.descr then
                         (* Application of the reader constant itself: 'tagDefs ()'
                            becomes the reader parameter. The only argument is unit. *)
-                        [from_string (reader_param_name cd.descr)]
+                        [from_string (reader_inject_name (reader_param_name cd.descr))]
                       else if ground_rep_for cd.descr <> None
                               && Types.TNset.is_empty (Types.free_vars (Typed_ast.exp_to_typ e)) then
                         (* Ground-typed site of a ground_rep constant:
@@ -1763,7 +1822,7 @@ type pat_style = FunParam | MatchArm
                 (* Bare reference to the reader constant (unapplied):
                    eta-expand so the unit-function type is preserved. *)
                 Output.flat [from_string "(fun (_ : Unit) => ";
-                             from_string (reader_param_name const.descr); from_string ")"]
+                             from_string (reader_inject_name (reader_param_name const.descr)); from_string ")"]
               else if Types.Cdset.mem const.descr !lean_reader_lifted then
                 (* Bare reference to a lifted def (e.g. passed to a HOF):
                    partially apply the reader parameters. *)

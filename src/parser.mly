@@ -172,7 +172,7 @@ let mk_pre_x_l sk1 (sk2,id) sk3 l =
 %token <Ast.terminal * Ulib.Text.t> IN MEM MinusMinusGt
 %token <Ast.terminal> Class_ Do LeftArrow
 %token <Ast.terminal> Inst Inst_default
-%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep
+%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep ReaderSeed
 %token <Ast.terminal> RightAssoc LeftAssoc NonAssoc Infix Special TargetRep TargetSorts
 
 %start file
@@ -1029,6 +1029,8 @@ declaration :
     { Decl_fuel_decl($1, $2, $3, $4, $5, fst $6, $7) }
   | Declare targets_opt GroundRep Val id Eq BacktickString
     { Decl_ground_rep_decl($1, $2, $3, $4, $5, fst $6, $7) }
+  | Declare targets_opt ReaderSeed Val id
+    { Decl_reader_seed_decl($1, $2, $3, $4, $5) }
 
 lemma_typ:
   | Lemma

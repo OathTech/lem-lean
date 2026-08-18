@@ -410,3 +410,15 @@ let ground_just m = Maybe_extra.fromJust m
 
 val poly_just : forall 'a. maybe 'a -> 'a
 let poly_just m = Maybe_extra.fromJust m
+
+(* === Section 11: reader_seed === *)
+
+(* A def marked reader_seed is NOT lifted; its FIRST argument is the
+   injection value for reader-lifted callees in its body (lexical
+   seeding, not dynamic rebinding). Callers pass the seed explicitly. *)
+val seeded_reads : nat -> nat -> nat
+let seeded_reads amb_val x = reads_env x + reads_env_indirect x
+declare {lean} reader_seed val seeded_reads
+
+val uses_seeded : nat -> nat
+let uses_seeded k = seeded_reads 42 k

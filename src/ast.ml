@@ -510,6 +510,7 @@ declare_def =  (* declarations *)
  | Decl_reader_decl of terminal * targets option * terminal * terminal * id
  | Decl_fuel_decl of terminal * targets option * terminal * terminal * id * terminal * (terminal * string)
  | Decl_ground_rep_decl of terminal * targets option * terminal * terminal * id * terminal * (terminal * string)
+ | Decl_reader_seed_decl of terminal * targets option * terminal * terminal * id
 
 
 type
