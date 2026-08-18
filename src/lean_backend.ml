@@ -1292,10 +1292,12 @@ type pat_style = FunParam | MatchArm
                      | Some _ when is_truly_mutual ->
                        raise (Reporting_basic.err_general true Ast.Unknown
                          "Lean backend: 'declare {lean} fuel val' in a mutual block (unsupported)")
-                     | Some _ when lifted ->
-                       raise (Reporting_basic.err_general true Ast.Unknown
-                         "Lean backend: 'declare {lean} fuel val' combined with reader lifting (unsupported; extend when needed)")
                      | _ -> ());
+                    (* fuel x reader composes (arc 3, B1): the worker's fuel
+                       binder is emitted BEFORE the reader binders, so the
+                       point-free wrapper 'worker lemDefaultFuel' has the
+                       reader-prefixed type and lifted callers inject into
+                       the wrapper as for any lifted def. *)
                     match fuel_info with
                     | None ->
                       let saved = !lean_reader_binder in
@@ -1312,10 +1314,13 @@ type pat_style = FunParam | MatchArm
                         else Output.flat [from_string " "; let_type_variables true tv] in
                       let saved_e = !lean_fuel_emit in
                       let saved_w = !lean_fuel_worker in
+                      let saved_rb = !lean_reader_binder in
                       lean_fuel_emit := Some s;
                       lean_fuel_worker := Some (c, worker);
+                      lean_reader_binder := lifted;
                       Fun.protect ~finally:(fun () ->
-                          lean_fuel_emit := saved_e; lean_fuel_worker := saved_w)
+                          lean_fuel_emit := saved_e; lean_fuel_worker := saved_w;
+                          lean_reader_binder := saved_rb)
                         (fun () ->
                           let body = render_group g in
                           (* Point-free wrapper at the default fuel: call sites
@@ -1327,10 +1332,22 @@ type pat_style = FunParam | MatchArm
                              and an unattributed wrapper would reopen the
                              closed-term-extraction hazard one level up
                              (audit finding, 2026-08-18). *)
+                          (* A lifted worker's wrapper has the reader-prefixed
+                             type (arc 3, B1): reader binders sit between the
+                             fuel binder and the original arguments, so
+                             'worker lemDefaultFuel' is reader-first. *)
+                          let reader_arrows =
+                            if not lifted then emp else
+                            Output.flat (List.map (fun (cref, _) ->
+                                Output.flat [from_string "(";
+                                             pat_typ (C.t_to_src_t (reader_value_typ cref));
+                                             from_string ") -> "])
+                              (get_reader_params ())) in
                           let wrapper = Output.flat [
                             from_string "\n\n"; attr_for g;
                             from_string "def "; from_string base_name; tv_out;
-                            from_string " : "; pat_typ (C.t_to_src_t cd.const_type);
+                            from_string " : "; reader_arrows;
+                            pat_typ (C.t_to_src_t cd.const_type);
                             from_string " := "; from_string worker;
                             from_string " lemDefaultFuel\n"] in
                           (attr_for g, from_string "def", Output.flat [body; wrapper]))
@@ -1823,9 +1840,12 @@ type pat_style = FunParam | MatchArm
               begin match !lean_fuel_worker with
               | Some (fc, w) when fc = const.descr ->
                 (* Self-call inside a fuel'd worker: recurse on the
-                   decremented fuel binder. *)
+                   decremented fuel binder; a lifted worker also re-injects
+                   its reader binders (arc 3, B1). *)
+                let readers =
+                  if !lean_reader_binder then reader_args_output () else emp in
                 Output.flat [from_string "("; from_string w;
-                             from_string " lemFuel)"]
+                             from_string " lemFuel"; readers; from_string ")"]
               | _ ->
               if is_reader_cref const.descr then
                 (* Bare reference to the reader constant (unapplied):

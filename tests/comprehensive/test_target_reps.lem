@@ -422,3 +422,24 @@ declare {lean} reader_seed val seeded_reads
 
 val uses_seeded : nat -> nat
 let uses_seeded k = seeded_reads 42 k
+
+(* === Section 12: fuel x reader composition (arc 3, B1) === *)
+
+(* A reader-lifted def may also be fuel'd: the worker takes the fuel binder
+   FIRST, then the reader parameters, then the original arguments; the
+   point-free wrapper 'f := f_lemFuel lemDefaultFuel' then has the
+   reader-prefixed type, so lifted callers inject the reader into the
+   wrapper exactly as for any lifted def, and worker self-calls re-inject
+   the reader binder alongside the decremented fuel. *)
+
+(* Genuinely non-structural: climbs toward the ambient value. *)
+val fuel_env_loop : nat -> nat
+let rec fuel_env_loop n =
+  if n = ambient_env () then n else fuel_env_loop (n + 1)
+declare {lean} fuel val fuel_env_loop = `997`
+
+(* Applied call from a (transitively lifted) caller: uses the wrapper. *)
+let uses_fuel_env_loop (k : nat) : nat = fuel_env_loop k + k
+
+(* Bare reference passed to a HOF: wrapper partially applied to the reader. *)
+let maps_fuel_env (l : list nat) : list nat = List.map fuel_env_loop l
