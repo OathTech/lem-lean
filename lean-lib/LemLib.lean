@@ -23,15 +23,31 @@ private unsafe def DAEMON1_impl {α : Type 1} : α := unsafeCast ()
 @[implemented_by DAEMON1_impl] axiom DAEMON1 : ∀ {α : Type 1}, α
 
 /- runEffectful: execute a thunked BaseIO action, extracting the result.
-   Used by the Lean backend for effectful target_rep functions. Takes a
-   thunk (Unit → BaseIO α) so each call site creates a fresh closure,
-   preventing Lean's CSE from merging side-effecting calls. -/
+   Used by the Lean backend for effectful target_rep functions.
+
+   Correctness depends on two things:
+   - the implementation must RUN the action and project its value
+     (`unsafeBaseIO`), not reinterpret the io-result object;
+   - `@[never_extract, noinline]` prevents the compiler from caching an
+     application as a closed-term constant (evaluated once at startup) or
+     merging identical call sites via CSE. The thunk alone does NOT achieve
+     this: identical closed thunks are shared, making applications identical.
+
+   Generated defs whose bodies contain effectful call sites carry the same
+   attributes (emitted by the Lean backend), so callers cannot cache them
+   either. Extern implementations must follow the Lean ≥4.29 world-erased
+   convention: no RealWorld parameter, return the value directly. -/
+@[never_extract, noinline]
 private unsafe def runEffectful_impl {α : Type} (thunk : Unit → BaseIO α) : α :=
-  let action := thunk ()
-  let result := (unsafeCast action : Unit → α) ()
-  result
+  unsafeBaseIO (thunk ())
 @[implemented_by runEffectful_impl]
 axiom runEffectful {α : Type} : (Unit → BaseIO α) → α
+/- BOTH attribute sites are load-bearing: never_extract on the AXIOM stops
+   LCNF CSE from merging identical call sites (CSE sees `runEffectful`
+   before the implemented_by substitution); the attributes on the IMPL stop
+   closed-term extraction of the specialized application afterwards.
+   Verified against Lean 4.29 via trace.compiler.ir.result. -/
+attribute [never_extract] runEffectful
 
 /- Lem uses lowercase 'vector' for its built-in vector type -/
 abbrev vector (α : Type) (n : Nat) := Vector α n

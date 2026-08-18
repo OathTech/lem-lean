@@ -461,6 +461,23 @@ let needs_parens term =
    - MatchArm: bare output for match arms and let bindings *)
 type pat_style = FunParam | MatchArm
 
+    (* True iff the expression contains an application of a constant marked
+       'declare {lean} effectful'. Defs containing such call sites must be
+       emitted with @[never_extract, noinline]: never_extract stops Lean from
+       caching a closed application (e.g. 'fresh ()') as a constant evaluated
+       once at startup, and together with noinline it prevents CSE from
+       merging identical call sites. The runEffectful thunk alone cannot
+       achieve this, because identical closed thunks are themselves shared.
+       Limitation: instance fields cannot carry attributes, so effectful
+       calls inside instance methods are only protected one level down (by
+       the attributes on runEffectful_impl itself). *)
+    let exp_contains_effectful (e : exp) : bool =
+      let ue = add_exp_entities empty_used_entities e in
+      List.exists (fun cref ->
+          let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
+          Targetset.mem Target_lean cd.effectful)
+        ue.used_consts
+
     let rec def_extra (inside_instance: bool) (callback: def list -> Output.t) (inside_module: bool) (m: def_aux) =
       match m with
         | Lemma (skips, lemma_typ, targets, (name, _), skips', e) ->
@@ -912,6 +929,9 @@ type pat_style = FunParam | MatchArm
                   | None -> emp
                   | Some (_, t) -> Output.flat [from_string " :"; pat_typ t]
                 in
+                let effectful_attr =
+                  if (not inside_instance) && exp_contains_effectful e
+                  then from_string "@[never_extract, noinline] " else emp in
                 let defs = List.map (fun (_orig_name, cref) ->
                   let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
                   let (_, renamed, _) = Typed_ast_syntax.constant_descr_to_name
@@ -920,7 +940,7 @@ type pat_style = FunParam | MatchArm
                   let var_type = pat_typ (C.t_to_src_t cd.const_type) in
                   let defn = if inside_instance then emp else from_string "def " in
                   Output.flat [
-                    from_string "\n"; defn; from_string name_str; constraints;
+                    from_string "\n"; effectful_attr; defn; from_string name_str; constraints;
                     from_string "  : "; var_type;
                     from_string " :=\n  let "; pat_out; type_out;
                     ws sk; from_string " :="; exp_out;
@@ -959,6 +979,14 @@ type pat_style = FunParam | MatchArm
                     from_string "partial def"
                   else
                     from_string "def"
+                in
+                (* Defs containing effectful call sites need
+                   @[never_extract, noinline] — see exp_contains_effectful. *)
+                let attr_for group =
+                  if (not inside_instance)
+                     && List.exists (fun (_, _, _, _, _, e) ->
+                            exp_contains_effectful e) group
+                  then from_string "@[never_extract, noinline] " else emp
                 in
                 let render_group group =
                   match group with
@@ -1003,7 +1031,7 @@ type pat_style = FunParam | MatchArm
                       from_string " : "; full_type; equations
                     ]
                 in
-                let bodies = List.map render_group groups in
+                let bodies = List.map (fun g -> (attr_for g, render_group g)) groups in
                 let rec_skips =
                   if is_recursive && not inside_instance then
                     ws skips'
@@ -1012,12 +1040,13 @@ type pat_style = FunParam | MatchArm
                 if is_truly_mutual then
                   Output.flat [
                     ws skips; from_string "mutual\n"; rec_skips;
-                    concat_str "\n" (List.map (fun b -> Output.flat [def_keyword; b]) bodies);
+                    concat_str "\n" (List.map (fun (a, b) -> Output.flat [a; def_keyword; b]) bodies);
                     from_string "\nend"
                   ]
                 else
                   Output.flat [
-                    ws skips; rec_skips; def_keyword; Output.flat bodies
+                    ws skips; rec_skips;
+                    Output.flat (List.map (fun (a, b) -> Output.flat [a; def_keyword; b]) bodies)
                   ]
               else
                 from_string "\n/- removed recursive definition intended for another target -/"
