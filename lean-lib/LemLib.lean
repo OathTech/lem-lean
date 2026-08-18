@@ -81,6 +81,11 @@ def isLessEqual (o : LemOrdering) : Bool := o != .GT
 def isGreater (o : LemOrdering) : Bool := o == .GT
 def isGreaterEqual (o : LemOrdering) : Bool := o != .LT
 
+/- Inhabited for Sum (not in Lean core; needed by ground-typed failwithI
+   sites at sum types, arc-2 S5). Left-biased, right as fallback. -/
+instance [Inhabited α] : Inhabited (α ⊕ β) := ⟨.inl default⟩
+instance (priority := low) [Inhabited β] : Inhabited (α ⊕ β) := ⟨.inr default⟩
+
 /- Ord for Unit (not in Lean stdlib, needed by generated code) -/
 instance : Ord Unit where compare _ _ := .eq
 
