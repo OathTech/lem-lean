@@ -402,3 +402,11 @@ end
 (* ground COMPOUND type (List nat is variable-free -> failwithI) *)
 val ground_list_fail : unit -> list nat
 let ground_list_fail u = failwith "ground-list"
+
+(* ground_rep classification: ground site -> LemLib.fromJustI (success
+   equation intact); tyvar site keeps generated fromJust *)
+val ground_just : maybe nat -> nat
+let ground_just m = Maybe_extra.fromJust m
+
+val poly_just : forall 'a. maybe 'a -> 'a
+let poly_just m = Maybe_extra.fromJust m

@@ -270,6 +270,14 @@ and const_descr =
         Nat) whose zero-fuel result is the given target-syntax expression,
         plus a wrapper at the default fuel so call sites are unchanged.
         Currently implemented by the Lean backend only. *)
+
+    ground_rep : string Target.Targetmap.t;
+    (** Per-target GROUND-SITE alternative head: at call sites whose
+        result type is syntactically ground (no type variables), the
+        backend emits this identifier instead of the constant; other
+        sites render normally. Lets a typeclass-bounded target function
+        serve exactly the sites where the instance resolves without any
+        constraint propagation. Lean backend only. *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -518,6 +526,7 @@ type declare_def =  (** Declarations *)
  | Decl_effectful             of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_reader                of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_fuel                  of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
+ | Decl_ground_rep            of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

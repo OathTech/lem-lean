@@ -128,6 +128,21 @@ private unsafe def failwithIImpl {α : Type} [Inhabited α] (msg : String) : α 
 @[implemented_by failwithIImpl]
 opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
 
+/- fromJustI: ground-site head for msg-carrying fromJust helpers
+   (declare {lean} ground_rep, e.g. cerberus Utils.fromJust). A REAL def:
+   the success equation `fromJustI msg (some x) = x` holds by rfl
+   (theorems over lookups keep proving); only the failure leaf is opaque
+   (failwithI), keeping the cone axiom-free.
+   fromJustI1: the msg-less variant (Maybe_extra.fromJust). -/
+def fromJustI {α : Type} [Inhabited α] (msg : String) : Option α → α
+  | some x => x
+  | none => failwithI msg
+
+def fromJustI1 {α : Type} [Inhabited α] : Option α → α
+  | some x => x
+  | none => failwithI "fromJust"
+
+
 /- failwith: raises a panic with the given message -/
 unsafe def failwithImpl {α : Type} (msg : String) : α :=
   @panic α ⟨unsafeCast ()⟩ msg

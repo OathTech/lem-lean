@@ -136,6 +136,7 @@ let kw_table =
      ("effectful"),              (fun x -> Effectful(x));
      ("reader"),                 (fun x -> Reader(x));
      ("fuel"),                   (fun x -> Fuel(x));
+     ("ground_rep"),             (fun x -> GroundRep(x));
      ("pattern_match"),          (fun x -> PatternMatch(x));
      ("right_assoc"),            (fun x -> RightAssoc(x));
      ("left_assoc"),             (fun x -> LeftAssoc(x));

@@ -597,6 +597,14 @@ type pat_style = FunParam | MatchArm
       let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
       Target.Targetmap.apply_target cd.fuel_sentinel (Target.Target_no_ident Target.Target_lean)
 
+    (* Ground-site alternative head (declare {lean} ground_rep val f =
+       `Ident`): emitted instead of the constant at applications whose
+       result type is syntactically ground. See the failwith special case
+       below — same classification rule, declare-driven. *)
+    let ground_rep_for cref =
+      let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
+      Target.Targetmap.apply_target cd.ground_rep (Target.Target_no_ident Target.Target_lean)
+
     (* Constants whose LEAN target_rep is the bare identifier `failwith`
        (Assert_extra.failwith, cerberus's Utils.error, ...). At call sites
        with a syntactically GROUND result type these are re-emitted as
@@ -1660,6 +1668,17 @@ type pat_style = FunParam | MatchArm
                         (* Application of the reader constant itself: 'tagDefs ()'
                            becomes the reader parameter. The only argument is unit. *)
                         [from_string (reader_param_name cd.descr)]
+                      else if ground_rep_for cd.descr <> None
+                              && Types.TNset.is_empty (Types.free_vars (Typed_ast.exp_to_typ e)) then
+                        (* Ground-typed site of a ground_rep constant:
+                           swap the head, keep the arguments, ascribe the
+                           type so the instance resolves exactly here. *)
+                        let rep = match ground_rep_for cd.descr with
+                          | Some r -> r | None -> assert false in
+                        let args_out = List.map trans args in
+                        [Output.flat ([from_string "(("; from_string rep; from_string ")"]
+                          @ List.map (fun a -> Output.flat [from_string " "; a]) args_out
+                          @ [from_string " : "; pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e)); from_string ")"])]
                       else if is_lean_failwith_rep cd.descr
                               && List.length args = 1
                               && Types.TNset.is_empty (Types.free_vars (Typed_ast.exp_to_typ e)) then
