@@ -263,6 +263,13 @@ and const_descr =
         thread its value as an extra parameter through every function that
         (transitively) uses it, replacing calls with the parameter.
         Currently implemented by the Lean backend only. *)
+
+    fuel_sentinel : string Target.Targetmap.t;
+    (** Per-target fuel sentinel: when set, the backend emits the function
+        as a fuel-threaded total worker (recursion decrements an explicit
+        Nat) whose zero-fuel result is the given target-syntax expression,
+        plus a wrapper at the default fuel so call sites are unchanged.
+        Currently implemented by the Lean backend only. *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -510,6 +517,7 @@ type declare_def =  (** Declarations *)
  | Decl_extra_import          of lskips * targets_opt * lskips * lskips * string
  | Decl_effectful             of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_reader                of lskips * targets_opt * lskips * lskips * const_descr_ref id
+ | Decl_fuel                  of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

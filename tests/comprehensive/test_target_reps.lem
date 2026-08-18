@@ -356,3 +356,18 @@ let rec reads_env_rec (n : nat) : nat =
     | 0 -> reads_env 0
     | _ -> reads_env_rec (n - 1)
   end
+
+(* === Section 9: fuel-threaded totality === *)
+
+(* 'declare {lean} fuel val f = `sentinel`' emits f as a total worker
+   f_lemFuel (lemFuel : Nat) ... that returns the sentinel at zero fuel and
+   decrements on self-calls, plus a point-free wrapper at lemDefaultFuel so
+   call sites are unchanged. For recursion Lean's equation compiler cannot
+   prove terminating (non-structural descent, env-mediated recursion). *)
+val fuel_countdown : nat -> nat
+let rec fuel_countdown n =
+  if n = 0 then 0 else fuel_countdown (n - 1)
+declare {lean} fuel val fuel_countdown = `999`
+
+(* Callers use the wrapper — unchanged. *)
+let uses_countdown (k : nat) : nat = fuel_countdown k + 1

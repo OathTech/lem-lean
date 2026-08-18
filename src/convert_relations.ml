@@ -158,7 +158,7 @@ let const_descr
     target_ascii_rep = target_ascii_rep ;
     compile_message = compile_message ;
     termination_setting = termination_setting;
-    effectful = Target.Targetset.empty; reader = Target.Targetset.empty }
+    effectful = Target.Targetset.empty; reader = Target.Targetset.empty; fuel_sentinel = Target.Targetmap.empty }
 
 (** [and_const_ref env] represent the Lem constant [&&] in environment
     [env] *)

@@ -49,6 +49,12 @@ axiom runEffectful {α : Type} : (Unit → BaseIO α) → α
    Verified against Lean 4.29 via trace.compiler.ir.result. -/
 attribute [never_extract] runEffectful
 
+/- Default fuel for 'declare {lean} fuel val' wrappers: bounds recursion
+   DEPTH at declared non-structural points only (never value size), so any
+   well-formed input stays far under it. Proof-side statements carry
+   "fuel large enough" side conditions on the worker instead. -/
+def lemDefaultFuel : Nat := 1000000
+
 /- Lem uses lowercase 'vector' for its built-in vector type -/
 abbrev vector (α : Type) (n : Nat) := Vector α n
 

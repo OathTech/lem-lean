@@ -109,6 +109,14 @@ let lean_indreln_params : (Types.const_descr_ref * string) list ref = ref []
 let lean_reader_lifted : Types.Cdset.t ref = ref Types.Cdset.empty
 let lean_reader_binder : bool ref = ref false
 
+(* Fuel emission (declare {lean} fuel val f = `sentinel`): while rendering a
+   fuel'd def's clause, lean_fuel_emit holds the sentinel text (consumed by
+   funcl_aux: rename to worker, add the Nat binder, wrap the body) and
+   lean_fuel_worker holds (cref, worker name) so self-calls rewrite to
+   'worker lemFuel' (the decremented binder in scope). *)
+let lean_fuel_emit : string option ref = ref None
+let lean_fuel_worker : (Types.const_descr_ref * string) option ref = ref None
+
 let lean_reader_is_reader env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
   Targetset.mem Target_lean cd.reader
@@ -571,6 +579,11 @@ type pat_style = FunParam | MatchArm
       Output.flat (List.map (fun (_, pname) ->
           Output.flat [from_string " "; from_string pname])
         (get_reader_params ()))
+
+    (* Fuel sentinel for the Lean target, if declared for this constant. *)
+    let fuel_sentinel_for cref =
+      let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
+      Target.Targetmap.apply_target cd.fuel_sentinel (Target.Target_no_ident Target.Target_lean)
 
     let rec def_extra (inside_instance: bool) (callback: def list -> Output.t) (inside_module: bool) (m: def_aux) =
       match m with
@@ -1152,11 +1165,65 @@ type pat_style = FunParam | MatchArm
                     ]
                 in
                 let bodies = List.map (fun g ->
+                    (* Fuel emission (declare {lean} fuel val): single-clause,
+                       non-mutual, non-instance, not reader-lifted (extend on
+                       need — fail closed on every unsupported combination). *)
+                    let fuel_info = match g with
+                      | [({term = n}, c, _, _, _, _)] ->
+                          (match fuel_sentinel_for c with
+                           | Some s -> Some (n, c, s)
+                           | None -> None)
+                      | (({term = _}, c, _, _, _, _) :: _) ->
+                          (match fuel_sentinel_for c with
+                           | Some _ ->
+                             raise (Reporting_basic.err_general true Ast.Unknown
+                               "Lean backend: 'declare {lean} fuel val' on a multi-clause definition (unsupported)")
+                           | None -> None)
+                      | [] -> None in
                     let lifted = register_group g in
-                    let saved = !lean_reader_binder in
-                    lean_reader_binder := lifted;
-                    Fun.protect ~finally:(fun () -> lean_reader_binder := saved)
-                      (fun () -> (attr_for g, render_group g))) groups in
+                    (match fuel_info with
+                     | Some _ when inside_instance ->
+                       raise (Reporting_basic.err_general true Ast.Unknown
+                         "Lean backend: 'declare {lean} fuel val' inside an instance (unsupported)")
+                     | Some _ when is_truly_mutual ->
+                       raise (Reporting_basic.err_general true Ast.Unknown
+                         "Lean backend: 'declare {lean} fuel val' in a mutual block (unsupported)")
+                     | Some _ when lifted ->
+                       raise (Reporting_basic.err_general true Ast.Unknown
+                         "Lean backend: 'declare {lean} fuel val' combined with reader lifting (unsupported; extend when needed)")
+                     | _ -> ());
+                    match fuel_info with
+                    | None ->
+                      let saved = !lean_reader_binder in
+                      lean_reader_binder := lifted;
+                      Fun.protect ~finally:(fun () -> lean_reader_binder := saved)
+                        (fun () -> (attr_for g, def_keyword, render_group g))
+                    | Some (n, c, s) ->
+                      let base_name = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
+                      let worker = String.concat "" [base_name; "_lemFuel"] in
+                      let cd = c_env_lookup Ast.Unknown A.env.c_env c in
+                      let tv = Types.free_vars cd.const_type in
+                      let tv_out =
+                        if Types.TNset.cardinal tv = 0 then emp
+                        else Output.flat [from_string " "; let_type_variables true tv] in
+                      let saved_e = !lean_fuel_emit in
+                      let saved_w = !lean_fuel_worker in
+                      lean_fuel_emit := Some s;
+                      lean_fuel_worker := Some (c, worker);
+                      Fun.protect ~finally:(fun () ->
+                          lean_fuel_emit := saved_e; lean_fuel_worker := saved_w)
+                        (fun () ->
+                          let body = render_group g in
+                          (* Point-free wrapper at the default fuel: call sites
+                             are unchanged, and proofs unfold wrapper → worker
+                             definitionally. *)
+                          let wrapper = Output.flat [
+                            from_string "\n\ndef "; from_string base_name; tv_out;
+                            from_string " : "; pat_typ (C.t_to_src_t cd.const_type);
+                            from_string " := "; from_string worker;
+                            from_string " lemDefaultFuel\n"] in
+                          (attr_for g, from_string "def", Output.flat [body; wrapper]))
+                  ) groups in
                 let rec_skips =
                   if is_recursive && not inside_instance then
                     ws skips'
@@ -1165,13 +1232,13 @@ type pat_style = FunParam | MatchArm
                 if is_truly_mutual then
                   Output.flat [
                     ws skips; from_string "mutual\n"; rec_skips;
-                    concat_str "\n" (List.map (fun (a, b) -> Output.flat [a; def_keyword; b]) bodies);
+                    concat_str "\n" (List.map (fun (a, k, b) -> Output.flat [a; k; b]) bodies);
                     from_string "\nend"
                   ]
                 else
                   Output.flat [
                     ws skips; rec_skips;
-                    Output.flat (List.map (fun (a, b) -> Output.flat [a; def_keyword; b]) bodies)
+                    Output.flat (List.map (fun (a, k, b) -> Output.flat [a; k; b]) bodies)
                   ]
               else
                 from_string "\n/- removed recursive definition intended for another target -/"
@@ -1429,11 +1496,24 @@ type pat_style = FunParam | MatchArm
            can have arguments on a new line at field-name indentation, which Lean
            misparses as a new field definition. *)
         let body = if inside_instance then flatten_newlines body else body in
-        Output.flat [
-          ws name_skips; from_string " "; name; tv_set_sep; tv_set; constraints_sep; constraints;
-          reader_binder_output (); pat_skips;
-          fun_pattern_list inside_instance pats; ws skips; typ_opt; from_string " := "; body
-        ]
+        (match !lean_fuel_emit with
+         | Some sentinel ->
+           Output.flat [
+             ws name_skips; from_string " "; name; from_string "_lemFuel";
+             tv_set_sep; tv_set; constraints_sep; constraints;
+             from_string " (lemFuel : Nat)"; reader_binder_output (); pat_skips;
+             fun_pattern_list inside_instance pats; ws skips; typ_opt;
+             from_string " := match lemFuel with\n  | 0 => (";
+             from_string sentinel;
+             from_string ")\n  | Nat.succ lemFuel =>\n    ";
+             body
+           ]
+         | None ->
+           Output.flat [
+             ws name_skips; from_string " "; name; tv_set_sep; tv_set; constraints_sep; constraints;
+             reader_binder_output (); pat_skips;
+             fun_pattern_list inside_instance pats; ws skips; typ_opt; from_string " := "; body
+           ])
     and reader_binder_output () =
       if not !lean_reader_binder then emp else
       Output.flat (List.map (fun (cref, pname) ->
@@ -1529,7 +1609,19 @@ type pat_style = FunParam | MatchArm
                       if is_eq then [Output.flat [l_out; from_string "  =  "; r_out]]
                       else [Output.flat [l_out; meta_utf8 "  \xe2\x89\xa0  "; r_out]]
                     | _ ->
-                      if is_reader_cref cd.descr then
+                      let is_fuel_self =
+                        match !lean_fuel_worker with
+                        | Some (fc, _) -> fc = cd.descr
+                        | None -> false in
+                      if is_fuel_self then
+                        (* Self-call in a fuel'd worker: 'trans e0' reaches the
+                           bare-Constant case, which rewrites to
+                           '(worker lemFuel)'; apply the original arguments. *)
+                        let func_out = trans e0 in
+                        let args_out = List.map trans args in
+                        [Output.flat (func_out
+                          :: List.map (fun a -> Output.flat [from_string " "; a]) args_out)]
+                      else if is_reader_cref cd.descr then
                         (* Application of the reader constant itself: 'tagDefs ()'
                            becomes the reader parameter. The only argument is unit. *)
                         [from_string (reader_param_name cd.descr)]
@@ -1597,6 +1689,13 @@ type pat_style = FunParam | MatchArm
               let default_const_output () =
                 Output.concat emp (B.function_application_to_output (exp_to_locn e) (exp inside_instance) false e const [] (use_ascii_rep_for_const const.descr))
               in
+              begin match !lean_fuel_worker with
+              | Some (fc, w) when fc = const.descr ->
+                (* Self-call inside a fuel'd worker: recurse on the
+                   decremented fuel binder. *)
+                Output.flat [from_string "("; from_string w;
+                             from_string " lemFuel)"]
+              | _ ->
               if is_reader_cref const.descr then
                 (* Bare reference to the reader constant (unapplied):
                    eta-expand so the unit-function type is preserved. *)
@@ -1633,6 +1732,7 @@ type pat_style = FunParam | MatchArm
                   Output.flat ([ws sk; from_string "(@"; Ident.to_output (Term_const (false, true)) path_sep (Ident.replace_lskip i no_lskips)] @ type_args @ class_holes @ [from_string ")"])
               end else
                 default_const_output ()
+              end
           | Fun (skips, ps, skips', e) ->
               let ps = fun_pattern_list inside_instance ps in
                 block_hov (Typed_ast_syntax.is_pp_exp e) 2 (
