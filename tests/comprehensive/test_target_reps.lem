@@ -485,3 +485,12 @@ and dag_leaf n = n * 2
 declare {lean} termination_argument dag_mid = automatic
 
 let uses_dag (k : nat) : nat = dag_top k
+
+(* Section 12c: fuel'd def with a class constraint — the wrapper must
+   re-emit the class binders (arc-3 batch D regression). *)
+val fuel_constrained : forall 'a. Eq 'a => nat -> 'a -> 'a -> 'a
+let rec fuel_constrained n x y =
+  if x = y then x else fuel_constrained (n + 1) x y
+declare {lean} fuel val fuel_constrained = `fuelExhausted x`
+
+let uses_fuel_constrained (k : nat) : nat = fuel_constrained 0 k (k + 1)

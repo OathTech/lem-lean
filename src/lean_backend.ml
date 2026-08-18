@@ -1439,9 +1439,15 @@ type pat_style = FunParam | MatchArm
                                              pat_typ (C.t_to_src_t (reader_value_typ cref));
                                              from_string ") -> "])
                               (get_reader_params ())) in
+                          (* class-constraint binders must be re-emitted on
+                             the wrapper too (arc-3 batch D: [Eq0 a]-style
+                             constrained defs failed to elaborate) *)
+                          let cons_out =
+                            if constraints = emp then emp
+                            else Output.flat [from_string " "; constraints] in
                           let wrapper = Output.flat [
                             from_string "\n\n"; attr_for g;
-                            from_string "def "; from_string base_name; tv_out;
+                            from_string "def "; from_string base_name; tv_out; cons_out;
                             from_string " : "; reader_arrows;
                             pat_typ (C.t_to_src_t cd.const_type);
                             from_string " := "; from_string worker;
