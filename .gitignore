@@ -66,3 +66,4 @@ TODO.md
 # Tool directories
 .claude/
 _opam/
+.tmp/

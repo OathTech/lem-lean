@@ -150,13 +150,25 @@ let lean_reader_get_params env =
 let lean_reader_prepass env (ds : def list) =
   if lean_reader_get_params env <> [] then begin
     let target = Target.Target_no_ident Target.Target_lean in
-    let infos = List.filter_map (fun (((d_aux, _), _, _) as d : def) ->
-        match d_aux with
-        | Instance _ -> None
-        | _ ->
-          let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
-          let used = (add_def_entities target false empty_used_entities d).used_consts_set in
-          Some (defined, used)) ds in
+    (* Collect (defined, used) pairs at Val_def granularity, recursing into
+       nested modules. Only Val_defs register their DEFINED constants:
+       coarse add_def_entities on a whole Module def would also sweep class
+       methods, val-spec-only constants, and indreln relation names into
+       the lifted set (audit finding, 2026-08-18), and caller-side
+       injection would then poison their uses program-wide. Instances are
+       skipped (fail-closed at emission); Class/Val_spec/Indreln/etc.
+       cannot be lifted — a reader use inside an indreln rule or lemma is
+       unsupported and fails visibly at the Lean build. *)
+    let rec def_infos acc (((d_aux, _), _, _) as d : def) =
+      match d_aux with
+      | Instance _ -> acc
+      | Module (_, _, _, _, _, inner_ds, _) -> List.fold_left def_infos acc inner_ds
+      | Val_def _ ->
+        let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
+        let used = (add_def_entities target false empty_used_entities d).used_consts_set in
+        (defined, used) :: acc
+      | _ -> acc in
+    let infos = List.rev (List.fold_left def_infos [] ds) in
     let changed = ref true in
     while !changed do
       changed := false;
@@ -1217,8 +1229,15 @@ type pat_style = FunParam | MatchArm
                           (* Point-free wrapper at the default fuel: call sites
                              are unchanged, and proofs unfold wrapper → worker
                              definitionally. *)
+                          (* The wrapper must carry the same never_extract
+                             protection as the worker when the def contains
+                             effectful calls: callers reference the WRAPPER,
+                             and an unattributed wrapper would reopen the
+                             closed-term-extraction hazard one level up
+                             (audit finding, 2026-08-18). *)
                           let wrapper = Output.flat [
-                            from_string "\n\ndef "; from_string base_name; tv_out;
+                            from_string "\n\n"; attr_for g;
+                            from_string "def "; from_string base_name; tv_out;
                             from_string " : "; pat_typ (C.t_to_src_t cd.const_type);
                             from_string " := "; from_string worker;
                             from_string " lemDefaultFuel\n"] in
@@ -1898,6 +1917,13 @@ type pat_style = FunParam | MatchArm
               in
               let sep = from_string " " in
               begin
+                (* NOTE (audit, 2026-08-18): this Infix path has NONE of the
+                   reader/fuel/effectful hooks. A lifted, fuel'd, or
+                   effectful constant used in infix position emits without
+                   injection/wrapping — every such case fails VISIBLY at the
+                   Lean build (missing binder / unknown worker / unrun
+                   BaseIO), never silently. Hook here if a legitimate infix
+                   use ever appears. *)
                 match C.exp_to_term c with
                   | Constant cd ->
                     begin

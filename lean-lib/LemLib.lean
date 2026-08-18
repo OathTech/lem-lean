@@ -33,9 +33,13 @@ private unsafe def DAEMON1_impl {α : Type 1} : α := unsafeCast ()
      merging identical call sites via CSE. The thunk alone does NOT achieve
      this: identical closed thunks are shared, making applications identical.
 
-   Generated defs whose bodies contain effectful call sites carry the same
-   attributes (emitted by the Lean backend), so callers cannot cache them
-   either. Extern implementations must follow the Lean ≥4.29 world-erased
+   Generated defs whose bodies DIRECTLY contain effectful call sites carry
+   the same attributes (emitted by the Lean backend). NOTE this protection
+   is one level deep, not transitive: a closed application of a def that
+   merely CALLS an attributed def is still extractable/CSE-able. Sound use
+   therefore requires effectful constants not to be load-bearing on paths
+   where callers are applied to closed arguments — see the consumer's
+   effects design note (audit finding, 2026-08-18). Extern implementations must follow the Lean ≥4.29 world-erased
    convention: no RealWorld parameter, return the value directly. -/
 @[never_extract, noinline]
 private unsafe def runEffectful_impl {α : Type} (thunk : Unit → BaseIO α) : α :=
