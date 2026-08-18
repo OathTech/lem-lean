@@ -128,6 +128,27 @@ private unsafe def failwithIImpl {α : Type} [Inhabited α] (msg : String) : α 
 @[implemented_by failwithIImpl]
 opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
 
+/- fuelExhaustedWith: out-of-fuel sentinel for fuel'd defs whose return
+   type is pure (no error channel) and possibly polymorphic (arc-3 sweep).
+   The witness — any in-scope value of the return type, typically one of
+   the worker's own arguments — discharges inhabitation LOCALLY: no
+   [Inhabited] constraint propagates into generated signatures (the
+   April-2026 requirement), and no generated-instance DAEMON fallback
+   enters the cone. Same load-bearing properties as failwithI: opaque (no
+   equations — the fuel-exhausted branch is not provably equal to
+   anything, in particular NOT to the witness), axiom-free, and loud at
+   runtime via @[implemented_by] panic. -/
+private unsafe def fuelExhaustedWithImpl {α : Type} (msg : String) (witness : α) : α :=
+  @panic α ⟨witness⟩ msg
+@[implemented_by fuelExhaustedWithImpl]
+opaque fuelExhaustedWith {α : Type} (msg : String) (witness : α) : α := witness
+
+/- Message-less variant for 'declare {lean} fuel val' sentinels: the lem
+   backtick lexer excludes double quotes, so declares cannot carry a
+   message string. Unfolds to the opaque core — same cone hygiene. -/
+def fuelExhausted {α : Type} (witness : α) : α :=
+  fuelExhaustedWith "lem: fuel exhausted" witness
+
 /- fromJustI: ground-site head for msg-carrying fromJust helpers
    (declare {lean} ground_rep, e.g. cerberus Utils.fromJust). A REAL def:
    the success equation `fromJustI msg (some x) = x` holds by rfl

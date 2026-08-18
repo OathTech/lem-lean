@@ -459,3 +459,12 @@ declare {lean} fuel val ping = `991`
 declare {lean} fuel val pong = `992`
 
 let uses_pingpong (k : nat) : nat = ping k + pong k
+
+(* Section 12b: fuel with a pure polymorphic return type — sentinel via
+   fuelExhausted, witness = an in-scope argument of the worker. No
+   [Inhabited] constraint, no generated-instance fallback in the cone. *)
+val fuel_spin : forall 'a. nat -> 'a -> 'a
+let rec fuel_spin n x = if n = 0 then x else fuel_spin (n + 1) x
+declare {lean} fuel val fuel_spin = `fuelExhausted x`
+
+let uses_fuel_spin (k : nat) : nat = fuel_spin k (k + 1)
