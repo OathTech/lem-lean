@@ -1260,6 +1260,15 @@ type pat_style = FunParam | MatchArm
                             "Lean backend: reader_seed on a multi-clause or mutual definition (unsupported)")
                       | _ -> None in
                     (match seed_info with
+                     | Some _ when List.length (get_reader_params ()) <> 1 ->
+                       (* The seed name overrides EVERY injected reader
+                          parameter — with more than one reader that would
+                          silently conflate them (audit finding). *)
+                       raise (Reporting_basic.err_general true Ast.Unknown
+                         "Lean backend: reader_seed requires exactly one declared reader")
+                     | Some _ when is_truly_mutual ->
+                       raise (Reporting_basic.err_general true Ast.Unknown
+                         "Lean backend: reader_seed in a mutual block (unsupported; the mutual partner would escape lifting)")
                      | Some _ when inside_instance ->
                        raise (Reporting_basic.err_general true Ast.Unknown
                          "Lean backend: reader_seed inside an instance (unsupported)")
