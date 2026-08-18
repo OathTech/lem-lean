@@ -19,8 +19,7 @@ def  fail  {a : Type}   : a :=  failwith  "fail"
 def  ensure  (test : Bool) (msg : String)  : Unit := 
   if  test then 
     ()
-   else 
-    failwith  msg
+   else (failwithI  msg : Unit)
 
 end Lem_Assert_extra
 

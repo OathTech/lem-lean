@@ -107,6 +107,22 @@ def defaultGreaterEq [Ord α] (x y : α) : Bool := isGreaterEqual (defaultCompar
 /- Bool/Prop bridge -/
 def lemBoolToProp (b : Bool) : Prop := b = true
 
+/- failwithI: failure at a KNOWN-INHABITED type (arc-2 S5). The Lean
+   backend emits this instead of failwith at call sites whose result type
+   is syntactically GROUND (no type variables), where instance resolution
+   cannot require constraint propagation. Properties, each load-bearing:
+   - opaque: NO equations — an error branch is not provably equal to any
+     value (strictly stronger claim hygiene than both DAEMON and a
+     `:= default` body);
+   - axiom-free: the `:= default` initializer only witnesses
+     inhabitation; opaque does not expose it definitionally;
+   - computable at runtime via @[implemented_by]: panics with the message,
+     byte-identical behavior to failwith. -/
+private unsafe def failwithIImpl {α : Type} [Inhabited α] (msg : String) : α :=
+  panic! msg
+@[implemented_by failwithIImpl]
+opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
+
 /- failwith: raises a panic with the given message -/
 unsafe def failwithImpl {α : Type} (msg : String) : α :=
   @panic α ⟨unsafeCast ()⟩ msg

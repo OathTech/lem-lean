@@ -597,6 +597,22 @@ type pat_style = FunParam | MatchArm
       let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
       Target.Targetmap.apply_target cd.fuel_sentinel (Target.Target_no_ident Target.Target_lean)
 
+    (* Constants whose LEAN target_rep is the bare identifier `failwith`
+       (Assert_extra.failwith, cerberus's Utils.error, ...). At call sites
+       with a syntactically GROUND result type these are re-emitted as
+       LemLib.failwithI (opaque, [Inhabited]-bounded, axiom-free) — see
+       the consumer's effects design note §15/§16. Sites mentioning ANY
+       type variable keep legacy failwith: zero constraint propagation,
+       by construction. *)
+    let is_lean_failwith_rep cref =
+      let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
+      match Target.Targetmap.apply_target cd.target_rep (Target.Target_no_ident Target.Target_lean) with
+      | Some (CR_simple (_, _, _, e)) | Some (CR_inline (_, _, _, e)) ->
+        (match C.exp_to_term e with
+         | Backend (_, i) -> Ident.to_string i = "failwith"
+         | _ -> false)
+      | _ -> false
+
     let rec def_extra (inside_instance: bool) (callback: def list -> Output.t) (inside_module: bool) (m: def_aux) =
       match m with
         | Lemma (skips, lemma_typ, targets, (name, _), skips', e) ->
@@ -1644,6 +1660,15 @@ type pat_style = FunParam | MatchArm
                         (* Application of the reader constant itself: 'tagDefs ()'
                            becomes the reader parameter. The only argument is unit. *)
                         [from_string (reader_param_name cd.descr)]
+                      else if is_lean_failwith_rep cd.descr
+                              && List.length args = 1
+                              && Types.TNset.is_empty (Types.free_vars (Typed_ast.exp_to_typ e)) then
+                        (* Ground-typed failure site: axiom-free failwithI,
+                           with an ascription so the instance resolves at
+                           exactly this type. *)
+                        [Output.flat [from_string "(failwithI "; trans (List.hd args);
+                                      from_string " : "; pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e));
+                                      from_string ")"]]
                       else if Types.Cdset.mem cd.descr !lean_reader_lifted then
                         (* Call of a lifted def: `trans e0` reaches the bare-
                            Constant case, which injects the reader parameters

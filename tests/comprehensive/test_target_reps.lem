@@ -371,3 +371,34 @@ declare {lean} fuel val fuel_countdown = `999`
 
 (* Callers use the wrapper — unchanged. *)
 let uses_countdown (k : nat) : nat = fuel_countdown k + 1
+
+(* === Section 10: ground-typed failwithI emission === *)
+
+(* Call sites of failwith-mapped constants with a syntactically GROUND
+   result type emit LemLib.failwithI (opaque, [Inhabited]-bounded,
+   axiom-free); any type variable in the result type keeps legacy
+   failwith (DAEMON) — zero constraint propagation. *)
+
+(* ground result type -> failwithI *)
+val ground_fail : nat -> nat
+let ground_fail n = if n = 0 then failwith "ground" else n
+
+(* type-variable result -> legacy failwith, signature UNCHANGED (the
+   msum/pick class from the consumer) *)
+val poly_fail : forall 'a. list 'a -> 'a
+let poly_fail l = match l with
+  | [] -> failwith "poly"
+  | x :: _ -> x
+end
+
+(* ground site inside recursive (partial def) code *)
+val ground_fail_rec : nat -> nat
+let rec ground_fail_rec n =
+  match n with
+    | 0 -> failwith "rec-ground"
+    | _ -> ground_fail_rec (n - 1)
+end
+
+(* ground COMPOUND type (List nat is variable-free -> failwithI) *)
+val ground_list_fail : unit -> list nat
+let ground_list_fail u = failwith "ground-list"
