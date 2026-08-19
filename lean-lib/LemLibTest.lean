@@ -441,5 +441,63 @@ def checkPairs [BEq α] [BEq β] (c : α → α → LemOrdering)
 
 end PropertyTests
 
+/- ========================================================================
+   LemLibLegacy FREEZE-GUARD (arc-6 S5f, per audit-2).
+
+   LemLibLegacy above is the retired reference implementation and the
+   oracle for every theorem and property test in this file; if it drifts,
+   the equivalence obligations silently stop meaning "new == retired".
+   Mechanism chosen [AGENT:S5f]: characteristic-law #guards pinning
+   Legacy's OWN behavior against hand-computed literals (the alternative
+   — a recorded sha256 of the section checked by an external script —
+   pins the text, but needs out-of-file wiring into the test flow and
+   trips on harmless comment/whitespace edits; what the obligations
+   actually need frozen is Legacy's SEMANTICS, and these guards break on
+   exactly that: any behavioral drift of add's move-to-front + BEq-dedup,
+   lookup's first-comparator-EQ scan, delete's comparator filter, union's
+   left-fold-of-m2 direction, equalBy's two-sided find, or the
+   BEq-finer-than-comparator split). Build-failing: `lake build` runs
+   this file; a failing #guard is an elaboration error.
+   ======================================================================== -/
+
+section LegacyFreezeGuard
+
+-- add = cons + BEq-filter: move-to-front, shadowed key removed, rest order kept
+#guard LemLibLegacy.fmapAdd 1 20 [(2, 12), (1, 10), (3, 13)] == [(1, 20), (2, 12), (3, 13)]
+-- add dedups EVERY BEq-equal occurrence, not just the first
+#guard LemLibLegacy.fmapAdd 1 20 [(1, 10), (2, 12), (1, 11)] == [(1, 20), (2, 12)]
+-- lookup = linear scan, FIRST comparator-EQ wins on a shadowed spine
+#guard LemLibLegacy.fmapLookupBy cNat 1 [(1, 10), (1, 11)] == some 10
+-- delete = comparator filter: removes ALL EQ entries, order-preserving
+#guard LemLibLegacy.fmapDeleteBy cNat 1 [(2, 12), (1, 10), (3, 13), (1, 11)] == [(2, 12), (3, 13)]
+-- BEq (finer) governs add's dedup; the comparator (coarser) governs
+-- lookup/delete — the K2 bucket split the property tests rely on
+#guard LemLibLegacy.fmapAdd (⟨0, 1⟩ : K2) 20 [(⟨0, 0⟩, 10)] == [(⟨0, 1⟩, 20), (⟨0, 0⟩, 10)]
+#guard LemLibLegacy.fmapLookupBy cK2 ⟨0, 5⟩ [((⟨0, 1⟩ : K2), 20), (⟨0, 0⟩, 10)] == some 20
+#guard LemLibLegacy.fmapDeleteBy cK2 ⟨0, 5⟩ [((⟨0, 1⟩ : K2), 20), (⟨1, 0⟩, 30), (⟨0, 0⟩, 10)]
+  == [(⟨1, 0⟩, 30)]
+-- union = m2 foldl-ed into m1 via fmapAdd: m2's later entries end frontmost...
+#guard LemLibLegacy.fmapUnion [(1, 10)] [(2, 12), (3, 13)] == [(3, 13), (2, 12), (1, 10)]
+-- ...and m2 overrides m1 on key collision
+#guard LemLibLegacy.fmapUnion [(1, 10), (2, 12)] [(1, 20)] == [(1, 20), (2, 12)]
+-- equalBy: two-sided find? check — value mismatch on a shadowed entry fails
+#guard LemLibLegacy.fmapEqualBy (· == ·) (· == ·) [(1, 10), (1, 11)] [(1, 10)] == false
+#guard LemLibLegacy.fmapEqualBy (· == ·) (· == ·) [(1, 10), (2, 12)] [(2, 12), (1, 10)] == true
+-- domainBy = setFromListBy over keys: foldr dedup (keeps LAST duplicate's slot)
+#guard LemLibLegacy.fmapDomainBy cNat [(2, 12), (1, 10), (3, 13)] == [2, 1, 3]
+#guard LemLibLegacy.fmapDomainBy cNat [(2, 12), (1, 10), (2, 13)] == [1, 2]
+#guard LemLibLegacy.fmapRangeBy cNat [(1, 12), (2, 10), (3, 12)] == [10, 12]
+-- map/mapi/elements: spine order preserved; elements is the identity
+#guard LemLibLegacy.fmapElements (LemLibLegacy.fmapMap (· + 1) [(2, 12), (1, 10)]) == [(2, 13), (1, 11)]
+#guard LemLibLegacy.fmapMapi (fun k v => 10 * k + v) [(2, 1), (1, 3)] == [(2, 21), (1, 13)]
+-- empty/isEmpty, incl. emptiness after add-then-delete
+#guard LemLibLegacy.fmapIsEmpty (LemLibLegacy.fmapEmpty : LemLibLegacy.Fmap Nat Nat) == true
+#guard LemLibLegacy.fmapIsEmpty
+  (LemLibLegacy.fmapDeleteBy cNat 1 (LemLibLegacy.fmapAdd 1 10 LemLibLegacy.fmapEmpty)) == true
+-- all: predicate sees both key and value
+#guard LemLibLegacy.fmapAll (fun k v => k < v) [(1, 10), (2, 12)] == true
+#guard LemLibLegacy.fmapAll (fun k v => k < v) [(1, 10), (12, 2)] == false
+
+end LegacyFreezeGuard
 
 end LemLibTest
