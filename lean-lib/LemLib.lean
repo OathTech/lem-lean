@@ -1,3 +1,5 @@
+import Std.Data.TreeMap
+
 /-!
 # LemLib — Lean 4 runtime library for Lem
 
@@ -6,7 +8,9 @@ Provides the core types and operations that Lem-generated Lean 4 code depends on
 - `LemOrdering`: three-way comparison type used by set/map operations
 - Comparison, arithmetic, and string helpers
 - Set operations (using sorted `List` representation with `LemOrdering` comparators)
-- Finite map operations (using `List (α × β)` with `LemOrdering` comparators)
+- Finite map operations (`Fmap`: comparator-keyed `Std.TreeMap` index + insertion-order
+  spine index; observable behavior identical to the retired assoc-list representation —
+  see the Fmap section below and LemLibTest.lean for the equivalence obligations)
 
 **Convention**: Functions suffixed with `By` take an explicit `(cmp : α → α → LemOrdering)`
 comparator. Functions without `By` use Lean's `BEq` or `Ord` type classes.
@@ -335,51 +339,180 @@ def chooseAndSplit (cmp : α → α → LemOrdering) (s : List α) : Option (Lis
     let gt := xs.filter (fun y => match cmp y x with | .LT => false | .EQ => false | .GT => true)
     some (lt, x, gt)
 
-/- Finite map operations (using List of pairs) -/
-abbrev Fmap (α β : Type) := List (α × β)
+/- ============================================================================
+   Finite map operations (arc-6 S3 representation change)
+   ============================================================================
 
-def fmapEmpty : Fmap α β := []
-@[inline] def fmapIsEmpty : Fmap α β → Bool := List.isEmpty
+   Previous representation: `Fmap α β := List (α × β)` (assoc list, newest
+   insert at the head; `fmapAdd` = cons + full BEq-filter; `fmapLookupBy` =
+   linear comparator scan). O(n) insert/lookup made every generated lem `map`
+   seam superlinear at runtime (arc-6 S0 profile).
 
-def fmapAdd [BEq α] (k : α) (v : β) (m : Fmap α β) : Fmap α β :=
-  (k, v) :: m.filter (fun p => !(p.1 == k))
+   New representation: two `Std.TreeMap` indexes + an insertion-sequence
+   counter, chosen so that EVERY observable of the old representation is
+   preserved bit-for-bit (the arc-6 zero-differential-movement bar):
 
-def fmapLookupBy (cmp : α → α → LemOrdering) (k : α) : Fmap α β → Option β
-  | [] => none
-  | (k', v) :: rest => match cmp k k' with
-    | .EQ => some v
-    | _ => fmapLookupBy cmp k rest
+   - `bySeq : Std.TreeMap Nat (α × β)` — the ORDER SPINE. Each live entry
+     holds the sequence number of its insertion; `fmapElements` (= lem
+     `Map_extra.toList` / `Map.toSet`) enumerates seq-descending, i.e. the
+     exact newest-first list the old cons spine produced. Folds over maps
+     (`Map_extra.fold` = setFold = List.foldr over that list) therefore
+     apply the folded function oldest-first, exactly as before.
+   - `byKey : Std.TreeMap α (bucket) cmp` — the LOOKUP INDEX, keyed by the
+     lem `mapKeyCompare` comparator captured at first insert (the map type
+     itself cannot carry the comparator: `fmapEmpty` has no instances).
+     A bucket is the list of live entries whose keys are comparator-EQ,
+     seq-descending. Buckets (rather than single values) are load-bearing:
+     the old `fmapAdd` deduplicated by `BEq` while lookup/delete use the
+     comparator, and these can differ (e.g. cerberus `sym`: derived BEq is
+     symbol_description-sensitive, symbol_compare is not) — comparator-EQ
+     but BEq-distinct keys legally coexist, and lookup must return the
+     newest. The new `fmapAddBy` still deduplicates by `BEq`, inside the
+     comparator-EQ bucket only.
 
-def fmapDeleteBy (cmp : α → α → LemOrdering) (k : α) (m : Fmap α β) : Fmap α β :=
-  m.filter (fun p => match cmp k p.1 with | .EQ => false | _ => true)
+   Soundness assumptions (checked against the generated cerberus frontier,
+   arc-6 S3; violated ⇒ the old linear scan and the tree search could
+   disagree):
+   1. Per map value, all comparator-taking operations receive the same
+      comparator (lem inlines the static `mapKeyCompare` instance, so this
+      holds per key TYPE; the only custom comparators in the frontier —
+      identifier-by-string in Core_linking — coincide with the instance).
+      Operations use the CAPTURED comparator on the tree.
+   2. `BEq`-equal keys are comparator-EQ (BEq is structural or equal to the
+      comparator at every call site; comparators are reflexive).
+   3. Comparators are lawful total preorders (Std.TransCmp-style), which
+      all `mapKeyCompare` instances are (lexicographic structural orders).
 
-def fmapMap (f : β → γ) (m : Fmap α β) : Fmap α γ :=
-  m.map (fun p => (p.1, f p.2))
+   The retired assoc-list implementation is kept, test-only, in
+   LemLibTest.lean (namespace `LemLibLegacy`) as the reference for the
+   equivalence theorems and property tests. -/
 
-def fmapMapi (f : α → β → γ) (m : Fmap α β) : Fmap α γ :=
-  m.map (fun p => (p.1, f p.1 p.2))
+/-- Convert a `LemOrdering`-comparator to an `Ordering`-comparator (the form
+    `Std.TreeMap` expects). -/
+@[inline] def lemCmpToOrd (cmp : α → α → LemOrdering) (a b : α) : Ordering :=
+  match cmp a b with
+  | .LT => .lt
+  | .EQ => .eq
+  | .GT => .gt
 
+/-- Finite map. The nullary `empty` constructor is deliberate ABI: it makes
+    `lean_box(0)` a valid (empty) `Fmap`, exactly as it was for the retired
+    `List` representation — consumer C externs (e.g. cerberus
+    `native/tags.c`) return `lean_box(0)` for an unset map global. In `mk`,
+    `cmp` is the comparator captured at first insert. A byKey bucket entry
+    is `(seq, key, value)`; buckets and `bySeq` always describe the same
+    live entry set. -/
+inductive Fmap (α β : Type) : Type where
+  | empty
+  | mk (cmp : α → α → Ordering)
+       (byKey : Std.TreeMap α (List (Nat × α × β)) cmp)
+       (bySeq : Std.TreeMap Nat (α × β))
+       (counter : Nat)
+
+instance : Inhabited (Fmap α β) := ⟨.empty⟩
+
+def fmapEmpty : Fmap α β := .empty
+
+def fmapIsEmpty : Fmap α β → Bool
+  | .empty => true
+  | .mk _ _ bySeq _ => bySeq.isEmpty
+
+/-- Insert. Replaces (exactly) the BEq-equal entries the old
+    `(k, v) :: m.filter (fun p => !(p.1 == k))` removed; the new entry gets
+    the newest sequence number, so enumeration order matches the old
+    move-to-front behavior. On `empty` the passed comparator is captured as
+    the map's key order; a delete-emptied `mk` keeps its captured
+    comparator. -/
+def fmapAddBy [BEq α] (cmp : α → α → LemOrdering) (k : α) (v : β) : Fmap α β → Fmap α β
+  | .empty =>
+    let c' := lemCmpToOrd cmp
+    .mk c' (Std.TreeMap.empty.insert k [(0, k, v)])
+           (Std.TreeMap.empty.insert 0 (k, v)) 1
+  | .mk c byKey bySeq n =>
+    let bucket := (byKey.get? k).getD []
+    let dead := bucket.filter (fun e => e.2.1 == k)
+    let kept := bucket.filter (fun e => !(e.2.1 == k))
+    let bySeq' := dead.foldl (fun t e => t.erase e.1) bySeq
+    .mk c (byKey.insert k ((n, k, v) :: kept)) (bySeq'.insert n (k, v)) (n + 1)
+
+/-- Lookup: the newest comparator-EQ entry (= first match of the old head-first
+    scan) is the bucket head. The tree is searched with the captured
+    comparator (assumption 1 above). -/
+def fmapLookupBy (_cmp : α → α → LemOrdering) (k : α) : Fmap α β → Option β
+  | .empty => none
+  | .mk _ byKey _ _ =>
+    match byKey.get? k with
+    | some ((_, _, v) :: _) => some v
+    | _ => none
+
+/-- Delete: removes ALL comparator-EQ entries (the old filter semantics),
+    i.e. the whole bucket. -/
+def fmapDeleteBy (_cmp : α → α → LemOrdering) (k : α) (m : Fmap α β) : Fmap α β :=
+  match m with
+  | .empty => .empty
+  | .mk c byKey bySeq n =>
+    match byKey.get? k with
+    | none => m
+    | some bucket =>
+      .mk c (byKey.erase k) (bucket.foldl (fun t e => t.erase e.1) bySeq) n
+
+/-- Enumerate as the old spine list: newest insert first (seq-descending). -/
+def fmapElements : Fmap α β → List (α × β)
+  | .empty => []
+  | .mk _ _ bySeq _ => bySeq.foldl (fun acc _ kv => kv :: acc) []
+
+def fmapMap (f : β → γ) : Fmap α β → Fmap α γ
+  | .empty => .empty
+  | .mk c byKey bySeq n =>
+    .mk c (byKey.map (fun _ bucket => bucket.map (fun (s, k, v) => (s, k, f v))))
+          (bySeq.map (fun _ kv => (kv.1, f kv.2))) n
+
+def fmapMapi (f : α → β → γ) : Fmap α β → Fmap α γ
+  | .empty => .empty
+  | .mk c byKey bySeq n =>
+    .mk c (byKey.map (fun _ bucket => bucket.map (fun (s, k, v) => (s, k, f k v))))
+          (bySeq.map (fun _ kv => (kv.1, f kv.1 kv.2))) n
+
+/-- Structural instances matching the retired `List` representation exactly:
+    equality/ordering of the enumerated spines (order-SENSITIVE — these are
+    the instances `deriving BEq, Ord` on Fmap-carrying generated types
+    (lem `bimap`, `Multiset.t2`, cerberus `AilSyntax.sigma`) used to get
+    from `List`). Not to be confused with lem's own map equality
+    (`fmapEqualBy` below), which is containment-based. -/
+instance [BEq α] [BEq β] : BEq (Fmap α β) where
+  beq m1 m2 := fmapElements m1 == fmapElements m2
+
+instance [Ord α] [Ord β] : Ord (Fmap α β) where
+  compare m1 m2 := compare (fmapElements m1) (fmapElements m2)
+
+/-- Order-insensitive double containment — the old algorithm verbatim, over
+    the enumerated spines. -/
 def fmapEqualBy (eqK : α → α → Bool) (eqV : β → β → Bool) (m1 m2 : Fmap α β) : Bool :=
-  let check (m1 m2 : Fmap α β) : Bool :=
-    m1.all (fun (k, v) =>
-      match m2.find? (fun (k', _) => eqK k k') with
+  let l1 := fmapElements m1
+  let l2 := fmapElements m2
+  let check (a b : List (α × β)) : Bool :=
+    a.all (fun (k, v) =>
+      match b.find? (fun (k', _) => eqK k k') with
       | some (_, v') => eqV v v'
       | none => false)
-  check m1 m2 && check m2 m1
+  check l1 l2 && check l2 l1
 
 def fmapDomainBy (cmp : α → α → LemOrdering) (m : Fmap α β) : List α :=
-  setFromListBy cmp (m.map (fun p => p.1))
+  setFromListBy cmp ((fmapElements m).map (fun p => p.1))
 
 def fmapRangeBy (cmp : β → β → LemOrdering) (m : Fmap α β) : List β :=
-  setFromListBy cmp (m.map (fun p => p.2))
+  setFromListBy cmp ((fmapElements m).map (fun p => p.2))
 
 def fmapAll (f : α → β → Bool) (m : Fmap α β) : Bool :=
-  m.all (fun p => f p.1 p.2)
+  (fmapElements m).all (fun p => f p.1 p.2)
 
-def fmapUnion [BEq α] (m1 m2 : Fmap α β) : Fmap α β :=
-  m2.foldl (fun acc (k, v) => fmapAdd k v acc) m1
+/-- Union: fold m2's spine head-first (newest-first) into m1 — the old
+    `m2.foldl fmapAdd m1` order exactly. -/
+def fmapUnionBy [BEq α] (cmp : α → α → LemOrdering) (m1 m2 : Fmap α β) : Fmap α β :=
+  (fmapElements m2).foldl (fun acc (k, v) => fmapAddBy cmp k v acc) m1
 
-@[inline] def fmapElements (m : Fmap α β) : List (α × β) := m
+def fmapOfSpine [BEq α] (cmp : α → α → LemOrdering) (l : List (α × β)) : Fmap α β :=
+  l.foldr (fun (k, v) acc => fmapAddBy cmp k v acc) fmapEmpty
 
 /- ============================================================================
    Unsupported numeric types

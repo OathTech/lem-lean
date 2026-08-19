@@ -78,6 +78,9 @@ instance (priority := low) (a : Type) [SetType a] : MapKeyType a where
 
 /- removed value specification -/
 
+
+/- removed value specification -/
+
 /- removed value specification -/
 
 
@@ -87,7 +90,7 @@ instance (priority := low) (a : Type) [SetType a] : MapKeyType a where
 
 /- removed value specification -/
 
-def  fromList  {k : Type} {v : Type} [MapKeyType k]  (l : List ((k ×v)))  : Fmap k v :=  List.foldl  (fun (m : Fmap k v) (p : (k ×v)) =>  match m, p with |  m,  (k1, v1) =>  fmapAdd  k1  v1  m )  fmapEmpty  l
+def  fromList  {k : Type} {v : Type} [MapKeyType k]  (l : List ((k ×v)))  : Fmap k v :=  List.foldl  (fun (m : Fmap k v) (p : (k ×v)) =>  match m, p with |  m,  (k1, v1) =>  (fmapAddBy  (@mapKeyCompare (k) _)  k1  v1  m) )  fmapEmpty  l
 /- removed value specification -/
 
 /- removed value specification -/
@@ -136,6 +139,9 @@ def  all  {k : Type} {v : Type} [MapKeyType k] [Eq0 v]  (P : k → v → Bool) (
 
 /- removed value specification -/
 
+
+/- removed value specification -/
+
 /- removed value specification -/
 
 /- removed value specification -/
@@ -144,7 +150,7 @@ def  all  {k : Type} {v : Type} [MapKeyType k] [Eq0 v]  (P : k → v → Bool) (
 
 /-  instance of SetType  -/
 def  map_setElemCompare  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [SetType a] [SetType b] [SetType c] [SetType d] [MapKeyType b] [MapKeyType d]  (cmp : List ((d ×c)) → List ((b ×a)) → e) (x : Fmap d c) (y : Fmap b a)  : e := 
-  cmp  (id  x)  (id  y)
+  cmp  (fmapElements  x)  (fmapElements  y)
 
 instance (a b : Type) [SetType a] [SetType b] [MapKeyType a] : SetType (Fmap  a  b) where
 

@@ -30,10 +30,10 @@ open Lem_Map
 def  find0  {k : Type} {v : Type} [MapKeyType k]  (k1 : k) (m : Fmap k v)  : v :=  match  ((fmapLookupBy  (@mapKeyCompare (k) _)  k1  m)) with |  some  x =>  x |  none =>  failwith  "Map_extra.find" 
 /- removed value specification -/
 
-def  fromSet  {k : Type} {v : Type} [MapKeyType k]  (f : k → v) (s : List k)  : Fmap k v :=  setFold  (fun (k1 : k) (m : Fmap k v) =>  fmapAdd  k1  (f  k1)  m)  s  fmapEmpty
+def  fromSet  {k : Type} {v : Type} [MapKeyType k]  (f : k → v) (s : List k)  : Fmap k v :=  setFold  (fun (k1 : k) (m : Fmap k v) =>  (fmapAddBy  (@mapKeyCompare (k) _)  k1  (f  k1)  m))  s  fmapEmpty
 /- removed value specification -/
 
-def  fold  {k : Type} {r : Type} {v : Type} [MapKeyType k] [SetType k] [SetType v]  (f : k → v → r → r) (m : Fmap k v) (v1 : r)  : r :=  setFold  (fun (p : (k ×v)) (r1 : r) =>  match p, r1 with |  (k1,  v1),  r1 =>  f  k1  v1  r1 )  (id  m)  v1
+def  fold  {k : Type} {r : Type} {v : Type} [MapKeyType k] [SetType k] [SetType v]  (f : k → v → r → r) (m : Fmap k v) (v1 : r)  : r :=  setFold  (fun (p : (k ×v)) (r1 : r) =>  match p, r1 with |  (k1,  v1),  r1 =>  f  k1  v1  r1 )  (fmapElements  m)  v1
 /- removed value specification -/
 
 /- removed value specification -/
@@ -41,7 +41,7 @@ def  fold  {k : Type} {r : Type} {v : Type} [MapKeyType k] [SetType k] [SetType 
 /-  OLD: TODO: mapMaybe depends on toList that is not defined for hol and isabelle  -/
 def  mapMaybe0  {a : Type} {b : Type} {c : Type} [MapKeyType a]  (f : a → b → Option c) (m : Fmap a b)  : Fmap a c := 
   List.foldl 
-    (fun (m' : Fmap a c) (p : (a ×b)) =>  match m', p with |  m',  (k,  v) => (       match  f  k  v with  |  none =>  m' |  some  v' =>  fmapAdd  k  v'  m'       ) ) 
+    (fun (m' : Fmap a c) (p : (a ×b)) =>  match m', p with |  m',  (k,  v) => (       match  f  k  v with  |  none =>  m' |  some  v' =>  (fmapAddBy  (@mapKeyCompare (a) _)  k  v'  m')       ) ) 
     fmapEmpty 
     (fmapElements  m)
 end Lem_Map_extra
