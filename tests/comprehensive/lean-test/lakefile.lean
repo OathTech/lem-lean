@@ -27,6 +27,8 @@ lean_lib LemComprehensiveTest where
     `Test_deriving, `Test_deriving_auxiliary,
     `Test_either_maybe, `Test_either_maybe_auxiliary,
     `Test_expressions, `Test_expressions_auxiliary,
+    `Test_failwith_threading, `Test_failwith_threading_auxiliary,
+    `TestFailwithThreadingCheck,  -- hand-written arc-8 S2 signature-shape checks
     `Test_functions, `Test_functions_auxiliary,
     `Test_indreln, `Test_indreln_auxiliary,
     `Test_instances, `Test_instances_auxiliary,

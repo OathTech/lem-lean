@@ -22,6 +22,11 @@
 (*    [Inhabited tv] where a type parameter is consumed); no DAEMON      *)
 (*    fallback — underivable types get NO instance (fail-closed,         *)
 (*    arc-8 S1)                                                          *)
+(*  - EVERY failure site (failwith-mapped constants, L_undefined         *)
+(*    defaults) emits axiom-free failwithI/default; tyvar-typed sites    *)
+(*    thread [Inhabited tv] binders onto the enclosing def's signature   *)
+(*    (monotone over the call graph); legacy failwith and the            *)
+(*    sorry-emission paths are gone (fail-closed, arc-8 S2)              *)
 (*                                                                        *)
 (**************************************************************************)
 
@@ -172,6 +177,13 @@ let lean_indreln_params : (Types.const_descr_ref * string) list ref = ref []
    three def-assembly sites emit the binder. *)
 let lean_reader_lifted : Types.Cdset.t ref = ref Types.Cdset.empty
 let lean_reader_binder : bool ref = ref false
+
+(* Arc-8 S2: [Inhabited tv] instance-implicit binders for the def group
+   currently being rendered (tyvar names in parameter-declaration order,
+   from the threading pre-pass census lean_failwith_threaded). Set while
+   rendering a threaded def so the def-assembly sites emit the binders;
+   [] otherwise. *)
+let lean_inhabited_binder : string list ref = ref []
 
 (* Fuel emission (declare {lean} fuel val f = `sentinel`): while rendering a
    fuel'd def's clause, lean_fuel_emit holds the sentinel text (consumed by
@@ -393,6 +405,13 @@ let inhabited_needs_tier2 mutual_paths ((_, tnvar_list, path, t, _)) : bool =
             not (List.exists (fun (_, _, _, src_ts) ->
               let args = Seplist.to_list src_ts in
               not (List.exists (src_t_is_directly_mutual [path]) args)) ctors))
+      | Te_opaque ->
+        (* Arc-8 S2 (D4): user-module opaque types are fail-closed — no
+           constructors to derive through, so tier 2 records Plan_none /
+           Inh_none (NO instance, no fallback; backend-visible demands
+           are generation-time errors). The former non-parameterized
+           `default := sorry` fallback instance is gone. *)
+        true
       | _ -> false
   else
     match t with
@@ -580,6 +599,350 @@ let lean_inhabited_prepass env (ds : def list) =
     | Type_def (_, defs) -> process_block defs
     | _ -> ()
   in List.iter walk ds
+
+(* ===== Arc-8 S2: failwith -> failwithI + selective [Inhabited] threading =====
+   Design note doc/notes/2026-08-20_arc8-inhabited-threading-design.md,
+   section S2 (rules 1-6). EVERY failure site (failwith-mapped constants,
+   plus the L_undefined defaults from pattern compilation) now emits an
+   Inhabited-backed value (failwithI / default) — never legacy failwith,
+   never sorry. Sites whose type mentions free type variables that are
+   NOT discharged by the S1 instance census induce [Inhabited tv]
+   instance-implicit binders on the ENCLOSING def's signature, computed
+   here as a monotone fixpoint over the call graph (a caller that passes
+   its own free tyvar into a threaded position inherits the binder).
+   Instance-implicit binders need no call-site edits (S0 probe fact 2);
+   the pass edits signatures only. Fail-closed guards (rules 3-4):
+   - a tyvar failure site inside a generated instance method (binders
+     impossible there) is a generation-time error naming the instance;
+   - a demand on a tyvar that does not occur in the enclosing def's
+     TYPE (a phantom tyvar — the undetermined function-field shape) is a
+     generation-time error naming the def and the tyvar. *)
+
+(* Expression destructor context for the pre-pass walk (no checking, no
+   renaming — the same defs are re-walked by emission). *)
+module ExpW = Exps_in_context(struct let env_opt = None let avoid = None end)
+
+(* Types.t analog of derive_field_bounds: which tyvars must carry an
+   [Inhabited tv] bound for the type to be synthesizable from the S1
+   instance census. Some [] = discharged unconditionally; Some tvs =
+   discharged given [Inhabited tv] for each; None = not derivable at all
+   (an Inh_none-census type in a demanded position). Type abbreviations
+   are head-normalized away first. *)
+let rec typ_inhabited_bounds (d : Types.type_defs) (t : Types.t) : string list option =
+  let union a b = a @ List.filter (fun x -> not (List.mem x a)) b in
+  let t = Types.head_norm d t in
+  match t.Types.t with
+    | Types.Tvar v -> Some [Ulib.Text.to_string (Tyvar.to_rope v)]
+    | Types.Tne _ -> Some []
+    | Types.Tuvar _ -> Some []
+    | Types.Tfn (_, cod) -> typ_inhabited_bounds d cod
+    | Types.Tbackend _ -> Some []
+    | Types.Ttup ts ->
+      List.fold_left (fun acc t' ->
+        match acc with
+          | None -> None
+          | Some a -> (match typ_inhabited_bounds d t' with
+              | None -> None
+              | Some b -> Some (union a b)))
+        (Some []) ts
+    | Types.Tapp (ts, p) ->
+      let entries = match inhabited_census_lookup p with
+        | Some (_, Inh_none) -> []
+        | Some (_, Inh_instances es) -> es
+        | None -> lean_builtin_inhabited_entries p
+      in
+      if List.exists (fun e -> e = []) entries then Some []
+      else
+        List.fold_left (fun acc e ->
+          match acc with
+            | Some _ -> acc
+            | None ->
+              List.fold_left (fun acc2 i ->
+                match acc2 with
+                  | None -> None
+                  | Some a ->
+                    (match List.nth_opt ts i with
+                      | None -> None
+                      | Some t' -> (match typ_inhabited_bounds d t' with
+                          | None -> None
+                          | Some b -> Some (union a b))))
+                (Some []) e)
+          None entries
+
+(* Threaded-def census: cref -> ([Inhabited]-bound type-parameter
+   positions (indices into const_tparams, for call-site propagation),
+   bound tyvar names in parameter-declaration order (for signature
+   rendering)). Persists across modules within one lem invocation
+   (modules are processed in dependency order — the lean_reader_lifted
+   precedent). *)
+let lean_failwith_threaded : (int list * string list) Types.Cdmap.t ref = ref Types.Cdmap.empty
+let lean_thread_lookup (c : Types.const_descr_ref) : (int list * string list) option =
+  Types.Cdmap.apply !lean_failwith_threaded c
+let lean_thread_debug = (try Sys.getenv "LEM_THREAD_DEBUG" <> "" with Not_found -> false)
+
+(* Constants whose LEAN target_rep is the bare identifier `failwith`
+   (Assert_extra.failwith, cerberus's Utils.error, ...) — shared by the
+   pre-pass and emission so the two can never disagree. *)
+let lean_is_failwith_rep_env env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  match Target.Targetmap.apply_target cd.target_rep (Target.Target_no_ident Target.Target_lean) with
+  | Some (CR_simple (_, _, _, e)) | Some (CR_inline (_, _, _, e)) ->
+    (match ExpW.exp_to_term e with
+     | Backend (_, i) -> Ident.to_string i = "failwith"
+     | _ -> false)
+  | _ -> false
+
+let lean_typ_to_string (t : Types.t) : string =
+  ignore (Format.flush_str_formatter ());
+  Types.pp_type Format.str_formatter t;
+  Format.flush_str_formatter ()
+
+(* Collect, from one expression tree: failure SITES (the demanded
+   Types.t of every failwith-rep application / bare reference and every
+   L_undefined literal) and every constant REFERENCE with its type
+   instantiation (for threading propagation). *)
+type thread_scan = {
+  mutable th_sites : (Types.t * Ast.l) list;
+  mutable th_refs : (Types.const_descr_ref * Types.t list * Ast.l) list;
+}
+
+let lean_thread_scan_exp env (acc : thread_scan) (e : exp) : unit =
+  let is_fw = lean_is_failwith_rep_env env in
+  let sl_iter f sl = List.iter f (Seplist.to_list sl) in
+  let rec go e =
+    match ExpW.exp_to_term e with
+    | App (e1, e2) ->
+      let (e0, args) = strip_app_exp e in
+      (match ExpW.exp_to_term e0 with
+       | Constant cid when is_fw cid.descr && args <> [] ->
+         (* record the FULL application's type once; skip the spine *)
+         acc.th_sites <- (Typed_ast.exp_to_typ e, exp_to_locn e) :: acc.th_sites;
+         List.iter go args
+       | _ -> go e1; go e2)
+    | Constant cid ->
+      if is_fw cid.descr then
+        (* bare / point-free reference: the demand is the (instantiated)
+           codomain, reached through Tfn by typ_inhabited_bounds *)
+        acc.th_sites <- (Typed_ast.exp_to_typ e, exp_to_locn e) :: acc.th_sites
+      else
+        acc.th_refs <- (cid.descr, cid.instantiation, exp_to_locn e) :: acc.th_refs
+    | Lit l ->
+      (match l.term with
+       | L_undefined _ -> acc.th_sites <- (l.typ, exp_to_locn e) :: acc.th_sites
+       | _ -> ())
+    | Var _ | Nvar_e _ | Backend _ -> ()
+    | Fun (_, _, _, e1) -> go e1
+    | Function (_, pes, _) -> sl_iter (fun (_, _, e1, _) -> go e1) pes
+    | Infix (e1, e2, e3) -> go e1; go e2; go e3
+    | Record (_, fes, _) -> sl_iter (fun (_, _, e1, _) -> go e1) fes
+    | Recup (_, e1, _, fes, _) -> go e1; sl_iter (fun (_, _, e2, _) -> go e2) fes
+    | Field (e1, _, _) -> go e1
+    | Vector (_, es, _) -> sl_iter go es
+    | VectorSub (e1, _, _, _, _, _) -> go e1
+    | VectorAcc (e1, _, _, _) -> go e1
+    | Case (_, _, e1, _, pes, _) -> go e1; sl_iter (fun (_, _, e2, _) -> go e2) pes
+    | Typed (_, e1, _, _, _) -> go e1
+    | Let (_, lb, _, e1) ->
+      (match lb with
+       | (Let_val (_, _, _, e2), _) -> go e2
+       | (Let_fun (_, _, _, _, e2), _) -> go e2);
+      go e1
+    | Tup (_, es, _) -> sl_iter go es
+    | List (_, es, _) -> sl_iter go es
+    | Paren (_, e1, _) -> go e1
+    | Begin (_, e1, _) -> go e1
+    | If (_, e1, _, e2, _, e3) -> go e1; go e2; go e3
+    | Set (_, es, _) -> sl_iter go es
+    | Setcomp (_, e1, _, e2, _, _) -> go e1; go e2
+    | Comp_binding (_, _, e1, _, _, qbs, _, e2, _) ->
+      go e1; List.iter go_qb qbs; go e2
+    | Quant (_, qbs, _, e1) -> List.iter go_qb qbs; go e1
+    | Do (_, _, dls, _, e1, _, _) ->
+      List.iter (fun (Do_line (_, _, e2, _)) -> go e2) dls; go e1
+  and go_qb = function
+    | Qb_var _ -> ()
+    | Qb_restr (_, _, _, _, e1, _) -> go e1
+  in go e
+
+(* One threading unit: the crefs a val_def group defines plus its scan.
+   Fun_def clauses are grouped per constant (so and-chained siblings do
+   not inherit each other's demands); a Let_def's bound names share the
+   single body. *)
+type thread_unit = {
+  tu_crefs : Types.const_descr_ref list;
+  tu_scan : thread_scan;
+  tu_loc : Ast.l;
+}
+
+let lean_thread_cd_name (cd : const_descr) : string =
+  Name.to_string (Path.get_name cd.const_binding)
+
+(* The demand a scan makes RIGHT NOW: static failure-site demands plus,
+   for every reference to an already-threaded def, the bounds of the
+   instantiation types at the threaded positions. Errors are fail-closed
+   generation-time failures naming the object and the escape hatches. *)
+let lean_thread_demand env (where_ : string) (sc : thread_scan) : string list =
+  let d = env.t_env in
+  let union a b = a @ List.filter (fun x -> not (List.mem x a)) b in
+  let dem = ref [] in
+  List.iter (fun (t, l) ->
+      match typ_inhabited_bounds d t with
+      | Some names -> dem := union !dem names
+      | None ->
+        raise (Reporting_basic.err_general true l (Printf.sprintf
+          "Lean backend: failure site (failwith/undefined default) in %s at type '%s' whose Inhabited instance cannot be derived; escape hatches: 'declare {lean} skip_instances' on the type plus a hand-written Lean instance, or a hand-written Lean target_rep"
+          where_ (lean_typ_to_string t))))
+    sc.th_sites;
+  List.iter (fun (cref, inst, l) ->
+      match lean_thread_lookup cref with
+      | None -> ()
+      | Some (poss, _) ->
+        let callee = lean_thread_cd_name (c_env_lookup Ast.Unknown env.c_env cref) in
+        List.iter (fun p ->
+            match List.nth_opt inst p with
+            | None -> ()
+            | Some ti ->
+              (match typ_inhabited_bounds d ti with
+               | Some names -> dem := union !dem names
+               | None ->
+                 raise (Reporting_basic.err_general true l (Printf.sprintf
+                   "Lean backend: call of '%s' (which carries an [Inhabited] binder) in %s at instantiation '%s' whose Inhabited instance cannot be derived; escape hatches: 'declare {lean} skip_instances' on the type plus a hand-written Lean instance, or a hand-written Lean target_rep"
+                   callee where_ (lean_typ_to_string ti)))))
+          poss)
+    sc.th_refs;
+  !dem
+
+(* Pre-pass (runs after lean_inhabited_prepass, which populates the
+   instance census this analysis reads): compute the threaded-def map to
+   a fixpoint over this module's Val_defs, then guard-sweep Instance
+   methods (rule 3). *)
+let lean_failwith_thread_prepass env (ds : def list) =
+  let target = Target.Target_no_ident Target.Target_lean in
+  let in_lean targets = Typed_ast.in_targets_opt target targets in
+  (* -- unit collection -- *)
+  let scan_of_exps es =
+    let sc = { th_sites = []; th_refs = [] } in
+    List.iter (lean_thread_scan_exp env sc) es; sc in
+  let units_of_val_def l (vd : val_def) : thread_unit list =
+    match vd with
+    | Let_def (_, targets, (_, name_map, _, _, e)) ->
+      if in_lean targets then
+        [{ tu_crefs = List.map snd name_map; tu_scan = scan_of_exps [e]; tu_loc = l }]
+      else []
+    | Fun_def (_, _, targets, funcls) ->
+      if in_lean targets then begin
+        (* group clauses by constant, preserving order (the emission's
+           grouping rule) *)
+        let order = ref [] in
+        let tbl = Hashtbl.create 8 in
+        List.iter (fun ((_, c, _, _, _, e) : funcl_aux) ->
+            (if not (Hashtbl.mem tbl c) then order := c :: !order);
+            let existing = match Hashtbl.find_opt tbl c with Some v -> v | None -> [] in
+            Hashtbl.replace tbl c (existing @ [e]))
+          (Seplist.to_list funcls);
+        List.map (fun c ->
+            { tu_crefs = [c]; tu_scan = scan_of_exps (Hashtbl.find tbl c); tu_loc = l })
+          (List.rev !order)
+      end else []
+    | Let_inline _ -> []  (* expanded at call sites by the inline macro *)
+  in
+  let rec collect acc (((d_aux, _), l, _) : def) =
+    match d_aux with
+    | Module (_, _, _, _, _, inner_ds, _) -> List.fold_left collect acc inner_ds
+    | Val_def vd -> acc @ units_of_val_def l vd
+    | _ -> acc
+  in
+  let units = List.fold_left collect [] ds in
+  (* -- fixpoint -- *)
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    List.iter (fun u ->
+        let where_ =
+          match u.tu_crefs with
+          | c :: _ -> Printf.sprintf "'%s'" (lean_thread_cd_name (c_env_lookup Ast.Unknown env.c_env c))
+          | [] -> "a definition" in
+        let dem = lean_thread_demand env where_ u.tu_scan in
+        if dem <> [] then
+          List.iter (fun c ->
+              let cd = c_env_lookup Ast.Unknown env.c_env c in
+              let name = lean_thread_cd_name cd in
+              (* phantom guard (rule 4): every demanded tyvar must occur
+                 in the def's TYPE, or the binder would be unbound *)
+              let sig_names =
+                List.map (fun tv -> Name.to_string (Types.tnvar_to_name tv))
+                  (Types.TNset.elements (Types.free_vars cd.const_type)) in
+              List.iter (fun n ->
+                  if not (List.mem n sig_names) then
+                    raise (Reporting_basic.err_general true u.tu_loc (Printf.sprintf
+                      "Lean backend: failure at type variable '%s' which does not occur in the signature of '%s' — cannot thread an [Inhabited %s] binder; determine the type variable at the failure site or give '%s' a hand-written Lean target_rep"
+                      n name n name)))
+                dem;
+              let tp_names = List.map (fun tv -> Name.to_string (Types.tnvar_to_name tv)) cd.const_tparams in
+              let poss = List.concat (List.mapi (fun i n -> if List.mem n dem then [i] else []) tp_names) in
+              let names_in_order = List.filter (fun n -> List.mem n dem) tp_names in
+              (match lean_thread_lookup c with
+               | Some (old_poss, _) when old_poss = poss -> ()
+               | _ ->
+                 lean_failwith_threaded := Types.Cdmap.insert !lean_failwith_threaded (c, (poss, names_in_order));
+                 if lean_thread_debug then
+                   Printf.eprintf "THREAD %s [%s]\n%!" (Path.to_string cd.const_binding)
+                     (String.concat "," names_in_order);
+                 changed := true))
+            u.tu_crefs)
+      units
+  done;
+  (* -- instance guard sweep (rule 3): binders cannot be added to
+        instance methods, so ANY non-empty demand inside one is a
+        generation-time error naming the instance -- *)
+  let rec guard (((d_aux, _), l, _) : def) =
+    match d_aux with
+    | Module (_, _, _, _, _, inner_ds, _) -> List.iter guard inner_ds
+    | Instance (_, _, (_, _, _, class_path, _, _), vals, _) ->
+      let inst_name = Path.to_string class_path in
+      List.iter (fun vd ->
+          let vd_units = units_of_val_def l vd in
+          List.iter (fun u ->
+              let where_ = Printf.sprintf "an instance of class '%s'" inst_name in
+              let dem = lean_thread_demand env where_ u.tu_scan in
+              if dem <> [] then
+                raise (Reporting_basic.err_general true u.tu_loc (Printf.sprintf
+                  "Lean backend: type-variable failure site (failwith/undefined default, or a call needing [Inhabited '%s']) inside a generated method of instance of class '%s' — instance methods cannot carry [Inhabited] binders; escape hatches: give the method a Lean target_rep ('declare lean target_rep function ...') or restructure so the failure is at a concrete type"
+                  (String.concat "', '" dem) inst_name)))
+            vd_units)
+        vals
+    | _ -> ()
+  in List.iter guard ds
+
+(* Arc-8 S2: run the analysis pre-passes over EVERY typechecked module
+   of the invocation — including the non-output LIBRARY modules — in
+   dependency order, BEFORE any emission (called from
+   process_file.output). Rationale: analysis knowledge must span
+   invocation boundaries. `make lean-libs` regenerates the library with
+   [Inhabited] binders threaded onto its failure-carrying defs
+   (fromJust, head, fail, find0, ...); a later cerberus/test invocation
+   only EMITS its own modules, but its defs CALL those library defs —
+   so caller-side demand computation must see the library's instance
+   census and threading map. This pass recomputes that knowledge from
+   the very library sources the invocation already typechecked and
+   transformed: the same analysis that emitted the library, never a
+   hardcoded list. The per-module pre-passes in lean_defs then re-run
+   over each output module; all the passes are monotone (their
+   sets/maps only grow, and re-insertions are equal), so the re-run is
+   harmless. *)
+let lean_analysis_prepass_all env (mods : checked_module list) =
+  let saved = !lean_current_module_name in
+  List.iter (fun m ->
+      let (mod_path, mod_name) = Path.to_name_list m.module_path in
+      let module_name = Name.to_string
+          (Backend_common.get_module_name env (Target.Target_no_ident Target.Target_lean) mod_path mod_name) in
+      lean_current_module_name := module_name;
+      let (ds, _) = m.typed_ast in
+      lean_reader_prepass env ds;
+      lean_inhabited_prepass env ds;
+      lean_failwith_thread_prepass env ds)
+    mods;
+  lean_current_module_name := saved
 
 let wrap_lean_comment x = Ulib.Text.(^^^) (Ulib.Text.(^^^) (r"/- ") x) (r" -/")
 
@@ -948,20 +1311,25 @@ type pat_style = FunParam | MatchArm
       Target.Targetmap.apply_target cd.ground_rep (Target.Target_no_ident Target.Target_lean)
 
     (* Constants whose LEAN target_rep is the bare identifier `failwith`
-       (Assert_extra.failwith, cerberus's Utils.error, ...). At call sites
-       with a syntactically GROUND result type these are re-emitted as
-       LemLib.failwithI (opaque, [Inhabited]-bounded, axiom-free) — see
-       the consumer's effects design note §15/§16. Sites mentioning ANY
-       type variable keep legacy failwith: zero constraint propagation,
-       by construction. *)
-    let is_lean_failwith_rep cref =
-      let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
-      match Target.Targetmap.apply_target cd.target_rep (Target.Target_no_ident Target.Target_lean) with
-      | Some (CR_simple (_, _, _, e)) | Some (CR_inline (_, _, _, e)) ->
-        (match C.exp_to_term e with
-         | Backend (_, i) -> Ident.to_string i = "failwith"
-         | _ -> false)
-      | _ -> false
+       (Assert_extra.failwith, cerberus's Utils.error, ...). Arc-8 S2:
+       EVERY such call site is re-emitted as LemLib.failwithI (opaque,
+       [Inhabited]-bounded, axiom-free); tyvar-typed sites are
+       discharged by the [Inhabited tv] binders the threading pre-pass
+       put on the enclosing def (lean_failwith_thread_prepass). Legacy
+       LemLib.failwith is never emitted. Shared with the pre-pass so
+       the two can never disagree. *)
+    let is_lean_failwith_rep cref = lean_is_failwith_rep_env A.env cref
+    (* Rule-3 emission backstop (the pre-pass guard fires first with a
+       better-named error): a failure site inside an instance method at
+       a type not unconditionally discharged cannot be repaired by
+       binder threading. *)
+    let failwith_instance_guard inside_instance site_t =
+      if inside_instance then
+        match typ_inhabited_bounds A.env.t_env site_t with
+        | Some [] -> ()
+        | _ ->
+          raise (Reporting_basic.err_general true Ast.Unknown
+            "Lean backend: type-variable failure site inside a generated instance method — instance methods cannot carry [Inhabited] binders; escape hatches: give the method a Lean target_rep ('declare lean target_rep function ...') or restructure so the failure is at a concrete type")
 
     let rec def_extra (inside_instance: bool) (callback: def list -> Output.t) (inside_module: bool) (m: def_aux) =
       match m with
@@ -1434,9 +1802,18 @@ type pat_style = FunParam | MatchArm
                   let name_str = Name.to_string renamed in
                   let var_type = pat_typ (C.t_to_src_t cd.const_type) in
                   let defn = if inside_instance then emp else from_string "def " in
+                  (* Arc-8 S2: [Inhabited tv] binders for a threaded
+                     Let_def-bound constant. *)
+                  let thread_out =
+                    if inside_instance then emp
+                    else match lean_thread_lookup cref with
+                      | Some (_, ns) ->
+                        Output.flat (List.map (fun n ->
+                            Output.flat [from_string " [Inhabited "; from_string n; from_string "]"]) ns)
+                      | None -> emp in
                   Output.flat [
                     from_string "\n"; effectful_attr; defn; from_string name_str;
-                    reader_binder_output (); constraints;
+                    reader_binder_output (); constraints; thread_out;
                     from_string "  : "; var_type;
                     from_string " :=\n  let "; pat_out; type_out;
                     ws sk; from_string " :="; exp_out;
@@ -1608,7 +1985,7 @@ type pat_style = FunParam | MatchArm
                     let equations = Output.flat (List.map render_equation (first_clause :: rest_clauses)) in
                     Output.flat [
                       ws name_skips; from_string " "; name; tv_set_out; constraints_sep; constraints;
-                      reader_binder_output ();
+                      inhabited_binder_output (); reader_binder_output ();
                       from_string " : "; full_type; equations
                     ]
                 in
@@ -1710,6 +2087,19 @@ type pat_style = FunParam | MatchArm
                        point-free wrapper 'worker lemDefaultFuel' has the
                        reader-prefixed type and lifted callers inject into
                        the wrapper as for any lifted def. *)
+                    (* Arc-8 S2: [Inhabited tv] binders for this group,
+                       from the threading pre-pass (instance methods are
+                       never threaded — the pre-pass guard errors first). *)
+                    let thread_names =
+                      if inside_instance then []
+                      else match group_cref g with
+                        | Some c -> (match lean_thread_lookup c with
+                            | Some (_, ns) -> ns
+                            | None -> [])
+                        | None -> [] in
+                    let saved_inh = !lean_inhabited_binder in
+                    lean_inhabited_binder := thread_names;
+                    Fun.protect ~finally:(fun () -> lean_inhabited_binder := saved_inh) @@ fun () ->
                     match fuel_info with
                     | None ->
                       let saved = !lean_reader_binder in
@@ -1764,6 +2154,7 @@ type pat_style = FunParam | MatchArm
                           let wrapper = Output.flat [
                             from_string "\n\n"; attr_for g;
                             from_string "def "; from_string base_name; tv_out; cons_out;
+                            inhabited_binder_output ();
                             from_string " : "; reader_arrows;
                             pat_typ (C.t_to_src_t cd.const_type);
                             from_string " := "; from_string worker;
@@ -2055,7 +2446,7 @@ type pat_style = FunParam | MatchArm
          | Some sentinel ->
            Output.flat [
              ws name_skips; from_string " "; name; from_string "_lemFuel";
-             tv_set_sep; tv_set; constraints_sep; constraints;
+             tv_set_sep; tv_set; constraints_sep; constraints; inhabited_binder_output ();
              from_string " (lemFuel : Nat)"; reader_binder_output (); pat_skips;
              fun_pattern_list inside_instance pats; ws skips; typ_opt;
              from_string " := match lemFuel with\n  | 0 => (";
@@ -2071,7 +2462,7 @@ type pat_style = FunParam | MatchArm
          | None ->
            Output.flat [
              ws name_skips; from_string " "; name; tv_set_sep; tv_set; constraints_sep; constraints;
-             reader_binder_output (); pat_skips;
+             inhabited_binder_output (); reader_binder_output (); pat_skips;
              fun_pattern_list inside_instance pats; ws skips; typ_opt; from_string " := "; body
            ])
     and reader_binder_output () =
@@ -2081,6 +2472,13 @@ type pat_style = FunParam | MatchArm
             from_string " ("; from_string pname; from_string " : ";
             pat_typ (C.t_to_src_t (reader_value_typ cref)); from_string ")"])
         (get_reader_params ()))
+    (* Arc-8 S2: [Inhabited tv] instance-implicit binders for a threaded
+       def (zero call-site rewrites — Lean synthesizes the instance
+       arguments at every application). *)
+    and inhabited_binder_output () =
+      Output.flat (List.map (fun n ->
+          Output.flat [from_string " [Inhabited "; from_string n; from_string "]"])
+        !lean_inhabited_binder)
 
     and funcl inside_instance i_ref_opt constraints tv_set ({term = n}, c, pats, typ_opt, skips, e) =
       let n =
@@ -2197,15 +2595,20 @@ type pat_style = FunParam | MatchArm
                         [Output.flat ([from_string "(("; from_string rep; from_string ")"]
                           @ List.map (fun a -> Output.flat [from_string " "; a]) args_out
                           @ [from_string " : "; pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e)); from_string ")"])]
-                      else if is_lean_failwith_rep cd.descr
-                              && List.length args = 1
-                              && Types.TNset.is_empty (Types.free_vars (Typed_ast.exp_to_typ e)) then
-                        (* Ground-typed failure site: axiom-free failwithI,
-                           with an ascription so the instance resolves at
-                           exactly this type. *)
-                        [Output.flat [from_string "(failwithI "; trans (List.hd args);
-                                      from_string " : "; pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e));
-                                      from_string ")"]]
+                      else if is_lean_failwith_rep cd.descr && args <> [] then begin
+                        (* Failure site (arc-8 S2: EVERY site, ground or
+                           tyvar-typed): axiom-free failwithI, with an
+                           ascription so the instance resolves at exactly
+                           this type. Tyvar sites resolve through the S1
+                           derived instances and/or the [Inhabited tv]
+                           binders threaded onto the enclosing def. *)
+                        let site_t = Typed_ast.exp_to_typ e in
+                        failwith_instance_guard inside_instance site_t;
+                        [Output.flat ([from_string "(failwithI"]
+                          @ List.map (fun a -> Output.flat [from_string " "; trans a]) args
+                          @ [from_string " : "; pat_typ (C.t_to_src_t site_t);
+                             from_string ")"])]
+                      end
                       else if Types.Cdset.mem cd.descr !lean_reader_lifted then
                         (* Call of a lifted def: `trans e0` reaches the bare-
                            Constant case, which injects the reader parameters
@@ -2291,6 +2694,16 @@ type pat_style = FunParam | MatchArm
                    partially apply the reader parameters. *)
                 Output.flat [from_string "("; default_const_output ();
                              reader_args_output (); from_string ")"]
+              else if is_lean_failwith_rep const.descr then begin
+                (* Bare / point-free failure reference (arc-8 S2): the
+                   ascription (String -> tau) determines failwithI's
+                   type argument; Inhabited tau resolves as at applied
+                   sites. Legacy failwith is never emitted. *)
+                let site_t = Typed_ast.exp_to_typ e in
+                failwith_instance_guard inside_instance site_t;
+                Output.flat [from_string "(failwithI : ";
+                             pat_typ (C.t_to_src_t site_t); from_string ")"]
+              end
               else
               (* Class method constants used bare (no explicit arguments) need explicit
                  @ type application in Lean 4. Without it, Lean can't infer the class
@@ -2712,10 +3125,16 @@ type pat_style = FunParam | MatchArm
               ws s; from_string (String.concat "" [prefix; bits])
             ]
         | L_undefined (skips, explanation) ->
+          (* Arc-8 S2 (D4): undefined defaults (from pattern compilation)
+             render through the same Inhabited machinery as everything
+             else — `default` at tyvars is discharged by the threaded
+             [Inhabited tv] binders (the pre-pass records L_undefined
+             sites as failure sites); applied heads are demand-checked
+             against the census. The legacy tyvar `sorry` path is gone. *)
           let typ = l.typ in
           let src_t = C.t_to_src_t typ in
             Output.flat [
-              ws skips; default_value src_t;
+              ws skips; default_value_inhabited src_t;
               from_string " /- "; from_string explanation; from_string " -/"
             ]
     and fun_pattern_list inside_instance ps =
@@ -3481,7 +3900,12 @@ type pat_style = FunParam | MatchArm
             ]
     and generate_default_value_texp (t: texp) =
       match t with
-        | Te_opaque -> from_string "sorry /- DAEMON -/"
+        | Te_opaque ->
+          (* Arc-8 S2 (D4): opaque types are tier-2/fail-closed — they
+             never reach the tier-1 default renderer. The former
+             `default := sorry` fallback instance is gone. *)
+          raise (Reporting_basic.err_general true Ast.Unknown
+            "Lean backend: Te_opaque in generate_default_value_texp is unreachable (opaque types are fail-closed, arc-8 S2)")
         | Te_abbrev (_, src_t) -> default_value_inhabited src_t
         | Te_record (_, _, seplist, _) ->
             let fields = Seplist.to_list seplist in
@@ -3850,29 +4274,10 @@ type pat_style = FunParam | MatchArm
       let emit_deriving = List.length non_abbrev <= 1 in
       let beq_instances = List.map (generate_beq_ord_instances ~is_type1 ~emit_deriving) ts_list in
         Output.flat [inhabited_output; from_string "\n"; concat emp beq_instances]
-    (* Default value for L_undefined (DAEMON) context — uses sorry for type variables
-       since Inhabited constraints may not be available *)
-    and default_value (s : src_t) : Output.t =
-      match s.term with
-        | Typ_wild _ -> from_string "default"
-        | Typ_var _ -> from_string "sorry /- default for type variable -/"
-        | Typ_len _ -> from_string "0"
-        | Typ_tup seplist ->
-            let src_ts = Seplist.to_list seplist in
-            let mapped = List.map default_value src_ts in
-              Output.flat [
-                from_string "("; concat_str ", " mapped; from_string ")"
-              ]
-        | Typ_app _ -> from_string "default"
-        | Typ_paren (_, src_t, _)
-        | Typ_with_sort (src_t, _) -> default_value src_t
-        | Typ_fn (dom, _, rng) ->
-            let v = generate_fresh_name () in
-              Output.flat [
-                from_string "(fun ("; from_string v; from_string " : "; pat_typ dom;
-                from_string ") => "; default_value rng; from_string ")"
-              ]
-        | Typ_backend _ -> from_string "default"
+    (* Arc-8 S2 (D4): the former `default_value` (the L_undefined
+       renderer whose Typ_var case emitted `sorry`) is DELETED —
+       L_undefined renders via default_value_inhabited, which never
+       emits an opaque inhabitant. *)
       ;;
 end
 ;;
@@ -3989,6 +4394,11 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
       (* Arc-8 S1: compute the Inhabited census + tier-2 plans in
          declaration order before emission (defs is fold_right). *)
       lean_inhabited_prepass A.env ds;
+      (* Arc-8 S2: compute the [Inhabited] threading census (failure
+         sites at tyvar-typed positions -> signature binders, monotone
+         over the call graph) — needs the S1 census, so runs after it.
+         Also guard-sweeps instance methods (rule 3). *)
+      lean_failwith_thread_prepass A.env ds;
       let lean_defs = defs false false ds in
       (* Drain any deferred abbrevs (e.g., abbrev mword after class Size) *)
       let deferred = Output.flat (List.rev !lean_pending_abbrevs) in

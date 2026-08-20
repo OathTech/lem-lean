@@ -187,14 +187,21 @@ declare lean target_rep function make_digest = `sorry`
 
 let my_digest : digest = make_digest 42
 
-(* sorry in record field (DAEMON context) *)
-(* L_undefined on an opaque type should produce default or sorry in a
-   record literal with type ascription.  Verifies Lean can infer field type. *)
+(* opaque type in record field (arc-8 S2, D4: UPDATED EXPECTATION) *)
+(* Opaque user types are fail-closed: NO Inhabited instance, no sorry
+   fallback (the pre-S2 `default := sorry /- DAEMON -/` path is gone).
+   A generated Inhabited instance for my_state would demand
+   `default : layout_state` — a backend-visible demand on an
+   underivable type, which is now a GENERATION-TIME error (the
+   neg_inhabited_underivable probe asserts the error text). The escape
+   hatch is exercised here: skip instance generation for the demanding
+   record; the record TYPE itself still compiles and is usable. *)
 type my_state = <|
   st_count : nat;
   st_layout : layout_state;
   st_name : string
 |>
+declare {lean} skip_instances type my_state
 
 (* sorry target_rep returning Option *)
 (* sorry with Option return type, then used in match discriminant *)
@@ -372,19 +379,21 @@ declare {lean} fuel val fuel_countdown = `999`
 (* Callers use the wrapper — unchanged. *)
 let uses_countdown (k : nat) : nat = fuel_countdown k + 1
 
-(* === Section 10: ground-typed failwithI emission === *)
+(* === Section 10: failwithI emission (arc-8 S2: EVERY site) === *)
 
-(* Call sites of failwith-mapped constants with a syntactically GROUND
-   result type emit LemLib.failwithI (opaque, [Inhabited]-bounded,
-   axiom-free); any type variable in the result type keeps legacy
-   failwith (DAEMON) — zero constraint propagation. *)
+(* Call sites of failwith-mapped constants emit LemLib.failwithI
+   (opaque, [Inhabited]-bounded, axiom-free) at EVERY site — arc-8 S2.
+   Ground sites are unchanged from arc-2; tyvar sites now thread an
+   [Inhabited tv] binder onto the enclosing def instead of falling
+   back to legacy failwith (threading shapes are covered in depth by
+   test_failwith_threading.lem). Legacy failwith is never emitted. *)
 
 (* ground result type -> failwithI *)
 val ground_fail : nat -> nat
 let ground_fail n = if n = 0 then failwith "ground" else n
 
-(* type-variable result -> legacy failwith, signature UNCHANGED (the
-   msum/pick class from the consumer) *)
+(* type-variable result -> failwithI + [Inhabited a] binder (arc-8 S2;
+   pre-S2 this kept legacy failwith) *)
 val poly_fail : forall 'a. list 'a -> 'a
 let poly_fail l = match l with
   | [] -> failwith "poly"

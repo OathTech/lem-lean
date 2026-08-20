@@ -13,7 +13,7 @@ namespace Lem_Assert_extra
 
 /- removed value specification -/
 
-def  fail  {a : Type}   : a :=  failwith  "fail"
+def  fail  {a : Type} [Inhabited a]   : a := (failwithI  "fail" : a)
 /- removed value specification -/
 
 def  ensure  (test : Bool) (msg : String)  : Unit := 

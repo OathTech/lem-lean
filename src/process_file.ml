@@ -405,6 +405,15 @@ let output1 env (out_dir : string option) (targ : Target.target) avoid m =
                   raise (Reporting_basic.Fatal_error (Reporting_basic.Err_trans_header (l, msg))))
 
 let output env consts (targ : Target.target)  (out_dir : string option) mods =
+  (* Arc-8 S2: the Lean backend's analysis pre-passes (Inhabited
+     instance census + [Inhabited] threading) must see EVERY module of
+     the invocation — including non-output library modules — before any
+     emission, so caller-side demands against library defs are computed
+     with the same knowledge the library was emitted with. *)
+  (match targ with
+    | Target.Target_no_ident Target.Target_lean ->
+      Lean_backend.lean_analysis_prepass_all env mods
+    | _ -> ());
   List.iter
     (fun m ->
        if m.generate_output then

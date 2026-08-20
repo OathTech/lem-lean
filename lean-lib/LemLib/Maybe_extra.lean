@@ -15,7 +15,7 @@ open Lem_Assert_extra
 
 /- removed value specification -/
 
-def  fromJust  {a : Type}  (op : Option a)  : a :=  match  op with  |  some  v =>  v |  none =>  failwith  "fromJust of Nothing" 
+def  fromJust  {a : Type} [Inhabited a]  (op : Option a)  : a :=  match  op with  |  some  v =>  v |  none => (failwithI  "fromJust of Nothing" : a) 
 end Lem_Maybe_extra
 
 

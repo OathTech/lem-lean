@@ -23,34 +23,34 @@ open Lem_Assert_extra
 
 /- removed value specification -/
 
-def  head  {a : Type}  (l : List a)  : a :=  match  l with  |  x :: xs =>  x |  [] =>  failwith  "List_extra.head of empty list" 
+def  head  {a : Type} [Inhabited a]  (l : List a)  : a :=  match  l with  |  x :: xs =>  x |  [] => (failwithI  "List_extra.head of empty list" : a) 
 /- removed value specification -/
 
-def  tail  {a : Type}  (l : List a)  : List a :=  match  l with  |  x :: xs =>  xs |  [] =>  failwith  "List_extra.tail of empty list" 
-/- removed value specification -/
-
-/- 
- partial def  last  {a : Type}  (l : List a)  : a :=  match  l with  |  [x] =>  x |  x1 :: x2 :: xs =>  List.getLast!  (x2  ::  xs) |  [] =>  failwith  "List_extra.last of empty list"  -/
-/- removed value specification -/
-
- def  init  {a : Type}  (l : List a)  : List a :=  match  l with  |  [x] =>  [] |  x1 :: x2 :: xs =>  x1 :: (init  (x2 :: xs)) |  [] =>  failwith  "List_extra.init of empty list" 
-/- removed value specification -/
-
-def  foldl1  {a : Type}  (f : a → a → a) (x_xs : List a)  : a :=  match  x_xs with  | ( x  ::  xs) =>  List.foldl  f  x  xs |  [] =>  failwith  "List_extra.foldl1 of empty list" 
-/- removed value specification -/
-
-def  foldr1  {a : Type}  (f : a → a → a) (x_xs : List a)  : a :=  match  x_xs with  | ( x  ::  xs) =>  List.foldr  f  x  xs |  [] =>  failwith  "List_extra.foldr1 of empty list" 
+def  tail  {a : Type}  (l : List a)  : List a :=  match  l with  |  x :: xs =>  xs |  [] => (failwithI  "List_extra.tail of empty list" : List a) 
 /- removed value specification -/
 
 /- 
-def  nth  {a : Type}  (l : List a) (n : Nat)  : a :=  match  listGetOpt  l  n with |  some  e =>  e |  none =>  failwith  "List_extra.nth"  -/
+ partial def  last  {a : Type}  (l : List a)  : a :=  match  l with  |  [x] =>  x |  x1 :: x2 :: xs =>  List.getLast!  (x2  ::  xs) |  [] => (failwithI  "List_extra.last of empty list" : a)  -/
+/- removed value specification -/
+
+ def  init  {a : Type}  (l : List a)  : List a :=  match  l with  |  [x] =>  [] |  x1 :: x2 :: xs =>  x1 :: (init  (x2 :: xs)) |  [] => (failwithI  "List_extra.init of empty list" : List a) 
+/- removed value specification -/
+
+def  foldl1  {a : Type} [Inhabited a]  (f : a → a → a) (x_xs : List a)  : a :=  match  x_xs with  | ( x  ::  xs) =>  List.foldl  f  x  xs |  [] => (failwithI  "List_extra.foldl1 of empty list" : a) 
+/- removed value specification -/
+
+def  foldr1  {a : Type} [Inhabited a]  (f : a → a → a) (x_xs : List a)  : a :=  match  x_xs with  | ( x  ::  xs) =>  List.foldr  f  x  xs |  [] => (failwithI  "List_extra.foldr1 of empty list" : a) 
+/- removed value specification -/
+
+/- 
+def  nth  {a : Type}  (l : List a) (n : Nat)  : a :=  match  listGetOpt  l  n with |  some  e =>  e |  none => (failwithI  "List_extra.nth" : a)  -/
 /- removed value specification -/
  
-def  findNonPure  {a : Type}  (P : a → Bool) (l : List a)  : a :=  match  (find  P  l) with  |  some  e =>  e |  none =>  failwith  "List_extra.findNonPure"
+def  findNonPure  {a : Type} [Inhabited a]  (P : a → Bool) (l : List a)  : a :=  match  (find  P  l) with  |  some  e =>  e |  none => (failwithI  "List_extra.findNonPure" : a)
 
 /- removed value specification -/
  
- def  zipSameLength  {a : Type} {b : Type}  (l1 : List a) (l2 : List b)  : List ((a ×b)) :=  match l1,  l2 with  | x  ::  xs,  y  ::  ys =>  (x, y)  ::  zipSameLength  xs  ys | [],  [] =>  [] | _, _ =>  failwith  "List_extra.zipSameLength of different length lists"
+ def  zipSameLength  {a : Type} {b : Type}  (l1 : List a) (l2 : List b)  : List ((a ×b)) :=  match l1,  l2 with  | x  ::  xs,  y  ::  ys =>  (x, y)  ::  zipSameLength  xs  ys | [],  [] =>  [] | _, _ => (failwithI  "List_extra.zipSameLength of different length lists" : List ((a ×b)))
 
 
 /- removed value specification -/

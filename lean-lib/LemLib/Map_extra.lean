@@ -27,7 +27,7 @@ open Lem_Map
 
 /- removed value specification -/
 
-def  find0  {k : Type} {v : Type} [MapKeyType k]  (k1 : k) (m : Fmap k v)  : v :=  match  ((fmapLookupBy  (@mapKeyCompare (k) _)  k1  m)) with |  some  x =>  x |  none =>  failwith  "Map_extra.find" 
+def  find0  {k : Type} {v : Type} [MapKeyType k] [Inhabited v]  (k1 : k) (m : Fmap k v)  : v :=  match  ((fmapLookupBy  (@mapKeyCompare (k) _)  k1  m)) with |  some  x =>  x |  none => (failwithI  "Map_extra.find" : v) 
 /- removed value specification -/
 
 def  fromSet  {k : Type} {v : Type} [MapKeyType k]  (f : k → v) (s : List k)  : Fmap k v :=  setFold  (fun (k1 : k) (m : Fmap k v) =>  (fmapAddBy  (@mapKeyCompare (k) _)  k1  (f  k1)  m))  s  fmapEmpty
