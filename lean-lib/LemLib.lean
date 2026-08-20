@@ -92,6 +92,31 @@ def isGreaterEqual (o : LemOrdering) : Bool := o != .LT
 instance [Inhabited α] : Inhabited (α ⊕ β) := ⟨.inl default⟩
 instance (priority := low) [Inhabited β] : Inhabited (α ⊕ β) := ⟨.inr default⟩
 
+/- BEq/Ord for Sum (arc-10 S2 R1; neither is in Lean core). Unblocks
+   `deriving BEq, Ord` on generated types with either-typed constructor
+   fields (register R1, arc-8 decision log).
+   OCaml-polymorphic-comparison parity: lem `either 'a 'b = Left of 'a
+   | Right of 'b` (library/either.lem:16) renders on the OCaml backend
+   as `Either.either` (either.lem:20), i.e. OCaml's
+   `type ('a,'b) t = Left of 'a | Right of 'b`: both constructors are blocks
+   with tags in declaration order (Left = 0, Right = 1). OCaml (=) is
+   structural per constructor; OCaml compare orders by tag first, then
+   fields left-to-right (runtime/compare.c: tag comparison precedes
+   field walk). Mirror: inl/Left < inr/Right, payload comparison within
+   the same constructor, structural equality across. -/
+instance [BEq α] [BEq β] : BEq (α ⊕ β) where
+  beq
+    | .inl a, .inl b => a == b
+    | .inr a, .inr b => a == b
+    | _, _ => false
+
+instance [Ord α] [Ord β] : Ord (α ⊕ β) where
+  compare
+    | .inl a, .inl b => compare a b
+    | .inl _, .inr _ => .lt
+    | .inr _, .inl _ => .gt
+    | .inr a, .inr b => compare a b
+
 /- Ord for Unit (not in Lean stdlib, needed by generated code) -/
 instance : Ord Unit where compare _ _ := .eq
 

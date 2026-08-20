@@ -500,4 +500,25 @@ section LegacyFreezeGuard
 
 end LegacyFreezeGuard
 
+/- ========================================================================
+   Sum BEq/Ord parity pins (arc-10 S2 R1). Convention under test
+   (LemLib.lean Sum instances): structural equality; inl < inr; payload
+   order within a constructor — mirroring OCaml compare on
+   Either.t/two-block variants (tags in declaration order, Left = 0).
+   TESTS (untrusted-evaluator checks), not kernel proofs.
+   ======================================================================== -/
+section SumComparisonPins
+
+#guard ((.inl 3 : Nat ⊕ Bool) == .inl 3) == true
+#guard ((.inl 3 : Nat ⊕ Bool) == .inl 4) == false
+#guard ((.inl 3 : Nat ⊕ Nat) == .inr 3) == false   -- cross-constructor: never equal
+#guard ((.inr true : Nat ⊕ Bool) == .inr true) == true
+#guard compare (.inl 9 : Nat ⊕ Nat) (.inr 0) == .lt   -- inl < inr regardless of payload
+#guard compare (.inr 0 : Nat ⊕ Nat) (.inl 9) == .gt
+#guard compare (.inl 3 : Nat ⊕ Bool) (.inl 4) == .lt
+#guard compare (.inl 4 : Nat ⊕ Bool) (.inl 4) == .eq
+#guard compare (.inr false : Nat ⊕ Bool) (.inr true) == .lt
+
+end SumComparisonPins
+
 end LemLibTest
