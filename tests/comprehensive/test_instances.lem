@@ -152,17 +152,20 @@ and mini_sq = MiniSQ of mini_tn | MiniSQBasic of nat
 and mini_ad = MiniAD of list nat * maybe mini_dad
 and mini_dad = MiniDADParen of mini_ad | MiniDADArray of nat | MiniDADFn of list mini_tn
 
-(* === Section 7: DAEMON fallback for parametric types === *)
+(* === Section 7: derived instances for parametric types (arc-8 S1) === *)
 
-(* Parametric types without nullary constructors get noncomputable
-   DAEMON-based Inhabited instances. DAEMON is an axiom — no init code,
-   no panic, no [Inhabited a] constraints needed. The module loading
-   without panic is the test. *)
+(* Parametric types without nullary constructors get per-constructor
+   DERIVED Inhabited instances (bounded with [Inhabited a] where the
+   constructor consumes the parameter) — the DAEMON fallback is gone.
+   Here: nd_action gets [Inhabited a] via NDactive (the NDkill ctor is
+   skipped: nd_result is a later mutual sibling), then nd_result
+   derives THROUGH nd_action's instance. *)
 type nd_action 'a = NDactive of 'a | NDkill of nd_result 'a
 and nd_result 'a = NDresult of 'a * nd_action 'a
 
-(* Self-referential parametric mutual: both types have only constructors
-   that reference the other. Both should get DAEMON, not sorry. *)
+(* Mutual pair where each type also references the other: the direct
+   'a constructors still derive ([Inhabited a]); the cross-references
+   resolve through the sibling instances in declaration order. *)
 type action 'a = Active of 'a | Kill of result 'a
 and result 'a = Result of 'a * action 'a
 

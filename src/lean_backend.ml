@@ -18,7 +18,10 @@
 (*  - Target-specific class methods ({hol}, {coq}, etc.) are filtered     *)
 (*    from both class and instance definitions                            *)
 (*  - BEq is derived for types without function-typed constructor args    *)
-(*  - Inhabited instances use DAEMON when no safe constructor is found    *)
+(*  - Inhabited instances are DERIVED per constructor (bounded with      *)
+(*    [Inhabited tv] where a type parameter is consumed); no DAEMON      *)
+(*    fallback — underivable types get NO instance (fail-closed,         *)
+(*    arc-8 S1)                                                          *)
 (*                                                                        *)
 (**************************************************************************)
 
@@ -85,6 +88,67 @@ let lean_local_modules : string list ref = ref []
 let lean_deferred_opens : string list ref = ref []
 (* Set by process_file.ml before calling lean_defs — used for namespace wrapping *)
 let lean_current_module_name : string ref = ref ""
+(* Arc-8 S1 (derived Inhabited instances, replacing the DAEMON fallback):
+   process-global census of the Inhabited instances this backend has
+   emitted, keyed by type Path (modules are processed in dependency order
+   within one lem invocation, so earlier types' instances are visible to
+   later derivations — "cross-type dependencies resolve through the
+   emitted instances themselves", design note
+   lem-lean doc/notes/2026-08-20_arc8-inhabited-threading-design.md rule 4).
+   Each emitted instance is recorded as the list of type-parameter
+   POSITIONS that carry an [Inhabited _] bound; [] = unconditional.
+   Inh_none records a type whose derivation FAILED: fail-closed, NO
+   instance and NO fallback of any kind was emitted — any backend-visible
+   Inhabited demand on such a type is a generation-time error (see
+   inhabited_demand_check). *)
+type inh_status =
+  | Inh_instances of int list list
+  | Inh_none
+let lean_inhabited_census : (Path.t * (string * inh_status)) list ref = ref []
+let inhabited_census_lookup (p : Path.t) : (string * inh_status) option =
+  Option.map snd
+    (List.find_opt (fun (q, _) -> Path.compare p q = 0) !lean_inhabited_census)
+let inhabited_census_debug = (try Sys.getenv "LEM_INH_DEBUG" <> "" with Not_found -> false)
+let inhabited_census_add (p : Path.t) (name : string) (st : inh_status) : unit =
+  lean_inhabited_census := (p, (name, st)) :: !lean_inhabited_census;
+  if inhabited_census_debug then
+    Printf.eprintf "CENSUS add %s (%s) %s\n%!" (Path.to_string p) name
+      (match st with Inh_none -> "NONE" | Inh_instances es -> String.concat ";" (List.map (fun e -> Printf.sprintf "[%s]" (String.concat "," (List.map string_of_int e))) es))
+(* Known bounded Inhabited instances for library/target types the census
+   cannot see (their lem types carry target_reps, so the backend emits no
+   instances for them). Positions index the type's arguments:
+   - either -> Lean Sum: LemLib's bounded inl/inr pair
+     (lean-lib/LemLib.lean:90-91) — left side first (default priority).
+   - vector: inhabitation needs an element to replicate.
+   Every other head defaults to [[]]: assume an unconditional instance
+   exists. This is the same assumption the tier-1 machinery has always
+   made when emitting `default` at an applied type; if it is wrong, Lean
+   reports a loud 'failed to synthesize' error at the emitted instance —
+   visible, never a hidden inconsistency. *)
+let lean_builtin_inhabited_entries (p : Path.t) : int list list =
+  match Name.to_string (Path.get_name p) with
+    | "either" -> [[0]; [1]]
+    | "vector" -> [[0]]
+    | _ -> [[]]
+(* Arc-8 S1: per-type tier-2 derivation PLAN, computed by
+   lean_inhabited_prepass (in declaration order) and only RENDERED at
+   emission time. Needed because the main emission walks definitions
+   with fold_right — side effects run last-to-first (see the
+   lean_reader_prepass / lean_mutual_records precedent) — so census
+   population cannot be interleaved with emission. *)
+type inh_plan =
+  | Plan_variant of (int * string list) list
+      (* usable constructor indices (into the Te_variant ctor list) with
+         their [Inhabited tv] bound sets, in emission order: first at
+         default priority, rest (priority := low) *)
+  | Plan_record of string list  (* all fields derivable; bound set *)
+  | Plan_none                   (* fail-closed: NO instance, no fallback *)
+let lean_inhabited_tier2_plans : (Path.t * inh_plan) list ref = ref []
+let inhabited_plan_lookup (p : Path.t) : inh_plan option =
+  Option.map snd
+    (List.find_opt (fun (q, _) -> Path.compare p q = 0) !lean_inhabited_tier2_plans)
+let inhabited_plan_add (p : Path.t) (pl : inh_plan) : unit =
+  lean_inhabited_tier2_plans := (p, pl) :: !lean_inhabited_tier2_plans
 (* When true, isEqual outputs propositional = instead of BEq ==.
    Set during indreln antecedent processing where Prop is needed.
    Reason: Lean's == requires BEq instances, but function types lack BEq.
@@ -264,6 +328,258 @@ let lean_qualified_name name_str =
   match !lean_namespace_stack with
     | [] -> name_str
     | ns -> String.concat "." (List.rev ns @ [name_str])
+
+(* ===== Arc-8 S1: Inhabited derivation analysis (pre-pass side) =====
+   Pure analysis helpers shared by the pre-pass (which computes the
+   census + tier-2 plans in DECLARATION order) and the emission code
+   (which only renders). Design note:
+   doc/notes/2026-08-20_arc8-inhabited-threading-design.md rules 1-6. *)
+
+(* Check if a source type references any of the given paths (mutual type detection) *)
+let rec src_t_references_paths mutual_paths (s : src_t) : bool =
+  match s.term with
+    | Typ_wild _ | Typ_var _ | Typ_len _ -> false
+    | Typ_tup seplist ->
+        List.exists (src_t_references_paths mutual_paths) (Seplist.to_list seplist)
+    | Typ_app (p, ts) ->
+        List.exists (fun mp -> Path.compare mp p.descr = 0) mutual_paths ||
+        List.exists (src_t_references_paths mutual_paths) ts
+    | Typ_paren (_, inner, _) | Typ_with_sort (inner, _) ->
+        src_t_references_paths mutual_paths inner
+    | Typ_fn (dom, _, rng) ->
+        src_t_references_paths mutual_paths dom || src_t_references_paths mutual_paths rng
+    | Typ_backend (_, ts) ->
+        List.exists (src_t_references_paths mutual_paths) ts
+
+(* Check if a src_t is directly one of the mutual types (not wrapped
+   in List, Option, etc.). Used for Inhabited generation: indirect
+   references through containers are safe because List.default = [],
+   Option.default = none, etc. — they don't evaluate the element's default. *)
+let rec src_t_is_directly_mutual mutual_paths (s : src_t) : bool =
+  match s.term with
+    | Typ_app (id, _) ->
+      List.exists (fun p -> Path.compare p id.descr = 0) mutual_paths
+    | Typ_paren (_, t, _) -> src_t_is_directly_mutual mutual_paths t
+    | Typ_with_sort (t, _) -> src_t_is_directly_mutual mutual_paths t
+    | _ -> false
+
+(* For mutual types, find a constructor whose args don't reference any mutual types.
+   Prefers nullary constructors, then constructors with non-mutual args. *)
+let find_safe_ctor_for_mutual mutual_paths ctors =
+  let nullary = List.find_opt (fun (_, _, _, src_ts) ->
+    Seplist.to_list src_ts = []
+  ) ctors in
+  match nullary with
+    | Some _ -> nullary
+    | None ->
+      List.find_opt (fun (_, _, _, src_ts) ->
+        let args = Seplist.to_list src_ts in
+        not (List.exists (src_t_references_paths mutual_paths) args)
+      ) ctors
+
+(* Tier-1/tier-2 split (arc-8 S1). Tier 1 — unchanged from the DAEMON
+   era — covers: non-parameterized types with a safe or safe-indirect
+   constructor (or record/abbrev/opaque texps), and parameterized
+   variants with a nullary constructor. Everything else is tier 2:
+   per-constructor bounded derivation. *)
+let inhabited_needs_tier2 mutual_paths ((_, tnvar_list, path, t, _)) : bool =
+  if tnvar_list = [] then
+    match t with
+      | Te_variant (_, seplist) ->
+        let ctors = Seplist.to_list seplist in
+        (match find_safe_ctor_for_mutual mutual_paths ctors with
+          | Some _ -> false
+          | None ->
+            not (List.exists (fun (_, _, _, src_ts) ->
+              let args = Seplist.to_list src_ts in
+              not (List.exists (src_t_is_directly_mutual [path]) args)) ctors))
+      | _ -> false
+  else
+    match t with
+      | Te_variant (_, seplist) ->
+        not (List.exists (fun (_, _, _, src_ts) ->
+          Seplist.to_list src_ts = []) (Seplist.to_list seplist))
+      | _ -> true
+
+(* Arc-8 S1 derivability analysis (design note rules 2 and 4) for a
+   constructor-field type. Returns Some bound-tyvar-names — the
+   [Inhabited tv] bounds the field's default needs — or None (field not
+   derivably inhabitable). Recursively: type variables induce a bound;
+   tuples combine; function types need only an inhabitable codomain
+   (fun _ => default); applied types resolve through the instance
+   census (an unconditional instance is preferred, else the first
+   instance entry whose demanded argument positions are derivable —
+   container heads like list/maybe/fmap are unconditional, so mutual
+   references shielded by them stay derivable, the
+   src_t_is_directly_mutual precedent). pending = paths with NO usable
+   instance at this point: the type itself plus mutual siblings not yet
+   emitted (rule 4: tier 2 skips self/mutual-referential constructors;
+   earlier siblings and separate earlier types resolve through their
+   already-recorded instances). *)
+let derive_field_bounds (pending : Path.t list) (s : src_t) : string list option =
+  let union a b = a @ List.filter (fun x -> not (List.mem x a)) b in
+  let rec go (s : src_t) : string list option =
+    match s.term with
+      | Typ_var (_, v) -> Some [Ulib.Text.to_string (Tyvar.to_rope v)]
+      | Typ_len _ -> Some []
+      | Typ_wild _ -> None
+      | Typ_paren (_, t, _) | Typ_with_sort (t, _) -> go t
+      | Typ_tup seplist ->
+          List.fold_left (fun acc t ->
+            match acc with
+              | None -> None
+              | Some a -> (match go t with
+                  | None -> None
+                  | Some b -> Some (union a b)))
+            (Some []) (Seplist.to_list seplist)
+      | Typ_fn (_, _, rng) -> go rng
+      | Typ_backend (_, _) -> Some []
+      | Typ_app (id, ts) ->
+          let p = id.descr in
+          if List.exists (fun q -> Path.compare p q = 0) pending then None
+          else
+            let entries = match inhabited_census_lookup p with
+              | Some (_, Inh_none) -> []
+              | Some (_, Inh_instances es) -> es
+              | None -> lean_builtin_inhabited_entries p
+            in
+            if List.exists (fun e -> e = []) entries then Some []
+            else
+              List.fold_left (fun acc e ->
+                match acc with
+                  | Some _ -> acc
+                  | None ->
+                    List.fold_left (fun acc2 i ->
+                      match acc2 with
+                        | None -> None
+                        | Some a ->
+                          (match List.nth_opt ts i with
+                            | None -> None
+                            | Some t -> (match go t with
+                                | None -> None
+                                | Some b -> Some (union a b))))
+                      (Some []) e)
+                None entries
+  in go s
+
+(* Derivability of a list of field types: all derivable, bounds unioned. *)
+let derive_fields_bounds (pending : Path.t list) (ss : src_t list) : string list option =
+  List.fold_left (fun acc t ->
+    match acc with
+      | None -> None
+      | Some a -> (match derive_field_bounds pending t with
+          | None -> None
+          | Some b -> Some (a @ List.filter (fun x -> not (List.mem x a)) b)))
+    (Some []) ss
+
+(* Bound tyvar names -> parameter positions (for the census). *)
+let inhabited_bounds_to_positions tnvar_list (bounds : string list) : int list =
+  let rec go i = function
+    | [] -> []
+    | tv :: rest ->
+      let tail = go (i + 1) rest in
+      if List.mem (tnvar_to_string tv) bounds then i :: tail else tail
+  in go 0 tnvar_list
+
+(* Tier-2 plan for one type (arc-8 S1): one entry per usable
+   constructor, in declaration order; Plan_none = fail-closed. *)
+let inhabited_tier2_compute (pending : Path.t list) ((_, _, _, t, _)) : inh_plan =
+  match t with
+    | Te_variant (_, seplist) ->
+      let ctors = Seplist.to_list seplist in
+      let usable = List.concat (List.mapi (fun i (_, _, _, src_ts) ->
+        match derive_fields_bounds pending (Seplist.to_list src_ts) with
+          | Some bounds -> [(i, bounds)]
+          | None -> []) ctors) in
+      if usable = [] then Plan_none else Plan_variant usable
+    | Te_record (_, _, fields, _) ->
+      (match derive_fields_bounds pending
+               (List.map (fun (_, _, _, s) -> s) (Seplist.to_list fields)) with
+        | Some bounds -> Plan_record bounds
+        | None -> Plan_none)
+    | _ ->
+      (* Te_opaque with parameters: no constructors to derive through.
+         Te_abbrev never reaches tier 2 (skip_inhabited filters it). *)
+      Plan_none
+
+(* skip_inhabited_for_type, callable outside the backend functor *)
+let skip_inhabited_for_type_env env t path =
+  let l = Ast.Trans (false, "skip_inhabited_for_type", None) in
+  let td = Types.type_defs_lookup l env.t_env path in
+  (* Skip if declared with 'skip instances' for Lean *)
+  Target.Targetset.mem Target.Target_lean td.Types.type_skip_instances ||
+  match t with
+    | Te_abbrev _ -> true
+    | _ ->
+      Target.Targetmap.apply_target td.Types.type_target_rep
+        (Target.Target_no_ident Target.Target_lean) <> None
+
+(* Arc-8 S1 Inhabited pre-pass: computes the instance census and the
+   tier-2 derivation plans for a whole file IN DECLARATION ORDER,
+   before emission (which walks definitions with fold_right, i.e.
+   last-to-first side effects — the lean_reader_prepass /
+   lean_mutual_records precedent). Mirrors the emission dispatch
+   exactly: Seplist.length > 1 -> the mutual machinery (all tier-1
+   instances of a block precede all its tier-2 instances), otherwise
+   the single-type path. The census persists across files (types from
+   earlier modules resolve through it; lem processes modules in
+   dependency order in one invocation). *)
+let lean_inhabited_prepass env (ds : def list) =
+  let census_name path = Name.to_string (Path.get_name path) in
+  let record_tier2 pending (((_, _), tnvar_list, path, _, _) as td) =
+    let plan = inhabited_tier2_compute pending td in
+    inhabited_plan_add path plan;
+    (if inhabited_census_debug then
+      Printf.eprintf "PLAN %s: %s\n%!" (Path.to_string path)
+        (match plan with
+          | Plan_none -> "NONE"
+          | Plan_record b -> Printf.sprintf "record[%s]" (String.concat "," b)
+          | Plan_variant l -> String.concat ";" (List.map (fun (i, b) ->
+              Printf.sprintf "ctor%d[%s]" i (String.concat "," b)) l)));
+    match plan with
+      | Plan_none -> inhabited_census_add path (census_name path) Inh_none
+      | Plan_record bounds ->
+        inhabited_census_add path (census_name path)
+          (Inh_instances [inhabited_bounds_to_positions tnvar_list bounds])
+      | Plan_variant usable ->
+        inhabited_census_add path (census_name path)
+          (Inh_instances (List.map (fun (_, b) ->
+            inhabited_bounds_to_positions tnvar_list b) usable))
+  in
+  let process_block defs =
+    let multi = Seplist.length defs > 1 in
+    let ts_list = Seplist.to_list defs in
+    let is_lib = is_library_module !lean_current_module_name in
+    let ts_list = if is_lib then List.filter (fun (_, _, _, t, _) -> t <> Te_opaque) ts_list else ts_list in
+    let non_abbrev = List.filter (fun (_, _, _, t, _) ->
+      match t with Te_abbrev _ -> false | _ -> true) ts_list in
+    let active = List.filter (fun (_, _, path, t, _) ->
+      not (skip_inhabited_for_type_env env t path)) ts_list in
+    if multi then begin
+      let mutual_paths = List.map (fun (_, _, path, _, _) -> path) non_abbrev in
+      let tier1, tier2 = List.partition
+        (fun td -> not (inhabited_needs_tier2 mutual_paths td)) active in
+      (* Tier-1 census first: in the emitted file every tier-1 instance
+         of a block precedes every tier-2 instance of that block. *)
+      List.iter (fun (_, _, path, _, _) ->
+        inhabited_census_add path (census_name path) (Inh_instances [[]])) tier1;
+      let tier2_paths = List.map (fun (_, _, path, _, _) -> path) tier2 in
+      ignore (List.fold_left (fun pending ((_, _, path, _, _) as td) ->
+        record_tier2 pending td;
+        List.filter (fun p -> Path.compare p path <> 0) pending)
+        tier2_paths tier2)
+    end else
+      List.iter (fun ((_, _, path, _, _) as td) ->
+        if inhabited_needs_tier2 [path] td then record_tier2 [path] td
+        else inhabited_census_add path (census_name path) (Inh_instances [[]]))
+        active
+  in
+  let rec walk (((d_aux, _), _, _) : def) =
+    match d_aux with
+    | Module (_, _, _, _, _, inner_ds, _) -> List.iter walk inner_ds
+    | Type_def (_, defs) -> process_block defs
+    | _ -> ()
+  in List.iter walk ds
 
 let wrap_lean_comment x = Ulib.Text.(^^^) (Ulib.Text.(^^^) (r"/- ") x) (r" -/")
 
@@ -3104,26 +3420,40 @@ type pat_style = FunParam | MatchArm
       ]
     (* --- Instance generation ---
        For each type definition, generates:
-       1. Inhabited instance (real constructor, or DAEMON fallback)
+       1. Inhabited instance(s): tier 1 (safe constructor) or tier-2
+          per-constructor bounded derivation (arc-8 S1; fail-closed —
+          underivable types get no instance and backend-visible demands
+          on them are generation-time errors)
        2. BEq + Ord (derived via `deriving` if possible, sorry-based otherwise)
        3. SetType / Eq0 / Ord0 instances (with [BEq]/[Ord] constraints for parameterized types)
        Mutual types use find_safe_ctor_for_mutual to avoid self-referential defaults.
        Library opaque types (phantom types like ty1..ty4096) skip instance generation. *)
-    (* Check if a source type references any of the given paths (mutual type detection) *)
-    and src_t_references_paths mutual_paths (s : src_t) : bool =
-      match s.term with
-        | Typ_wild _ | Typ_var _ | Typ_len _ -> false
-        | Typ_tup seplist ->
-            List.exists (src_t_references_paths mutual_paths) (Seplist.to_list seplist)
-        | Typ_app (p, ts) ->
-            List.exists (fun mp -> Path.compare mp p.descr = 0) mutual_paths ||
-            List.exists (src_t_references_paths mutual_paths) ts
-        | Typ_paren (_, inner, _) | Typ_with_sort (inner, _) ->
-            src_t_references_paths mutual_paths inner
-        | Typ_fn (dom, _, rng) ->
-            src_t_references_paths mutual_paths dom || src_t_references_paths mutual_paths rng
-        | Typ_backend (_, ts) ->
-            List.exists (src_t_references_paths mutual_paths) ts
+    (* src_t_references_paths / src_t_is_directly_mutual /
+       find_safe_ctor_for_mutual / the derivability analysis now live at
+       top level (shared with lean_inhabited_prepass, arc-8 S1). *)
+    (* Arc-8 S1 fail-closed demand check (design note rule 5, charter
+       durability req 2): the backend is about to emit a value-level
+       `default` — an Inhabited demand it KNOWS about, inside a generated
+       instance body — at an applied type. If the census says derivation
+       FAILED for that type (Inh_none), refuse at generation time, naming
+       the type and both escape hatches. *)
+    and inhabited_demand_check (p : Path.t) : unit =
+      if inhabited_census_debug then
+        Printf.eprintf "DEMAND check %s -> %s\n%!" (Path.to_string p)
+          (match inhabited_census_lookup p with None -> "absent" | Some (_, Inh_none) -> "NONE" | Some (_, Inh_instances _) -> "inst");
+      match inhabited_census_lookup p with
+        | Some (n, Inh_none) ->
+          raise (Reporting_basic.err_general true Ast.Unknown (Printf.sprintf
+            "Lean backend: cannot derive an Inhabited instance for type '%s' (no constructor with derivably-inhabitable fields), but generated code demands one; escape hatches: 'declare {lean} skip_instances type %s' plus a hand-written Lean instance, or 'declare lean target_rep type %s' mapping it to a hand-written Lean type" n n n))
+        | _ -> ()
+    (* Render the [Inhabited tv] binders for the bound tyvars, in the
+       type's parameter declaration order. *)
+    and inhabited_bound_binders tnvar_list (bounds : string list) : Output.t =
+      Output.flat (List.filter_map (fun tv ->
+        let n = tnvar_to_string tv in
+        if List.mem n bounds then
+          Some (Output.flat [from_string " [Inhabited "; from_string n; from_string "]"])
+        else None) tnvar_list)
     (* Default value for a source type in Inhabited context.
        mutual_name_map: when non-empty, direct references to mutual types use
        TypeName.default_inhabited instead of default (for mutual def blocks
@@ -3134,8 +3464,9 @@ type pat_style = FunParam | MatchArm
         | Typ_app (id, _) when mutual_name_map <> [] ->
           (match List.assoc_opt id.descr mutual_name_map with
             | Some type_name_str -> from_string (String.concat "" [type_name_str; ".default_inhabited"])
-            | None -> from_string "default")
-        | Typ_wild _ | Typ_var _ | Typ_app _ | Typ_backend _ -> from_string "default"
+            | None -> (inhabited_demand_check id.descr; from_string "default"))
+        | Typ_app (id, _) -> inhabited_demand_check id.descr; from_string "default"
+        | Typ_wild _ | Typ_var _ | Typ_backend _ -> from_string "default"
         | Typ_len _ -> from_string "0"
         | Typ_tup seplist ->
             let mapped = List.map recurse (Seplist.to_list seplist) in
@@ -3170,90 +3501,66 @@ type pat_style = FunParam | MatchArm
       let mapped = List.map (default_value_inhabited ~mutual_name_map) ys in
       let sep = if List.length mapped = 0 then emp else from_string " " in
       Output.flat [lskips_t_to_output n; sep; concat_str " " mapped]
-    (* Check if a src_t is directly one of the mutual types (not wrapped
-       in List, Option, etc.). Used for Inhabited generation: indirect
-       references through containers are safe because List.default = [],
-       Option.default = none, etc. — they don't evaluate the element's default. *)
-    and src_t_is_directly_mutual mutual_paths (s : src_t) : bool =
-      match s.term with
-        | Typ_app (id, _) ->
-          List.exists (fun p -> Path.compare p id.descr = 0) mutual_paths
-        | Typ_paren (_, t, _) -> src_t_is_directly_mutual mutual_paths t
-        | Typ_with_sort (t, _) -> src_t_is_directly_mutual mutual_paths t
-        | _ -> false
-    (* For mutual types, find a constructor whose args don't reference any mutual types.
-       Prefers nullary constructors, then constructors with non-mutual args. *)
-    and find_safe_ctor_for_mutual mutual_paths ctors =
-      let nullary = List.find_opt (fun (_, _, _, src_ts) ->
-        Seplist.to_list src_ts = []
-      ) ctors in
-      match nullary with
-        | Some _ -> nullary
-        | None ->
-          List.find_opt (fun (_, _, _, src_ts) ->
-            let args = Seplist.to_list src_ts in
-            not (List.exists (src_t_references_paths mutual_paths) args)
-          ) ctors
     (* Compute whether to skip Inhabited for this type (abbreviations, types with
        target_rep, or types annotated with 'declare {lean} skip instances') *)
     and skip_inhabited_for_type t path =
-      let l = Ast.Trans (false, "skip_inhabited_for_type", None) in
-      let td = Types.type_defs_lookup l A.env.t_env path in
-      (* Skip if declared with 'skip instances' for Lean *)
-      Target.Targetset.mem Target.Target_lean td.Types.type_skip_instances ||
-      match t with
-        | Te_abbrev _ -> true
-        | _ ->
-          Target.Targetmap.apply_target td.Types.type_target_rep
-            (Target.Target_no_ident Target.Target_lean) <> None
-    (* Compute the default value expression for an Inhabited instance.
+      skip_inhabited_for_type_env A.env t path
+    (* Compute the default value expression for a TIER-1 Inhabited instance.
        mutual_name_map: (Path.t * string) list mapping mutual type paths to their
        Lean names. When non-empty, uses TypeName.default_inhabited for mutual type
        args (for use inside mutual def blocks where Inhabited instances don't exist yet). *)
-    (* Returns (default_expr, uses_daemon). When uses_daemon is true, the
-       instance uses (priority := low) so user overrides take precedence. *)
-    and inhabited_default_expr ?(mutual_name_map=[]) ?(is_type1=false) mutual_paths ((name, _), tnvar_list, path, t, _) : Output.t * bool =
-      let daemon = (from_string (if is_type1 then "DAEMON1" else "DAEMON"), true) in
-      if tnvar_list = [] then
-        let render_ctor c = (render_ctor_default ~mutual_name_map c, false) in
-        match t with
+    (* Returns None when tier 1 has no safe constructor: the caller must
+       then render the pre-pass tier-2 plan (per-constructor bounded
+       instances — arc-8 S1; the DAEMON fallback is gone). The tier
+       split itself is inhabited_needs_tier2 (top level, shared with the
+       pre-pass so the plan and the emission can never disagree). *)
+    and inhabited_default_expr ?(mutual_name_map=[]) mutual_paths (((name, _), tnvar_list, path, t, _) as td) : Output.t option =
+      if inhabited_needs_tier2 mutual_paths td then None
+      else if tnvar_list = [] then
+        Some (match t with
           | Te_variant (_, seplist) ->
             let ctors = Seplist.to_list seplist in
             (match find_safe_ctor_for_mutual mutual_paths ctors with
-              | Some ctor -> render_ctor ctor
+              | Some ctor -> render_ctor_default ~mutual_name_map ctor
               | None ->
                 let safe_indirect = List.find_opt (fun (_, _, _, src_ts) ->
                   let args = Seplist.to_list src_ts in
                   not (List.exists (src_t_is_directly_mutual [path]) args)
                 ) ctors in
-                match safe_indirect with
-                  | Some ctor -> render_ctor ctor
-                  | None -> daemon)
+                (match safe_indirect with
+                  | Some ctor -> render_ctor_default ~mutual_name_map ctor
+                  | None ->
+                    raise (Reporting_basic.err_general true Ast.Unknown
+                      "Lean backend: inhabited_default_expr tier-1 variant disagrees with inhabited_needs_tier2 (internal)")))
           | Te_record (_, _, fields, _) when List.length mutual_paths > 1 ->
             let field_list = Seplist.to_list fields in
             let field_defaults = List.map (fun (_, _, _, src_t) -> default_value_inhabited ~mutual_name_map src_t) field_list in
             let type_name = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip (B.type_path_to_name name path))) in
-            (Output.flat [from_string type_name; from_string ".mk "; concat_str " " field_defaults], false)
-          | _ -> (generate_default_value_texp t, false)
+            Output.flat [from_string type_name; from_string ".mk "; concat_str " " field_defaults]
+          | _ -> generate_default_value_texp t)
       else
-        (* Parameterized types: try nullary constructors only. Everything else
-           gets DAEMON — uniform fallback, no sorry anywhere in Inhabited. *)
-        match t with
+        (* Parameterized types: tier 1 covers nullary constructors only. *)
+        Some (match t with
           | Te_variant (_, seplist) ->
             let ctors = Seplist.to_list seplist in
-            let nullary = List.find_opt (fun (_, _, _, src_ts) ->
-              Seplist.to_list src_ts = []) ctors in
-            (match nullary with
-              | Some ctor -> (render_ctor_default ~mutual_name_map ctor, false)
-              | None -> daemon)
-          | _ -> daemon
+            (match List.find_opt (fun (_, _, _, src_ts) ->
+              Seplist.to_list src_ts = []) ctors with
+              | Some ctor -> render_ctor_default ~mutual_name_map ctor
+              | None ->
+                raise (Reporting_basic.err_general true Ast.Unknown
+                  "Lean backend: inhabited_default_expr tier-1 parameterized disagrees with inhabited_needs_tier2 (internal)"))
+          | _ ->
+            raise (Reporting_basic.err_general true Ast.Unknown
+              "Lean backend: inhabited_default_expr tier-1 non-variant parameterized disagrees with inhabited_needs_tier2 (internal)"))
     (* Type variable binding + type args for Inhabited instance header *)
     and inhabited_type_parts tnvar_list =
       let tnvar_list' =
         if tnvar_list = [] then emp
         else
-          (* Unconstrained {a : Type} bindings. No [Inhabited a] constraints —
-             DAEMON fallback is unconditional, nullary ctors don't need them. *)
+          (* Unconstrained {a : Type} bindings. Tier-1 instances (nullary/
+             safe ctors) need no [Inhabited a] constraints; tier-2 derived
+             instances append their [Inhabited tv] binders separately
+             (inhabited_bound_binders, arc-8 S1). *)
           let tvs = List.map (fun tv ->
             match tv with
             | Typed_ast.Tn_A (_, r, _) -> Types.Ty (Tyvar.from_rope r)
@@ -3267,24 +3574,66 @@ type pat_style = FunParam | MatchArm
         else Output.flat [from_string " "; tnvar_names]
       in
       (tnvar_list', type_args)
+    (* Arc-8 S1 tier 2: per-constructor bounded derivation (design note
+       rules 2-5), replacing the DAEMON fallback. For each constructor
+       whose fields are all derivably inhabitable, emit one bounded
+       instance — the first at default priority, the rest at
+       (priority := low), the LemLib Sum inl/inr pair precedent
+       (lean-lib/LemLib.lean:90-91). Fail-closed: no usable constructor
+       -> NO instance and NO fallback of any kind; the type is
+       census-recorded Inh_none so any backend-visible demand on it is a
+       generation-time error (inhabited_demand_check). The derivation
+       itself was computed by lean_inhabited_prepass in DECLARATION
+       order (emission runs fold_right, last-to-first); this function
+       only renders the stored plan. *)
+    and generate_tier2_inhabited (((name, _), tnvar_list, path, t, _)) : Output.t =
+      let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip (B.type_path_to_name name path))) in
+      let name_out = lskips_t_to_output (B.type_path_to_name name path) in
+      let (tnvar_list', type_args) = inhabited_type_parts tnvar_list in
+      let emit_instances (bodies : (Output.t * string list) list) : Output.t =
+        Output.flat (List.mapi (fun i (body, bounds) ->
+          let inst_kw = if i = 0 then "instance" else "\ninstance (priority := low)" in
+          Output.flat [
+            from_string inst_kw; tnvar_list'; inhabited_bound_binders tnvar_list bounds;
+            from_string " : Inhabited ("; name_out; type_args;
+            from_string ") where\n  default := "; body;
+          ]) bodies)
+      in
+      match inhabited_plan_lookup path, t with
+        | (None | Some Plan_none), _ ->
+          (* Fail-closed: no usable constructor -> no instance, no
+             fallback of any kind. Demands error via inhabited_demand_check. *)
+          emp
+        | Some (Plan_variant usable), Te_variant (_, seplist) ->
+          let ctors = Array.of_list (Seplist.to_list seplist) in
+          emit_instances (List.map (fun (i, bounds) ->
+            (render_ctor_default ctors.(i), bounds)) usable)
+        | Some (Plan_record bounds), Te_record (_, _, fields, _) ->
+          let field_list = Seplist.to_list fields in
+          let field_defaults = List.map (fun (_, _, _, src_t) -> default_value_inhabited src_t) field_list in
+          let body = Output.flat [from_string type_name_str; from_string ".mk "; concat_str " " field_defaults] in
+          emit_instances [(body, bounds)]
+        | _ ->
+          raise (Reporting_basic.err_general true Ast.Unknown (Printf.sprintf
+            "Lean backend: tier-2 Inhabited plan for type '%s' does not match its definition shape (internal pre-pass/emission mismatch)" type_name_str))
     (* Generate a single Inhabited instance (non-mutual or single-type blocks) *)
     and generate_inhabited_instance mutual_paths (((name, _), tnvar_list, path, t, _) as td) : Output.t =
       if skip_inhabited_for_type t path then emp
       else
       let name_out = lskips_t_to_output (B.type_path_to_name name path) in
-      let (default, uses_daemon) = inhabited_default_expr mutual_paths td in
-      let (tnvar_list', type_args) = inhabited_type_parts tnvar_list in
-      let inst_kw = if uses_daemon then "instance (priority := low)"
-        else "instance" in
-        Output.flat [
-          from_string inst_kw; tnvar_list'; from_string " : Inhabited ("; name_out;
-          type_args;
-          from_string ") where\n  default := "; default;
-        ]
+      match inhabited_default_expr mutual_paths td with
+        | None -> generate_tier2_inhabited td
+        | Some default ->
+          let (tnvar_list', type_args) = inhabited_type_parts tnvar_list in
+          Output.flat [
+            from_string "instance"; tnvar_list'; from_string " : Inhabited ("; name_out;
+            type_args;
+            from_string ") where\n  default := "; default;
+          ]
     (* Generate mutual def + instance pairs for Inhabited on mutual type blocks.
        Uses `mutual def ... end` so forward references between defaults are allowed,
        then non-mutual `instance` declarations referencing those defs. *)
-    and generate_inhabited_mutual ?(is_type1=false) mutual_paths ts_list : Output.t =
+    and generate_inhabited_mutual mutual_paths ts_list : Output.t =
       (* Filter to types that need Inhabited *)
       let active = List.filter (fun (_, _, path, t, _) ->
         not (skip_inhabited_for_type t path)) ts_list in
@@ -3301,15 +3650,18 @@ type pat_style = FunParam | MatchArm
         (path, type_name_str)
       ) active in
       (* Compute defaults and split into tier 1 (real ctors, need mutual def)
-         and tier 2 (DAEMON, standalone low-priority instance). *)
+         and tier 2 (arc-8 S1: per-constructor derived bounded instances
+         rendered from the pre-pass plan). *)
       let typed_defaults = List.map (fun (((name, _), tnvar_list, path, _, _) as td) ->
         let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip (B.type_path_to_name name path))) in
         let name_out = lskips_t_to_output (B.type_path_to_name name path) in
-        let (default, uses_daemon) = inhabited_default_expr ~mutual_name_map ~is_type1 mutual_paths td in
-        (type_name_str, name_out, tnvar_list, default, uses_daemon)
+        let default_opt = inhabited_default_expr ~mutual_name_map mutual_paths td in
+        (type_name_str, name_out, tnvar_list, default_opt, td)
       ) active in
-      let tier1 = List.filter (fun (_, _, _, _, d) -> not d) typed_defaults in
-      let tier2 = List.filter (fun (_, _, _, _, d) -> d) typed_defaults in
+      let tier1 = List.filter_map (fun (tns, no, tvs, d, td) ->
+        match d with Some d -> Some (tns, no, tvs, d, td) | None -> None) typed_defaults in
+      let tier2 = List.filter_map (fun (_, _, _, d, td) ->
+        match d with None -> Some td | Some _ -> None) typed_defaults in
       (* Tier 1: mutual def block with real constructor defaults *)
       let mutual_block = if tier1 = [] then emp else
         let defs = List.map (fun (type_name_str, name_out, tnvar_list, default, _) ->
@@ -3334,16 +3686,14 @@ type pat_style = FunParam | MatchArm
           from_string "\nend"; concat emp instances;
         ]
       in
-      (* Tier 2: standalone DAEMON instances (computable, low priority) *)
-      let daemon_instances = List.map (fun (type_name_str, _, tnvar_list, _, _) ->
-        let (tnvar_list', type_args) = inhabited_type_parts tnvar_list in
-        Output.flat [
-          from_string "\ninstance (priority := low)"; tnvar_list';
-          from_string " : Inhabited ("; from_string type_name_str; type_args;
-          from_string ") where\n  default := "; from_string (if is_type1 then "DAEMON1" else "DAEMON");
-        ]
-      ) tier2 in
-      Output.flat [mutual_block; concat emp daemon_instances]
+      (* Tier 2 (arc-8 S1): per-constructor derived instances (from the
+         pre-pass plan), emitted in declaration order after the tier-1
+         instances — so tier-2 bodies may resolve through every tier-1
+         instance of the block and every EARLIER tier-2 sibling's
+         instances, exactly as the pre-pass assumed. *)
+      let tier2_instances = List.map (fun td ->
+        Output.flat [from_string "\n"; generate_tier2_inhabited td]) tier2 in
+      Output.flat [mutual_block; concat emp tier2_instances]
     and generate_beq_ord_instances ?(is_type1=false) ?(emit_deriving=true) ((name, _), tnvar_list, path, t, _) : Output.t =
       (* Skip instance generation for abbreviations, types with target reps,
          and types annotated with 'declare {lean} skip instances'. *)
@@ -3490,7 +3840,7 @@ type pat_style = FunParam | MatchArm
       in
       let inhabited_output =
         if List.length non_abbrev > 1 then
-          generate_inhabited_mutual ~is_type1 mutual_paths ts_list
+          generate_inhabited_mutual mutual_paths ts_list
         else
           let mapped = List.map (generate_inhabited_instance mutual_paths) ts_list in
           concat_str "\n" mapped
@@ -3636,6 +3986,9 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
       if is_library then
         lean_namespace_stack := [ns_name];
       lean_reader_prepass A.env ds;
+      (* Arc-8 S1: compute the Inhabited census + tier-2 plans in
+         declaration order before emission (defs is fold_right). *)
+      lean_inhabited_prepass A.env ds;
       let lean_defs = defs false false ds in
       (* Drain any deferred abbrevs (e.g., abbrev mword after class Size) *)
       let deferred = Output.flat (List.rev !lean_pending_abbrevs) in
