@@ -5,7 +5,14 @@
 Lean 4's `partial def` requires `Inhabited T` for the return type. The Lem backend must generate `Inhabited` instances for all types. For types where it can't find a valid constructor (parametric types without nullary constructors, self-referential mutual types), it needs a fallback that:
 
 - Does not panic at module init
-- Does not require `[Inhabited a]` typeclass constraints
+- ~~Does not require `[Inhabited a]` typeclass constraints~~ **REVOKED
+  [USER 2026-08-20]** (arc-8 charter authorization; cerberus-scale S0
+  probe evidence in cerberus-lean
+  `lean_frontend/docs/2026-08-20_arc8-s0-probe-census.md`): this was a
+  requirement on the April fallback design, not a discovered
+  impossibility — selective `[Inhabited a]` signature threading +
+  derived real instances replace the DAEMON fallback; see
+  `doc/notes/2026-08-20_arc8-inhabited-threading-design.md`.
 - Does not require `unsafe`
 - Does not require user annotation
 - Works uniformly for all types
