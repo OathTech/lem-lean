@@ -75,9 +75,16 @@ assert left_ok : (match use_left with Left n -> n = 3 | Right _ -> false end)
 
 (* ================================================================ *)
 (* 4. L_undefined (the pattern-compiler's default arm for an
-      incomplete match) at a tyvar type: renders as `default` and
-      threads the SAME binder — the legacy `sorry` path is gone
-      (D4, arc-8 decision log).                                     *)
+      incomplete match) at a tyvar type: renders as an ascribed
+      failwithI carrying the Incomplete Pattern message (mirroring
+      the OCaml backend's `failwith m`, src/backend.ml:864 — audit
+      fix, arc-8; the earlier silent-`default` rendering and the
+      legacy `sorry` path are both gone) and threads the SAME
+      binder. The happy path is pinned by the assert below; the
+      PANIC path (message printed + post-panic default as a library
+      call; fail-stop under LEAN_ABORT_ON_PANIC=1) is pinned by
+      lean-test/TestFailwithThreadingPanic via the Makefile
+      `lean-panic` target.                                          *)
 (* ================================================================ *)
 
 val head_undef : forall 'a. list 'a -> 'a

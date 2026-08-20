@@ -23,14 +23,20 @@ example (l : List Empty) : List Empty := tail_or_fail l
 example {a : Type} [Inhabited a] (l : List (a × Empty)) : Sum a Empty :=
   left_or_fail l
 
-/- 4. L_undefined (incomplete-match default) at a tyvar type: same
-   binder, `default` body — no sorry anywhere in its definition. -/
+/- 4. L_undefined (incomplete-match arm) at a tyvar type: same
+   binder, failwithI body carrying the Incomplete Pattern message
+   (audit fix — mirrors OCaml's raise); no sorry, no silent default
+   anywhere in its definition. -/
 example {a : Type} [Inhabited a] (l : List a) : a := head_undef l
 
 /- 7. Multi-clause emission path: same binder shape. -/
 example {a : Type} [Inhabited a] (l : List a) : a := alt_or_fail l
 
-/- Runtime behavior of the panic path is exercised by the cerberus
-   differential suites (byte-identical panic, arc-8 S3 zero-movement
-   bar); the asserts in Test_failwith_threading_auxiliary.lean cover
-   the success paths. -/
+/- Runtime behavior of the panic path is pinned IN THIS SUITE by
+   TestFailwithThreadingPanic.lean (Makefile target `lean-panic`:
+   abort under LEAN_ABORT_ON_PANIC=1 with the Incomplete Pattern
+   message — the harness discipline of cerberus scripts/common.sh),
+   and further exercised by the cerberus differential suites
+   (byte-identical panic, arc-8 S3 zero-movement bar); the asserts
+   in Test_failwith_threading_auxiliary.lean cover the success
+   paths. -/

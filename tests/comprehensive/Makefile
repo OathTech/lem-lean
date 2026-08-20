@@ -4,13 +4,56 @@ LEMFLAGS = -wl ign -i $(LEMLIB)/pervasives.lem
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-generate lean-compile clean
+.PHONY: all lean lean-generate lean-compile lean-negative lean-panic clean
 
 all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-negative
+lean: lean-generate lean-compile lean-panic lean-negative
+
+# Panic-path pin (arc-8 audit fix, auditor A F1): head_undef's
+# incomplete-match arm must be a failwithI RAISE carrying the
+# Incomplete Pattern message (mirroring OCaml's `failwith m`), never a
+# silent default. Two legs (see TestFailwithThreadingPanic.lean):
+#  1. library-call semantics (no env var): the panic PRINTS the
+#     Incomplete Pattern message, then CONTINUES with the Inhabited
+#     default (`survived:` line). Pre-fix this run printed NOTHING —
+#     the message line is the pin of the fix.
+#  2. harness discipline (LEAN_ABORT_ON_PANIC=1, cerberus
+#     scripts/common.sh): the run must fail-stop (nonzero exit). On
+#     this 4.28 toolchain the abort fires at module INIT (LemLib's own
+#     eager closed-term failwithI lifts, messages disabled there), so
+#     the message is asserted on leg 1, not this leg.
+lean-panic:
+	@echo "=== Panic-path pin (failwithI raise at the L_undefined arm) ==="
+	@cd lean-test && lake build test-failwith-panic > /dev/null
+	@out=$$(cd lean-test && ./.lake/build/bin/test-failwith-panic 2>&1); st=$$?; \
+	if [ $$st -ne 0 ]; then \
+		echo "  FAIL (leg 1): nonzero exit $$st without LEAN_ABORT_ON_PANIC"; \
+		echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "PANIC"; then \
+		echo "  FAIL (leg 1): no PANIC line — the arm degraded to a silent default"; \
+		echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "Incomplete Pattern"; then \
+		echo "  FAIL (leg 1): panic without the Incomplete Pattern message"; \
+		echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "survived:"; then \
+		echo "  FAIL (leg 1): no post-panic default (library-call semantics changed)"; \
+		echo "$$out"; exit 1; \
+	else \
+		echo "  OK (leg 1): panic prints the Incomplete Pattern message, then continues with default"; \
+	fi
+	@out=$$(cd lean-test && LEAN_ABORT_ON_PANIC=1 ./.lake/build/bin/test-failwith-panic 2>&1); st=$$?; \
+	if [ $$st -eq 0 ]; then \
+		echo "  FAIL (leg 2): exited 0 under LEAN_ABORT_ON_PANIC=1 (no fail-stop)"; \
+		echo "$$out"; exit 1; \
+	elif echo "$$out" | grep -q "survived:"; then \
+		echo "  FAIL (leg 2): execution continued past the panic under LEAN_ABORT_ON_PANIC=1"; \
+		echo "$$out"; exit 1; \
+	else \
+		echo "  OK (leg 2): fail-stops (exit $$st) under LEAN_ABORT_ON_PANIC=1"; \
+	fi
 
 # Negative probes: each negative/neg_*.lem MUST be rejected, and with the
 # error fragment declared in its first-line "(* EXPECT: ... *)" header —

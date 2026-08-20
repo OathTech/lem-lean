@@ -52,3 +52,9 @@ lean_lib LemComprehensiveTest where
     `Test_vectors, `Test_vectors_auxiliary,
     `TestExtraImportHelper  -- hand-written helper for extra_import test
   ]
+
+-- Arc-8 audit fix (auditor A F1): panic-path pin for the L_undefined
+-- rendering (run by the Makefile `lean-panic` target under
+-- LEAN_ABORT_ON_PANIC=1; must abort with the Incomplete Pattern message).
+lean_exe «test-failwith-panic» where
+  root := `TestFailwithThreadingPanic

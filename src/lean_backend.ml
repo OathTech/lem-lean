@@ -23,7 +23,8 @@
 (*    fallback — underivable types get NO instance (fail-closed,         *)
 (*    arc-8 S1)                                                          *)
 (*  - EVERY failure site (failwith-mapped constants, L_undefined         *)
-(*    defaults) emits axiom-free failwithI/default; tyvar-typed sites    *)
+(*    literals) emits axiom-free failwithI (mirroring OCaml's raise;     *)
+(*    audit fix, arc-8); tyvar-typed sites                               *)
 (*    thread [Inhabited tv] binders onto the enclosing def's signature   *)
 (*    (monotone over the call graph); legacy failwith and the            *)
 (*    sorry-emission paths are gone (fail-closed, arc-8 S2)              *)
@@ -603,9 +604,11 @@ let lean_inhabited_prepass env (ds : def list) =
 (* ===== Arc-8 S2: failwith -> failwithI + selective [Inhabited] threading =====
    Design note doc/notes/2026-08-20_arc8-inhabited-threading-design.md,
    section S2 (rules 1-6). EVERY failure site (failwith-mapped constants,
-   plus the L_undefined defaults from pattern compilation) now emits an
-   Inhabited-backed value (failwithI / default) — never legacy failwith,
-   never sorry. Sites whose type mentions free type variables that are
+   plus the L_undefined literals from pattern compilation) now emits an
+   Inhabited-backed failwithI (audit fix: L_undefined too mirrors
+   OCaml's `failwith m`, src/backend.ml:864) — never legacy failwith,
+   never sorry, never a silent default. Sites whose type mentions free
+   type variables that are
    NOT discharged by the S1 instance census induce [Inhabited tv]
    instance-implicit binders on the ENCLOSING def's signature, computed
    here as a monotone fixpoint over the call graph (a caller that passes
@@ -3125,17 +3128,26 @@ type pat_style = FunParam | MatchArm
               ws s; from_string (String.concat "" [prefix; bits])
             ]
         | L_undefined (skips, explanation) ->
-          (* Arc-8 S2 (D4): undefined defaults (from pattern compilation)
-             render through the same Inhabited machinery as everything
-             else — `default` at tyvars is discharged by the threaded
-             [Inhabited tv] binders (the pre-pass records L_undefined
-             sites as failure sites); applied heads are demand-checked
-             against the census. The legacy tyvar `sorry` path is gone. *)
+          (* Arc-8 audit fix (auditor A F1): mirror the OCaml backend,
+             which renders L_undefined as a RAISE carrying the
+             incomplete-pattern message — `failwith m`
+             (src/backend.ml:864, `const_undefined` in module Ocaml at
+             src/backend.ml:830) — never a silent default value. The
+             Lean rendering is failwithI with the same message, ascribed
+             like every other failure site so the Inhabited instance
+             resolves at exactly this type; bare-tyvar sites are
+             discharged by the threaded [Inhabited tv] binders (the
+             pre-pass records L_undefined sites as failure sites,
+             renderer-independently: lean_thread_scan_exp). The
+             explanation is emitted verbatim between quotes — it is
+             pre-escaped with String.escaped at construction
+             (src/patterns.ml:1594,1644), exactly as the OCaml backend's
+             `str` output relies on. *)
           let typ = l.typ in
           let src_t = C.t_to_src_t typ in
             Output.flat [
-              ws skips; default_value_inhabited src_t;
-              from_string " /- "; from_string explanation; from_string " -/"
+              ws skips; from_string "(failwithI \""; from_string explanation;
+              from_string "\" : "; pat_typ src_t; from_string ")"
             ]
     and fun_pattern_list inside_instance ps =
       let style = if inside_instance then MatchArm else FunParam in
@@ -4276,8 +4288,9 @@ type pat_style = FunParam | MatchArm
         Output.flat [inhabited_output; from_string "\n"; concat emp beq_instances]
     (* Arc-8 S2 (D4): the former `default_value` (the L_undefined
        renderer whose Typ_var case emitted `sorry`) is DELETED —
-       L_undefined renders via default_value_inhabited, which never
-       emits an opaque inhabitant. *)
+       L_undefined renders as failwithI (audit fix; mirrors OCaml's
+       `failwith m`, src/backend.ml:864), which never emits an opaque
+       inhabitant or a silent default. *)
       ;;
 end
 ;;
