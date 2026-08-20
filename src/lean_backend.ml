@@ -672,6 +672,89 @@ let rec typ_inhabited_bounds (d : Types.type_defs) (t : Types.t) : string list o
                 (Some []) e)
           None entries
 
+(* ===== Arc-10 S2: derived structural comparisons for mutual blocks =====
+   Shape analysis for constructor-field types, deciding how a derived
+   BEq/compare body compares each field. Computed on SEMANTIC types
+   (Types.t, head-normalized) so type abbreviations can never hide a
+   mutual-sibling reference (the src_t_has_fn abbrev lesson). *)
+type cmp_shape =
+  | CSleaf                                   (* no sibling inside: instance-based == / Ord.compare *)
+  | CSsibling of string                      (* Lean name: mutual call to <name>.beq_derived / .compare_derived *)
+  | CStuple of cmp_shape list                (* destructure, compare componentwise *)
+  | CSlist of Types.t * cmp_shape            (* element type + element shape: mutual list helper *)
+  | CSoption of Types.t * cmp_shape          (* mutual option helper *)
+  | CSsum of (Types.t * cmp_shape) * (Types.t * cmp_shape)  (* mutual sum helper *)
+  | CSbad of string                          (* underivable: reason (fail-closed, type keeps its residual) *)
+
+(* Does the (head-normalized) type reference any of the given paths? *)
+let rec lean_typ_refs_paths (d : Types.type_defs) (paths : Path.t list) (t : Types.t) : bool =
+  let t = Types.head_norm d t in
+  match t.Types.t with
+    | Types.Tvar _ | Types.Tne _ | Types.Tuvar _ -> false
+    | Types.Tfn (a, b) -> lean_typ_refs_paths d paths a || lean_typ_refs_paths d paths b
+    | Types.Ttup ts -> List.exists (lean_typ_refs_paths d paths) ts
+    | Types.Tbackend (ts, _) -> List.exists (lean_typ_refs_paths d paths) ts
+    | Types.Tapp (ts, p) ->
+      List.exists (fun q -> Path.compare p q = 0) paths ||
+      List.exists (lean_typ_refs_paths d paths) ts
+
+(* Compute the comparison shape of a field type.
+   derived: the mutual siblings currently in the derived set (path ->
+   Lean name); sorried: sibling paths OUTSIDE the derived set (their
+   instances stay sorried, so a reference makes this type underivable —
+   underivability propagates rather than routing a "real" body through
+   a sorry instance). Containers with a Lean-instance comparison story
+   (list, maybe, either, tuples) recurse; any other head over a sibling
+   is fail-closed CSbad. *)
+let rec lean_cmp_shape (d : Types.type_defs) (derived : (Path.t * string) list)
+    (sorried : Path.t list) (t : Types.t) : cmp_shape =
+  let all_paths = List.map fst derived @ sorried in
+  if not (lean_typ_refs_paths d all_paths t) then CSleaf
+  else
+    let bad_of = function CSbad r -> Some r | _ -> None in
+    let t' = Types.head_norm d t in
+    match t'.Types.t with
+      | Types.Tfn _ -> CSbad "function type"  (* unreachable behind texp_can_derive_beq; belt *)
+      | Types.Ttup ts ->
+        let shs = List.map (lean_cmp_shape d derived sorried) ts in
+        (match List.find_map bad_of shs with
+          | Some r -> CSbad r
+          | None -> CStuple shs)
+      | Types.Tapp (ts, p) ->
+        (match List.find_opt (fun (q, _) -> Path.compare p q = 0) derived with
+          | Some (_, name) ->
+            if List.exists (lean_typ_refs_paths d all_paths) ts
+            then CSbad "mutual type applied to mutual-referencing arguments"
+            else CSsibling name
+          | None ->
+            if List.exists (fun q -> Path.compare p q = 0) sorried then
+              CSbad "reference to a mutual sibling outside the derived set"
+            else
+              (match Name.to_string (Path.get_name p), ts with
+                | "list", [e] ->
+                  let sh = lean_cmp_shape d derived sorried e in
+                  (match bad_of sh with Some r -> CSbad r | None -> CSlist (e, sh))
+                | "maybe", [e] ->
+                  let sh = lean_cmp_shape d derived sorried e in
+                  (match bad_of sh with Some r -> CSbad r | None -> CSoption (e, sh))
+                | "either", [l; r] ->
+                  let shl = lean_cmp_shape d derived sorried l in
+                  let shr = lean_cmp_shape d derived sorried r in
+                  (match bad_of shl, bad_of shr with
+                    | Some r, _ | _, Some r -> CSbad r
+                    | None, None -> CSsum ((l, shl), (r, shr)))
+                | n, _ -> CSbad (Printf.sprintf "mutual reference under unsupported head '%s'" n)))
+      | _ -> CSbad "unexpected shape"
+
+let lean_cmp_shape_is_bad = function CSbad _ -> true | _ -> false
+
+(* True while rendering a definition that is emitted only as a BLOCK
+   COMMENT (a def whose Lean target uses an inline/target_rep — the
+   `Comment` def form). Fail-closed generation-time errors (e.g. the
+   arc-10 set-comprehension rejection) must not fire for such dead
+   text; they emit the historical inert placeholder instead. *)
+let lean_rendering_comment = ref false
+
 (* Threaded-def census: cref -> ([Inhabited]-bound type-parameter
    positions (indices into const_tparams, for call-site propagation),
    bound tyvar names in parameter-declaration order (for signature
@@ -1723,9 +1806,13 @@ type pat_style = FunParam | MatchArm
             end
           | _ -> None
         in
-        let comment = Output.flat [
-          skips; from_string "/- "; def inside_instance callback inside_module def_aux; from_string " -/"
-        ] in
+        let comment =
+          let saved = !lean_rendering_comment in
+          lean_rendering_comment := true;
+          Fun.protect ~finally:(fun () -> lean_rendering_comment := saved) @@ fun () ->
+          Output.flat [
+            skips; from_string "/- "; def inside_instance callback inside_module def_aux; from_string " -/"
+          ] in
         begin match abbrev_for_target_rep with
         | Some abbrev_out ->
           lean_pending_abbrevs := abbrev_out :: !lean_pending_abbrevs;
@@ -2975,12 +3062,24 @@ type pat_style = FunParam | MatchArm
                 exp inside_instance e; from_string " : Prop)"
               ]
           | Comp_binding (_, _, _, _, _, _, _, _, _) ->
-              (* Set comprehension binding — not directly supported in Lean.
-                 Library functions with comprehensions have Lean target reps
-                 that bypass this code path. If reached, emit sorry. *)
-              from_string "(sorry /- Lean backend: set comprehension binding not supported -/)"
+              (* Set-comprehension binding — not supported in Lean. Library
+                 functions with comprehensions have Lean target reps that
+                 bypass this code path (their lem definitions render only as
+                 block comments, guarded below); anything LIVE is
+                 FAIL-CLOSED: a loud generation-time error (arc-10 S2,
+                 decision log D1 ruling 3 — formerly an opaque `(sorry ...)`
+                 stub). *)
+              if !lean_rendering_comment then
+                from_string "(sorry /- Lean backend: set comprehension binding not supported -/)"
+              else
+                raise (Reporting_basic.err_general true (exp_to_locn e)
+                  "Lean backend: set comprehensions ({ e | bindings ... }) are not supported by the Lean backend; workarounds: rewrite using explicit Set/List library functions (e.g. Set.filter / Set.map / Set.cross, which have Lean target reps), or give the enclosing definition a 'declare lean target_rep'")
           | Setcomp (_, _, _, _, _, _) ->
-              from_string "(sorry /- Lean backend: set comprehension not supported -/)"
+              if !lean_rendering_comment then
+                from_string "(sorry /- Lean backend: set comprehension not supported -/)"
+              else
+                raise (Reporting_basic.err_general true (exp_to_locn e)
+                  "Lean backend: set comprehensions ({ e | condition }) are not supported by the Lean backend; workarounds: rewrite using explicit Set/List library functions (e.g. Set.filter / Set.map, which have Lean target reps), or give the enclosing definition a 'declare lean target_rep'")
           | Nvar_e (skips, nvar) ->
             let nvar = id Nexpr_var @@ Ulib.Text.(^^^) (r "") (Nvar.to_rope nvar) in
               Output.flat [
@@ -4130,7 +4229,7 @@ type pat_style = FunParam | MatchArm
       let tier2_instances = List.map (fun td ->
         Output.flat [from_string "\n"; generate_tier2_inhabited td]) tier2 in
       Output.flat [mutual_block; concat emp tier2_instances]
-    and generate_beq_ord_instances ?(is_type1=false) ?(emit_deriving=true) ((name, _), tnvar_list, path, t, _) : Output.t =
+    and generate_beq_ord_instances ?(is_type1=false) ?(emit_deriving=true) ?derived_cmp ((name, _), tnvar_list, path, t, _) : Output.t =
       (* Skip instance generation for abbreviations, types with target reps,
          and types annotated with 'declare {lean} skip instances'. *)
       let skip_instances = match t with
@@ -4167,79 +4266,535 @@ type pat_style = FunParam | MatchArm
             | _ -> false
           in
           let has_deriving = (emit_deriving || is_all_nullary) && texp_can_derive_beq t in
+          let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n)) in
+          let bare_tvs = concat emp @@ List.map (fun t ->
+            let name = tnvar_to_string t in
+            let kind = tnvar_kind t in
+            Output.flat [from_string " {"; from_string name; from_string " : "; from_string kind; from_string "}"]
+          ) tnvar_list in
+          (* Arc-10 S2: render " [Cls tv]" binders for the given tyvar names,
+             in parameter-declaration order (the inhabited_bound_binders
+             pattern applied to comparison classes). *)
+          let cls_bounds cls (bounds : string list) : Output.t =
+            Output.flat (List.filter_map (fun tv ->
+              let tn = tnvar_to_string tv in
+              if List.mem tn bounds then
+                Some (Output.flat [from_string " ["; from_string cls; from_string " "; from_string tn; from_string "]"])
+              else None) tnvar_list)
+          in
+          (* All Type-kind parameters — the bound set used for the
+             deriving-bridge on PARAMETERIZED deriving types (Lean's own
+             derived BEq/Ord instances carry per-parameter constraints). *)
+          let all_ty_tvs = List.filter_map (fun tv ->
+            match tv with
+              | Typed_ast.Tn_A _ -> Some (tnvar_to_string tv)
+              | Typed_ast.Tn_N _ -> None) tnvar_list in
+          (* Loud residual body (arc-10 S2): failwithI replaces the historical
+             `sorry` bodies — axiom-free, honest-panic (the arc-8 convention;
+             mirrors OCaml raising Invalid_argument when polymorphic
+             comparison reaches a closure). Two labeled residual classes:
+             - "carries function-typed fields": the type itself is
+               underivable (OCaml comparison would raise on its closures);
+             - "unconstrained type variable": the bounded real instance
+               exists but a lem default-instance use site erased the
+               dictionary (fallback, priority below the bounded instance). *)
+          let residual_body cls reason =
+            String.concat "" ["failwithI \"Lean backend: comparison residual: "; cls; " ("; type_name_str; "): "; reason; "\""] in
+          let fn_reason = "type carries function-typed fields (OCaml polymorphic comparison raises on closures)" in
+          let tv_reason = "demanded at an unconstrained type variable (lem default instance erased the dictionary); the bounded real instance needs concrete comparable arguments" in
+          let residual_beq_ord reason priority_kw =
+            (Output.flat [
+              from_string priority_kw; bare_tvs; from_string " : BEq ("; o;
+              type_args;
+              from_string ") where\n  beq _ _ := "; from_string (residual_body "BEq" reason);
+            ],
+            Output.flat [
+              from_string priority_kw; bare_tvs; from_string " : Ord ("; o;
+              type_args;
+              from_string ") where\n  compare _ _ := "; from_string (residual_body "Ord" reason);
+            ])
+          in
           let beq_instance, ord_instance =
             if has_deriving then (emp, emp)
-            else begin
-              (* Standalone BEq instance without [Inhabited] constraint.
-                 Ord extends BEq in Lean 4, but Ord instances require [Inhabited a]
-                 (since we use sorry for the compare body and Inhabited for the type).
-                 Lem-sourced Eq instances may not have [Inhabited], so they need
-                 a BEq that's available unconditionally. *)
-              let bare_tvs = concat emp @@ List.map (fun t ->
-                let name = tnvar_to_string t in
-                let kind = tnvar_kind t in
-                Output.flat [from_string " {"; from_string name; from_string " : "; from_string kind; from_string "}"]
-              ) tnvar_list in
-              (* Low priority so hand-written BEq instances can override sorry *)
+            else if is_type1 then
+              (* Type 1 universe: failwithI is Type-only, keep the sorried
+                 residual (currently-empty population). *)
               (Output.flat [
                 from_string "\ninstance (priority := low)"; bare_tvs; from_string " : BEq ("; o;
                 type_args;
                 from_string ") where\n  beq _ _ := sorry";
               ],
-              (* Ord is universe-polymorphic so it works for Type 1 too.
-                 Use bare_tvs (no [Inhabited]) since compare := sorry doesn't need it.
-                 This lets downstream types use 'deriving Ord' without extra constraints. *)
               Output.flat [
                 from_string "\ninstance (priority := low)"; bare_tvs; from_string " : Ord ("; o;
                 type_args;
                 from_string ") where\n  compare _ _ := sorry";
               ])
-            end
+            else match derived_cmp with
+              | Some bounds ->
+                (* Arc-10 S2: REAL instances over the derived structural
+                   comparison functions (emitted by
+                   generate_derived_comparisons in this type's mutual
+                   block). DEFAULT priority — the same standing Lean's own
+                   `deriving BEq, Ord` instances get: LemLib's generic
+                   default-priority bridges ([MapKeyType a] : BEq a,
+                   [Eq0 a] : BEq a, [SetType a] : BEq a) would otherwise
+                   shadow a low-priority real instance and complete
+                   through the unconstrained failwithI fallback.
+                   Hand-written override instance files still win: equal
+                   priority resolves newest-declaration-first, and
+                   override files import the generated module. *)
+                (Output.flat [
+                  from_string "\ninstance"; bare_tvs; cls_bounds "BEq" bounds;
+                  from_string " : BEq ("; o; type_args;
+                  from_string ") where\n  beq := "; from_string type_name_str; from_string ".beq_derived";
+                ],
+                Output.flat [
+                  from_string "\ninstance"; bare_tvs; cls_bounds "Ord" bounds;
+                  from_string " : Ord ("; o; type_args;
+                  from_string ") where\n  compare := "; from_string type_name_str; from_string ".compare_derived";
+                ])
+              | None -> residual_beq_ord fn_reason "\ninstance (priority := low)"
+          in
+          (* Unconstrained fallbacks for bounded real instances (parameterized
+             types only): lem's unconstrained default instances mean generated
+             polymorphic code may demand these classes at OPEN type variables
+             (no dictionary); priority strictly below the bounded instance so
+             it is only reached when the bounds cannot be synthesized. *)
+          let fallback_beq_ord =
+            match derived_cmp with
+              | Some bounds when tnvar_list <> [] && bounds <> [] ->
+                let (b, o_) = residual_beq_ord tv_reason "\ninstance (priority := 50)" in
+                Output.flat [b; o_]
+              | _ -> emp
           in
           (* SetType/Eq0/Ord0 are defined for (a : Type) only, skip for Type 1 *)
           if is_type1 then Output.flat [beq_instance; ord_instance]
           else
-            (* SetType/Eq0/Ord0: use real implementations when possible.
-               For types with deriving BEq/Ord, bridge to the derived instances.
-               For types without, use sorry (can't derive or bridge). *)
-            let bare_tvs_all = concat emp @@ List.map (fun t ->
-              let name = tnvar_to_string t in
-              Output.flat [from_string " {"; from_string name; from_string " : "; from_string (tnvar_kind t); from_string "}"]
-            ) tnvar_list in
-            (* SetType/Eq0/Ord0: use real implementations for monomorphic types
-               with deriving (no constraint propagation issue). For parameterized
-               types or non-deriving types, use sorry to avoid constraint issues. *)
-            let (settype_body, eq0_body, ord0_body) =
-              if has_deriving && tnvar_list = [] then
-                (* Monomorphic + deriving: bridge to derived BEq/Ord *)
-                ("setElemCompare := defaultCompare",
-                 "isEqual x y := x == y\n  isInequal x y := !(x == y)",
-                 "compare := defaultCompare\n  isLess := defaultLess\n  isLessEqual := defaultLessEq\n  isGreater := defaultGreater\n  isGreaterEqual := defaultGreaterEq")
-              else
-                (* Parameterized or non-deriving: sorry to avoid constraint propagation *)
-                ("setElemCompare _ _ := sorry",
-                 "isEqual _ _ := sorry\n  isInequal _ _ := sorry",
-                 "compare _ _ := sorry\n  isLess _ _ := sorry\n  isLessEqual _ _ := sorry\n  isGreater _ _ := sorry\n  isGreaterEqual _ _ := sorry")
+            (* SetType/Eq0/Ord0 (lem classes): bridge to the Lean BEq/Ord
+               instances wherever those are real — derived-with-`deriving`
+               (monomorphic: unconditional, default priority — the
+               historical emission; parameterized: [BEq tv]/[Ord tv]
+               bounds, arc-10 S2) or comparison-derived (bounds from the
+               derivation plan). Residual types (and the open-tyvar fallback
+               for parameterized ones) carry loud failwithI bodies. *)
+            let real_trio (bounds : string list) (inst_kw : string) : Output.t =
+              Output.flat [
+                from_string inst_kw; bare_tvs; cls_bounds "Ord" bounds;
+                from_string " : Lem_Basic_classes.SetType ("; o; type_args;
+                from_string ") where\n  setElemCompare := defaultCompare";
+                from_string inst_kw; bare_tvs; cls_bounds "BEq" bounds;
+                from_string " : Lem_Basic_classes.Eq0 ("; o; type_args;
+                from_string ") where\n  isEqual x y := x == y\n  isInequal x y := !(x == y)";
+                from_string inst_kw; bare_tvs; cls_bounds "Ord" bounds;
+                from_string " : Lem_Basic_classes.Ord0 ("; o; type_args;
+                from_string ") where\n  compare := defaultCompare\n  isLess := defaultLess\n  isLessEqual := defaultLessEq\n  isGreater := defaultGreater\n  isGreaterEqual := defaultGreaterEq";
+              ]
             in
-            let instance_tvs = bare_tvs_all
+            (* Trio for comparison-DERIVED types: bodies call the derived
+               functions DIRECTLY (no `==`/defaultCompare instance
+               indirection, which LemLib's generic default-priority
+               bridges could reroute through a fallback). *)
+            let derived_trio (bounds : string list) : Output.t =
+              let bd = from_string type_name_str in
+              let lem_of_cmp x y =
+                Output.flat [
+                  from_string "match "; bd; from_string ".compare_derived "; from_string x;
+                  from_string " "; from_string y;
+                  from_string " with | .lt => LemOrdering.LT | .eq => LemOrdering.EQ | .gt => LemOrdering.GT";
+                ] in
+              let bool_of_cmp x y arms =
+                Output.flat [
+                  from_string "match "; bd; from_string ".compare_derived "; from_string x;
+                  from_string " "; from_string y; from_string (String.concat "" [" with "; arms]);
+                ] in
+              Output.flat [
+                from_string "\ninstance"; bare_tvs; cls_bounds "Ord" bounds;
+                from_string " : Lem_Basic_classes.SetType ("; o; type_args;
+                from_string ") where\n  setElemCompare x y := "; lem_of_cmp "x" "y";
+                from_string "\ninstance"; bare_tvs; cls_bounds "BEq" bounds;
+                from_string " : Lem_Basic_classes.Eq0 ("; o; type_args;
+                from_string ") where\n  isEqual := "; bd; from_string ".beq_derived";
+                from_string "\n  isInequal x y := !("; bd; from_string ".beq_derived x y)";
+                from_string "\ninstance"; bare_tvs; cls_bounds "Ord" bounds;
+                from_string " : Lem_Basic_classes.Ord0 ("; o; type_args;
+                from_string ") where\n  compare x y := "; lem_of_cmp "x" "y";
+                from_string "\n  isLess x y := "; bool_of_cmp "x" "y" "| .lt => true | _ => false";
+                from_string "\n  isLessEqual x y := "; bool_of_cmp "x" "y" "| .gt => false | _ => true";
+                from_string "\n  isGreater x y := "; bool_of_cmp "x" "y" "| .gt => true | _ => false";
+                from_string "\n  isGreaterEqual x y := "; bool_of_cmp "x" "y" "| .lt => false | _ => true";
+              ]
             in
-            let inst_kw = if has_deriving && tnvar_list = []
-              then "\ninstance"  (* Real implementations — default priority *)
-              else "\ninstance (priority := low)"  (* Sorry — overridable *)
+            let residual_trio reason inst_kw : Output.t =
+              Output.flat [
+                from_string inst_kw; bare_tvs; from_string " : Lem_Basic_classes.SetType ("; o;
+                type_args;
+                from_string ") where\n  setElemCompare _ _ := "; from_string (residual_body "SetType" reason);
+                from_string inst_kw; bare_tvs; from_string " : Lem_Basic_classes.Eq0 ("; o;
+                type_args;
+                from_string ") where\n  isEqual _ _ := "; from_string (residual_body "Eq0" reason);
+                from_string "\n  isInequal _ _ := "; from_string (residual_body "Eq0" reason);
+                from_string inst_kw; bare_tvs; from_string " : Lem_Basic_classes.Ord0 ("; o;
+                type_args;
+                from_string ") where\n  compare _ _ := "; from_string (residual_body "Ord0" reason);
+                from_string "\n  isLess _ _ := "; from_string (residual_body "Ord0" reason);
+                from_string "\n  isLessEqual _ _ := "; from_string (residual_body "Ord0" reason);
+                from_string "\n  isGreater _ _ := "; from_string (residual_body "Ord0" reason);
+                from_string "\n  isGreaterEqual _ _ := "; from_string (residual_body "Ord0" reason);
+              ]
+            in
+            (* Fallback trio for any parameterized type whose trio is real
+               (deriving-bridge or derived): the open-tyvar demand class. *)
+            let fallback_trio =
+              if tnvar_list = [] then emp
+              else if has_deriving || derived_cmp <> None
+              then residual_trio tv_reason "\ninstance (priority := 50)"
+              else emp
             in
             Output.flat [
               beq_instance;
               ord_instance;
-              from_string inst_kw; instance_tvs; from_string " : Lem_Basic_classes.SetType ("; o;
-              type_args;
-              from_string ") where\n  "; from_string settype_body;
-              from_string inst_kw; instance_tvs; from_string " : Lem_Basic_classes.Eq0 ("; o;
-              type_args;
-              from_string ") where\n  "; from_string eq0_body;
-              from_string inst_kw; instance_tvs; from_string " : Lem_Basic_classes.Ord0 ("; o;
-              type_args;
-              from_string ") where\n  "; from_string ord0_body;
+              fallback_beq_ord;
+              (if has_deriving && tnvar_list = [] then real_trio [] "\ninstance"
+               else if has_deriving then real_trio all_ty_tvs "\ninstance"
+               else match derived_cmp with
+                 | Some bounds -> derived_trio bounds
+                 | None -> residual_trio fn_reason "\ninstance (priority := low)");
+              fallback_trio;
             ]
+    (* ===== Arc-10 S2: derived structural comparisons for mutual blocks =====
+       For every derivable type of a (homogeneous-parameter) mutual block,
+       emit total mutual `beq_derived` / `compare_derived` functions plus
+       the specialized container helpers structural recursion needs, then
+       let generate_beq_ord_instances bridge the BEq/Ord/SetType/Eq0/Ord0
+       instances onto them.
+
+       PARITY CONVENTION (OCaml polymorphic (=) / compare, the arc-4
+       CerbStepInstances precedent):
+       - equality is structural: same constructor + equal fields;
+       - compare ranks constructors like the OCaml runtime
+         (runtime/compare.c): NULLARY constructors are immediates and sort
+         BELOW every non-nullary (block) constructor; within each class,
+         declaration order; equal constructors compare fields left-to-right
+         lexicographically (ctor_rank_ocaml encodes the two-class rank);
+       - list: [] (immediate) < _::_ (block), then elementwise lex;
+         maybe: None < Some; either: Left/inl < Right/inr — each matching
+         the OCaml value representation of the corresponding lem library
+         type;
+       - leaf fields (no mutual sibling inside) compare through their Lean
+         BEq/Ord instances. NOTE (registered): for MIXED nullary/non-nullary
+         variants whose Ord comes from Lean `deriving Ord`, that leaf order
+         is Lean's flat constructor index, which diverges from the OCaml
+         two-class rank — a pre-existing deriving-path divergence, recorded
+         in the arc-10 register, NOT introduced here.
+
+       FAIL-CLOSED: types whose comparison cannot be honestly derived
+       (function-typed fields anywhere — where OCaml (=)/compare RAISE —
+       or references to such siblings, or siblings under unsupported
+       container heads) are left exactly as before: sorried residual
+       instances, explicitly counted, overridable by hand instance files.
+       Underivability PROPAGATES: a "derived" body is never routed through
+       a sorried instance. *)
+    and lean_output_str (o : Output.t) : string =
+      Ulib.Text.to_string (to_rope (r"\"") lex_skip need_space o)
+    and lean_typ_render (ty : Types.t) : string =
+      lean_output_str (pat_typ (C.t_to_src_t ty))
+    and generate_derived_comparisons ts_list : Output.t * (Path.t * string list) list =
+      let d = A.env.t_env in
+      let l = Ast.Trans (false, "generate_derived_comparisons", None) in
+      let non_abbrev = List.filter (fun (_, _, _, t, _) ->
+        match t with Te_abbrev _ -> false | _ -> true) ts_list in
+      let skip_type path =
+        let td = Types.type_defs_lookup l A.env.t_env path in
+        Target.Targetset.mem Target.Target_lean td.Types.type_skip_instances ||
+        Target.Targetmap.apply_target td.Types.type_target_rep
+          (Target.Target_no_ident Target.Target_lean) <> None
+      in
+      let deriving_covered t = match t with
+        | Te_variant (_, ctors) ->
+          Seplist.for_all (fun (_, _, _, args) -> Seplist.to_list args = []) ctors
+          && texp_can_derive_beq t
+        | _ -> false
+      in
+      (* Candidates: (path, Lean type name, tnvar_list, ctors) with
+         ctor = (Lean ctor name, field semantic types). Instance-backed
+         block members (skip_instances / deriving-covered) are LEAVES;
+         everything else that fails candidacy is a SORRIED sibling —
+         referencing it poisons the referencing type (fail-closed). *)
+      let candidates, sorried0 =
+        List.fold_right (fun (((name, _), tnvar_list, path, t, _)) (cs, os) ->
+          if skip_type path then (cs, os)
+          else if deriving_covered t then (cs, os)
+          else if not (texp_can_derive_beq t) then (cs, path :: os)
+          else
+            let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip (B.type_path_to_name name path))) in
+            (match t with
+              | Te_variant (_, seplist) ->
+                let ctors = List.map (fun ((cn, _), c_ref, _, args) ->
+                  let cname = B.const_ref_to_name cn false c_ref in
+                  let cn_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip cname)) in
+                  (cn_str, List.map (fun (s : src_t) -> s.typ) (Seplist.to_list args))
+                ) (Seplist.to_list seplist) in
+                ((path, type_name_str, tnvar_list, ctors) :: cs, os)
+              | Te_record (_, _, fields, _) ->
+                let ctors = [("mk", List.map (fun (_, _, _, (s : src_t)) -> s.typ) (Seplist.to_list fields))] in
+                ((path, type_name_str, tnvar_list, ctors) :: cs, os)
+              | _ -> (cs, path :: os))
+        ) non_abbrev ([], [])
+      in
+      (* Fixpoint: drop candidates with any underivable field shape;
+         dropped candidates become sorried siblings for the next round. *)
+      let rec solve cands sorried =
+        let derived_map = List.map (fun (p, nm, _, _) -> (p, nm)) cands in
+        let ok, bad = List.partition (fun (_, _, _, ctors) ->
+          List.for_all (fun (_, args) ->
+            List.for_all (fun ty ->
+              not (lean_cmp_shape_is_bad (lean_cmp_shape d derived_map sorried ty))) args) ctors)
+          cands
+        in
+        if bad = [] then (ok, sorried)
+        else solve ok (List.map (fun (p, _, _, _) -> p) bad @ sorried)
+      in
+      let derived, sorried = solve candidates sorried0 in
+      if derived = [] then (emp, [])
+      else begin
+        let derived_map = List.map (fun (p, nm, _, _) -> (p, nm)) derived in
+        let shape_of ty = lean_cmp_shape d derived_map sorried ty in
+        (* Bound tyvars of a type: Type-kind parameters free in some field
+           (covers transitive needs — a sibling application's arguments are
+           part of the field type), in parameter-declaration order. *)
+        let bounds_of tnvar_list ctors =
+          let fvs = List.fold_left (fun acc (_, args) ->
+            List.fold_left (fun acc ty -> Types.TNset.union acc (Types.free_vars ty)) acc args)
+            Types.TNset.empty ctors in
+          let free_names = List.map (fun tnv -> Ulib.Text.to_string (Types.tnvar_to_rope tnv))
+            (Types.TNset.elements fvs) in
+          List.filter_map (fun tv ->
+            match tv with
+              | Typed_ast.Tn_A _ ->
+                let nm = tnvar_to_string tv in
+                if List.mem nm free_names then Some nm else None
+              | Typed_ast.Tn_N _ -> None) tnvar_list
+        in
+        (* Helper-def machinery: one specialized def per (kind, container
+           type), memoized per block, emitted inside the same mutual block
+           (classical structural recursion — the CerbStepInstances
+           beqLoadedValueList pattern, generated). *)
+        let helper_defs : string list ref = ref [] in
+        let helper_memo : (string, string) Hashtbl.t = Hashtbl.create 16 in
+        let helper_ctr = ref 0 in
+        let first_name = match derived with (_, nm, _, _) :: _ -> nm | [] -> assert false in
+        (* {tv : Type} [Cls tv] / {nv : Nat} binders for the tyvars free in
+           the given types (helper signatures). *)
+        let tv_binders_of (tys : Types.t list) (cls : string) : string =
+          let fvs = List.fold_left (fun acc ty -> Types.TNset.union acc (Types.free_vars ty))
+            Types.TNset.empty tys in
+          let bs = List.map (fun tnv ->
+            let nm = Ulib.Text.to_string (Types.tnvar_to_rope tnv) in
+            match tnv with
+              | Types.Ty _ -> Printf.sprintf "{%s : Type} [%s %s]" nm cls nm
+              | Types.Nv _ -> Printf.sprintf "{%s : Nat}" nm)
+            (Types.TNset.elements fvs) in
+          (match bs with [] -> "" | _ -> String.concat "" [" "; String.concat " " bs])
+        in
+        (* Build ctor-argument patterns; tuples destructure in-pattern.
+           Returns (x-pattern, y-pattern, leaves = (xvar, yvar, shape)). *)
+        let rec build_pats (ctr : int ref) (sh : cmp_shape) : string * string * (string * string * cmp_shape) list =
+          match sh with
+            | CStuple shs ->
+              let parts = List.map (build_pats ctr) shs in
+              (Printf.sprintf "(%s)" (String.concat ", " (List.map (fun (a, _, _) -> a) parts)),
+               Printf.sprintf "(%s)" (String.concat ", " (List.map (fun (_, b, _) -> b) parts)),
+               List.concat_map (fun (_, _, ls) -> ls) parts)
+            | _ ->
+              incr ctr;
+              let x = Printf.sprintf "x%d" !ctr and y = Printf.sprintf "y%d" !ctr in
+              (x, y, [(x, y, sh)])
+        in
+        let rec beq_leaf (x, y, sh) : string =
+          match sh with
+            | CSleaf -> Printf.sprintf "%s == %s" x y
+            | CSsibling nm -> Printf.sprintf "%s.beq_derived %s %s" nm x y
+            | CSlist (et, esh) -> Printf.sprintf "%s %s %s" (helper "beq" (CSlist (et, esh))) x y
+            | CSoption (et, esh) -> Printf.sprintf "%s %s %s" (helper "beq" (CSoption (et, esh))) x y
+            | CSsum (a, b) -> Printf.sprintf "%s %s %s" (helper "beq" (CSsum (a, b))) x y
+            | CStuple _ | CSbad _ -> assert false (* destructured / fail-closed upstream *)
+        and cmp_leaf (x, y, sh) : string =
+          match sh with
+            | CSleaf -> Printf.sprintf "Ord.compare %s %s" x y
+            | CSsibling nm -> Printf.sprintf "%s.compare_derived %s %s" nm x y
+            | CSlist (et, esh) -> Printf.sprintf "%s %s %s" (helper "cmp" (CSlist (et, esh))) x y
+            | CSoption (et, esh) -> Printf.sprintf "%s %s %s" (helper "cmp" (CSoption (et, esh))) x y
+            | CSsum (a, b) -> Printf.sprintf "%s %s %s" (helper "cmp" (CSsum (a, b))) x y
+            | CStuple _ | CSbad _ -> assert false
+        and beq_conj (leaves : (string * string * cmp_shape) list) : string =
+          match leaves with
+            | [] -> "true"
+            | _ -> String.concat " && " (List.map beq_leaf leaves)
+        and cmp_chain (leaves : (string * string * cmp_shape) list) : string =
+          match leaves with
+            | [] -> "Ordering.eq"
+            | [lf] -> cmp_leaf lf
+            | lf :: rest ->
+              Printf.sprintf "(match %s with | .lt => Ordering.lt | .gt => Ordering.gt | .eq => %s)"
+                (cmp_leaf lf) (cmp_chain rest)
+        (* Named helper for a container shape; generated on first demand. *)
+        and helper (kind : string) (sh : cmp_shape) : string =
+          let key = String.concat "" [kind; "|"; (match sh with
+            | CSlist (et, _) -> String.concat "" ["list|"; lean_typ_render et]
+            | CSoption (et, _) -> String.concat "" ["option|"; lean_typ_render et]
+            | CSsum ((lt_, _), (rt_, _)) -> String.concat "" ["sum|"; lean_typ_render lt_; "|"; lean_typ_render rt_]
+            | _ -> assert false)]
+          in
+          match Hashtbl.find_opt helper_memo key with
+            | Some nm -> nm
+            | None ->
+              incr helper_ctr;
+              let nm = Printf.sprintf "%s.%s_deriv_aux%d" first_name kind !helper_ctr in
+              Hashtbl.add helper_memo key nm;
+              (* Elements destructure via build_pats, so tuple-shaped
+                 elements (e.g. List ((pattern × pexpr))) compare
+                 componentwise inside the helper's own arm. *)
+              let elem kind0 esh =
+                let ctr = ref 0 in
+                let (px, py, leaves) = build_pats ctr esh in
+                (px, py, (if kind0 = "beq" then beq_conj leaves else cmp_chain leaves))
+              in
+              let def_text =
+                match sh, kind with
+                  | CSlist (et, esh), "beq" ->
+                    let ety = lean_typ_render et in
+                    let (px, py, body) = elem "beq" esh in
+                    Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : List (%s)) : Bool := match cmpx_, cmpy_ with\n  | [], [] => true\n  | %s :: xs0, %s :: ys0 => %s && %s xs0 ys0\n  | _, _ => false\ntermination_by structural cmpx_"
+                      nm (tv_binders_of [et] "BEq") ety
+                      px py body nm
+                  | CSlist (et, esh), "cmp" ->
+                    let ety = lean_typ_render et in
+                    let (px, py, body) = elem "cmp" esh in
+                    Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : List (%s)) : Ordering := match cmpx_, cmpy_ with\n  | [], [] => Ordering.eq\n  | [], _ :: _ => Ordering.lt\n  | _ :: _, [] => Ordering.gt\n  | %s :: xs0, %s :: ys0 => (match %s with | .lt => Ordering.lt | .gt => Ordering.gt | .eq => %s xs0 ys0)\ntermination_by structural cmpx_"
+                      nm (tv_binders_of [et] "Ord") ety
+                      px py body nm
+                  | CSoption (et, esh), "beq" ->
+                    let ety = lean_typ_render et in
+                    let (px, py, body) = elem "beq" esh in
+                    Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : Option (%s)) : Bool := match cmpx_, cmpy_ with\n  | none, none => true\n  | some %s, some %s => %s\n  | _, _ => false\ntermination_by structural cmpx_"
+                      nm (tv_binders_of [et] "BEq") ety
+                      px py body
+                  | CSoption (et, esh), "cmp" ->
+                    let ety = lean_typ_render et in
+                    let (px, py, body) = elem "cmp" esh in
+                    Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : Option (%s)) : Ordering := match cmpx_, cmpy_ with\n  | none, none => Ordering.eq\n  | none, some _ => Ordering.lt\n  | some _, none => Ordering.gt\n  | some %s, some %s => %s\ntermination_by structural cmpx_"
+                      nm (tv_binders_of [et] "Ord") ety
+                      px py body
+                  | CSsum ((lt_, shl), (rt_, shr)), "beq" ->
+                    let lty = lean_typ_render lt_ and rty = lean_typ_render rt_ in
+                    let (plx, ply, lbody) = elem "beq" shl in
+                    let (prx, pry, rbody) = elem "beq" shr in
+                    Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : Sum (%s) (%s)) : Bool := match cmpx_, cmpy_ with\n  | Sum.inl %s, Sum.inl %s => %s\n  | Sum.inr %s, Sum.inr %s => %s\n  | _, _ => false\ntermination_by structural cmpx_"
+                      nm (tv_binders_of [lt_; rt_] "BEq") lty rty
+                      plx ply lbody prx pry rbody
+                  | CSsum ((lt_, shl), (rt_, shr)), "cmp" ->
+                    let lty = lean_typ_render lt_ and rty = lean_typ_render rt_ in
+                    let (plx, ply, lbody) = elem "cmp" shl in
+                    let (prx, pry, rbody) = elem "cmp" shr in
+                    Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : Sum (%s) (%s)) : Ordering := match cmpx_, cmpy_ with\n  | Sum.inl %s, Sum.inl %s => %s\n  | Sum.inl _, Sum.inr _ => Ordering.lt\n  | Sum.inr _, Sum.inl _ => Ordering.gt\n  | Sum.inr %s, Sum.inr %s => %s\ntermination_by structural cmpx_"
+                      nm (tv_binders_of [lt_; rt_] "Ord") lty rty
+                      plx ply lbody prx pry rbody
+                  | _ -> assert false
+              in
+              helper_defs := def_text :: !helper_defs;
+              nm
+        in
+        (* Signature pieces per type. *)
+        let sig_of tnvar_list bounds cls =
+          let binders = String.concat "" (List.map (fun tv ->
+            let nm = tnvar_to_string tv in
+            let base = Printf.sprintf " {%s : %s}" nm (tnvar_kind tv) in
+            if List.mem nm bounds then Printf.sprintf "%s [%s %s]" base cls nm else base)
+            tnvar_list) in
+          let args = String.concat "" (List.map (fun tv -> String.concat "" [" "; tnvar_to_string tv]) tnvar_list) in
+          (binders, args)
+        in
+        (* Two-class OCaml rank def (only needed with >1 constructor). *)
+        let rank_def type_name tnvar_list ctors : string =
+          let nullary_rank = ref 0 in
+          let nnullary = List.length (List.filter (fun (_, args) -> args = []) ctors) in
+          let block_rank = ref 0 in
+          let arms = List.map (fun (cn, args) ->
+            let rank =
+              if args = [] then (let r0 = !nullary_rank in incr nullary_rank; r0)
+              else (let r0 = nnullary + !block_rank in incr block_rank; r0)
+            in
+            let wilds = String.concat "" (List.map (fun _ -> " _") args) in
+            Printf.sprintf "  | .%s%s => %d" cn wilds rank) ctors in
+          let (binders, args) = sig_of tnvar_list [] "" in
+          Printf.sprintf
+            "/- OCaml polymorphic-compare constructor rank: nullary constructors\n   (immediates) sort below non-nullary (blocks); declaration order within\n   each class. -/\ndef %s.ctor_rank_ocaml%s : %s%s → Nat\n%s"
+            type_name binders type_name args (String.concat "\n" arms)
+        in
+        let beq_def (type_name, tnvar_list, bounds, ctors) : string =
+          let (binders, args) = sig_of tnvar_list bounds "BEq" in
+          let arms = List.map (fun (cn, argtys) ->
+            let ctr = ref 0 in
+            let parts = List.map (fun ty -> build_pats ctr (shape_of ty)) argtys in
+            let px = String.concat " " (List.map (fun (a, _, _) -> a) parts) in
+            let py = String.concat " " (List.map (fun (_, b, _) -> b) parts) in
+            let leaves = List.concat_map (fun (_, _, ls) -> ls) parts in
+            let sp = if argtys = [] then "" else " " in
+            Printf.sprintf "  | .%s%s%s, .%s%s%s => %s" cn sp px cn sp py (beq_conj leaves)) ctors in
+          let fallback = if List.length ctors > 1 then ["  | _, _ => false"] else [] in
+          Printf.sprintf "def %s.beq_derived%s (cmpx_ cmpy_ : %s%s) : Bool := match cmpx_, cmpy_ with\n%s\ntermination_by structural cmpx_"
+            type_name binders type_name args
+            (String.concat "\n" (arms @ fallback))
+        in
+        let cmp_def (type_name, tnvar_list, bounds, ctors) : string =
+          let (binders, args) = sig_of tnvar_list bounds "Ord" in
+          let arms = List.filter_map (fun (cn, argtys) ->
+            if argtys = [] then None  (* nullary pairs: rank fallback yields .eq *)
+            else begin
+              let ctr = ref 0 in
+              let parts = List.map (fun ty -> build_pats ctr (shape_of ty)) argtys in
+              let px = String.concat " " (List.map (fun (a, _, _) -> a) parts) in
+              let py = String.concat " " (List.map (fun (_, b, _) -> b) parts) in
+              let leaves = List.concat_map (fun (_, _, ls) -> ls) parts in
+              Some (Printf.sprintf "  | .%s %s, .%s %s => %s" cn px cn py (cmp_chain leaves))
+            end) ctors in
+          let fallback =
+            if List.length ctors > 1 then
+              [Printf.sprintf "  | xg, yg => Ord.compare (%s.ctor_rank_ocaml xg) (%s.ctor_rank_ocaml yg)" type_name type_name]
+            else [] in
+          Printf.sprintf "def %s.compare_derived%s (cmpx_ cmpy_ : %s%s) : Ordering := match cmpx_, cmpy_ with\n%s\ntermination_by structural cmpx_"
+            type_name binders type_name args
+            (String.concat "\n" (arms @ fallback))
+        in
+        (* Render: rank defs (non-recursive, before the block), then the
+           mutual block. Type-def bodies are rendered FIRST so helper
+           demand is populated; helpers can demand further helpers. *)
+        let per_type = List.map (fun (path, nm, tnvar_list, ctors) ->
+          (path, nm, tnvar_list, bounds_of tnvar_list ctors, ctors)) derived in
+        let type_defs_text = List.concat_map (fun (_, nm, tvs, bounds, ctors) ->
+          [beq_def (nm, tvs, bounds, ctors); cmp_def (nm, tvs, bounds, ctors)]) per_type in
+        let rank_defs_text = List.filter_map (fun (_, nm, tvs, _, ctors) ->
+          if List.length ctors > 1 then Some (rank_def nm tvs ctors) else None) per_type in
+        let all_mutual = type_defs_text @ List.rev !helper_defs in
+        let text = String.concat "" [
+          "\n/- Arc-10 S2: derived structural comparisons (OCaml polymorphic\n";
+          "   (=)/compare parity at this type's constructors: structural equality;\n";
+          "   nullary-below-block constructor rank, declaration order within each\n";
+          "   class; left-to-right lexicographic fields; leaf fields via their\n";
+          "   Lean BEq/Ord instances). -/\n";
+          (match rank_defs_text with [] -> "" | rs -> String.concat "" [String.concat "\n" rs; "\n"]);
+          "mutual\n";
+          String.concat "\n" all_mutual;
+          "\nend\n";
+        ] in
+        (from_string text, List.map (fun (path, _, _, bounds, _) -> (path, bounds)) per_type)
+      end
     and generate_default_values ts : Output.t =
       let ts = Seplist.to_list ts in
       (* In library modules, skip instance generation for opaque types
@@ -4284,8 +4839,20 @@ type pat_style = FunParam | MatchArm
       (* If only 1 non-abbreviation type remains, it was rendered with deriving
          (not as a mutual block), so emit_deriving:true to avoid duplicate instances. *)
       let emit_deriving = List.length non_abbrev <= 1 in
-      let beq_instances = List.map (generate_beq_ord_instances ~is_type1 ~emit_deriving) ts_list in
-        Output.flat [inhabited_output; from_string "\n"; concat emp beq_instances]
+      (* Arc-10 S2: derived structural comparisons for the block's
+         derivable types (real mutual beq/compare defs; fail-closed
+         residual for the rest). Homogeneous-parameter multi-type blocks
+         only: Type-1 (indexed) blocks and single-type blocks keep the
+         historical emission (currently-empty populations). *)
+      let (cmp_defs, derived_info) =
+        if is_type1 || emit_deriving then (emp, [])
+        else generate_derived_comparisons ts_list
+      in
+      let beq_instances = List.map (fun (((_, _), _, path, _, _) as td) ->
+        let derived_cmp =
+          Option.map snd (List.find_opt (fun (p, _) -> Path.compare p path = 0) derived_info) in
+        generate_beq_ord_instances ~is_type1 ~emit_deriving ?derived_cmp td) ts_list in
+        Output.flat [inhabited_output; from_string "\n"; cmp_defs; concat emp beq_instances]
     (* Arc-8 S2 (D4): the former `default_value` (the L_undefined
        renderer whose Typ_var case emitted `sorry`) is DELETED —
        L_undefined renders as failwithI (audit fix; mirrors OCaml's

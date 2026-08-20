@@ -22,6 +22,7 @@ lean_lib LemComprehensiveTest where
     `Test_cross_module_import, `Test_cross_module_import_auxiliary,
     `Test_cross_recup_base, `Test_cross_recup_base_auxiliary,
     `Test_cross_recup_import, `Test_cross_recup_import_auxiliary,
+    `Test_derived_comparison, `Test_derived_comparison_auxiliary,
     `Test_derived_inhabited, `Test_derived_inhabited_auxiliary,
     `TestDerivedInhabitedCheck,  -- hand-written arc-8 S1 instance-shape checks
     `Test_deriving, `Test_deriving_auxiliary,

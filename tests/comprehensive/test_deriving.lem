@@ -35,6 +35,13 @@ type point = <| x : nat; y : nat |>
 (* Parameterized type - deriving should add constraints automatically *)
 type box 'a = Box of 'a | Empty
 
+(* Either-typed fields (arc-10 S2 R1): LemLib now provides BEq/Ord for
+   Sum, so fn-free types with either fields derive (formerly the arc-8
+   ebox blocker: emitted `deriving BEq, Ord` failed to compile for lack
+   of an `Ord (Sum a b)` instance). *)
+type e_field = EFPlain of either nat bool | EFNone
+type e_field_poly 'a = EFPoly of either 'a (list 'a)
+
 (* ------------------------------------------------------------------ *)
 (* Section 2: Abbreviation hiding function type                       *)
 (* ------------------------------------------------------------------ *)
