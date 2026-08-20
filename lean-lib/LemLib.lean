@@ -4,7 +4,6 @@ import Std.Data.TreeMap
 # LemLib — Lean 4 runtime library for Lem
 
 Provides the core types and operations that Lem-generated Lean 4 code depends on:
-- `DAEMON`: undefined value axiom (analogous to Coq's DAEMON)
 - `LemOrdering`: three-way comparison type used by set/map operations
 - Comparison, arithmetic, and string helpers
 - Set operations (using sorted `List` representation with `LemOrdering` comparators)
@@ -18,13 +17,16 @@ comparator. Functions without `By` use Lean's `BEq` or `Ord` type classes.
 
 /- Lem standard library support for Lean 4 -/
 
-/- DAEMON: undefined value placeholder, analogous to Coq's DAEMON axiom.
-   Uses @[implemented_by] so it's computable (works with partial def)
-   but the runtime value is never meaningfully evaluated. -/
-private unsafe def DAEMON_impl {α : Type} : α := unsafeCast ()
-private unsafe def DAEMON1_impl {α : Type 1} : α := unsafeCast ()
-@[implemented_by DAEMON_impl] axiom DAEMON : ∀ {α : Type}, α
-@[implemented_by DAEMON1_impl] axiom DAEMON1 : ∀ {α : Type 1}, α
+/- HISTORY (arc-8 S3, 2026-08-20): `axiom DAEMON : ∀ {α : Type}, α`
+   (with DAEMON1 and their @[implemented_by unsafeCast] impls) and the
+   legacy `failwith` (whose value WAS DAEMON) lived here until arc-8.
+   DAEMON as declared was a logically INCONSISTENT axiom
+   (`(DAEMON : Empty)` proves `False`); the backend now derives real
+   bounded Inhabited instances (arc-8 S1) and emits failwithI with
+   `[Inhabited tv]` signature threading (arc-8 S2), so nothing generated
+   references them. DO NOT REINTRODUCE any axiom-valued or unsafeCast
+   inhabitant: consumers enforce absence in-build (cerberus-lean
+   relsem/RelSem/Audit.lean absence gate). -/
 
 /- runEffectful: execute a thunked BaseIO action, extracting the result.
    Used by the Lean backend for effectful target_rep functions.
@@ -121,12 +123,11 @@ def lemBoolToProp (b : Bool) : Prop := b = true
    is syntactically GROUND (no type variables), where instance resolution
    cannot require constraint propagation. Properties, each load-bearing:
    - opaque: NO equations — an error branch is not provably equal to any
-     value (strictly stronger claim hygiene than both DAEMON and a
-     `:= default` body);
+     value (strictly stronger claim hygiene than a `:= default` body);
    - axiom-free: the `:= default` initializer only witnesses
      inhabitation; opaque does not expose it definitionally;
    - computable at runtime via @[implemented_by]: panics with the message,
-     byte-identical behavior to failwith. -/
+     byte-identical behavior to the retired legacy failwith (arc-8 S3). -/
 private unsafe def failwithIImpl {α : Type} [Inhabited α] (msg : String) : α :=
   panic! msg
 @[implemented_by failwithIImpl]
@@ -136,9 +137,8 @@ opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
    type is pure (no error channel) and possibly polymorphic (arc-3 sweep).
    The witness — any in-scope value of the return type, typically one of
    the worker's own arguments — discharges inhabitation LOCALLY: no
-   [Inhabited] constraint propagates into generated signatures (the
-   April-2026 requirement), and no generated-instance DAEMON fallback
-   enters the cone. Same load-bearing properties as failwithI: opaque (no
+   [Inhabited] constraint propagates into generated signatures, and no
+   generated-instance fallback enters the cone. Same load-bearing properties as failwithI: opaque (no
    equations — the fuel-exhausted branch is not provably equal to
    anything, in particular NOT to the witness), axiom-free, and loud at
    runtime via @[implemented_by] panic. -/
@@ -167,13 +167,6 @@ def fromJustI1 {α : Type} [Inhabited α] : Option α → α
   | some x => x
   | none => failwithI "fromJust"
 
-
-/- failwith: raises a panic with the given message -/
-unsafe def failwithImpl {α : Type} (msg : String) : α :=
-  @panic α ⟨unsafeCast ()⟩ msg
-
-@[implemented_by failwithImpl]
-def failwith {α : Type} (_msg : String) : α := DAEMON
 
 /- Function application -/
 def apply (f : α → β) (x : α) : β := f x
