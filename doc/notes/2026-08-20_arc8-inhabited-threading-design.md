@@ -269,3 +269,19 @@ the `Backend "sorry"` pass-through for USER-written `sorry`
 target_reps (sole corpus use: cmm_op concurrency stubs, TEMPORAL
 boundary); polymorphic Let_defs emit no tyvar binders (pre-existing
 shape limitation, unreachable-loud).
+
+## Arc-8 close-out (2026-08-20, S4)
+
+S3 executed as specified above: DAEMON, DAEMON1, DAEMON_impl,
+DAEMON1_impl and legacy `failwith` deleted from LemLib (`9d220e4`);
+cerberus re-pinned and fully regenerated with zero references and zero
+differential movement; the cerberus-side absence gates landed
+(in-build RelSem Audit.lean environment scan + the
+check_theorem_axioms.sh arc-8 bar), and T1–T4 cones are exactly
+`[propext, runEffectful, Classical.choice, Quot.sound]`. The S2
+implementation record above is the corrected reference over the S0
+census's Class partition (cerberus-lean decision log D6). Full arc
+record: cerberus-lean `lean_frontend/docs/2026-08-20_arc8-results.md`;
+work order closed: cerberus-lean
+`lean_frontend/lembugs/2026-08-20_daemon-inconsistent-axiom.md`
+(RESOLVED header).
