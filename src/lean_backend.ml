@@ -3954,7 +3954,10 @@ type pat_style = FunParam | MatchArm
           per-constructor bounded derivation (arc-8 S1; fail-closed —
           underivable types get no instance and backend-visible demands
           on them are generation-time errors)
-       2. BEq + Ord (derived via `deriving` if possible, sorry-based otherwise)
+       2. BEq + Ord (via `deriving` if possible; otherwise derived
+          structural comparisons (arc-10 S2b) or loud failwithI residuals
+          — NO sorry emission path; Type-1 blocks are a generation-time
+          error (arc-10 audit fix), fail-closed like the Inhabited path)
        3. SetType / Eq0 / Ord0 instances (with [BEq]/[Ord] constraints for parameterized types)
        Mutual types use find_safe_ctor_for_mutual to avoid self-referential defaults.
        Library opaque types (phantom types like ty1..ty4096) skip instance generation. *)
@@ -4317,18 +4320,18 @@ type pat_style = FunParam | MatchArm
           let beq_instance, ord_instance =
             if has_deriving then (emp, emp)
             else if is_type1 then
-              (* Type 1 universe: failwithI is Type-only, keep the sorried
-                 residual (currently-empty population). *)
-              (Output.flat [
-                from_string "\ninstance (priority := low)"; bare_tvs; from_string " : BEq ("; o;
-                type_args;
-                from_string ") where\n  beq _ _ := sorry";
-              ],
-              Output.flat [
-                from_string "\ninstance (priority := low)"; bare_tvs; from_string " : Ord ("; o;
-                type_args;
-                from_string ") where\n  compare _ _ := sorry";
-              ])
+              (* Type-1 universe (heterogeneous parameter counts in the
+                 mutual block): FAIL-CLOSED (arc-10 audit fix, auditor A
+                 F1). The historical `:= sorry` residual bodies are
+                 DELETED — no opaque-inhabitant emission path may remain
+                 (the arc-8 convention; population is empty today, so
+                 any future Type-1 type reaching instance emission is a
+                 loud generation-time error naming the escape hatches,
+                 exactly like the Inhabited path). *)
+              raise (Reporting_basic.err_general true Ast.Unknown
+                (Printf.sprintf
+                  "Lean backend: cannot derive BEq/Ord instances for type '%s': heterogeneous type-parameter counts put its mutual block in the Type 1 universe (the historical sorry-bodied residual instances are deleted, arc-10 audit fix); escape hatches: 'declare {lean} skip_instances type %s' plus hand-written Lean instances where demanded, or 'declare lean target_rep type %s' mapping it to a hand-written Lean type"
+                  type_name_str type_name_str type_name_str))
             else match derived_cmp with
               | Some bounds ->
                 (* Arc-10 S2: REAL instances over the derived structural
@@ -4842,8 +4845,11 @@ type pat_style = FunParam | MatchArm
       (* Arc-10 S2: derived structural comparisons for the block's
          derivable types (real mutual beq/compare defs; fail-closed
          residual for the rest). Homogeneous-parameter multi-type blocks
-         only: Type-1 (indexed) blocks and single-type blocks keep the
-         historical emission (currently-empty populations). *)
+         only: single-type blocks keep the historical emission, and
+         Type-1 (indexed) blocks are a fail-closed generation-time
+         error in generate_beq_ord_instances (arc-10 audit fix,
+         auditor A F1 — the sorried Type-1 residual is deleted;
+         population empty). *)
       let (cmp_defs, derived_info) =
         if is_type1 || emit_deriving then (emp, [])
         else generate_derived_comparisons ts_list

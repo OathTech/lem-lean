@@ -50,6 +50,15 @@ let mr_test4 = is_odd 5
 type foo = A | B of bar nat
 and bar 'a = C of 'a | D of foo
 
+(* Arc-10 audit fix (auditor A F1): Type-1 blocks (heterogeneous param
+   counts) no longer get sorry-bodied BEq/Ord instances — reaching
+   instance emission there is a fail-closed generation-time error
+   (negative probe: negative/neg_type1_comparison.lem). These tests pin
+   the Type-1 RENDERING only; no comparison is demanded, so the
+   skip_instances escape hatch is the documented recipe. *)
+declare {lean} skip_instances type foo
+declare {lean} skip_instances type bar
+
 let mr_test5 = A
 let mr_test6 = B (C 42)
 let mr_test7 = D A
@@ -187,6 +196,10 @@ type het_tree_node 'a =
   | HTBranch of het_tree_meta
 and het_tree_meta = <| tm_depth : nat; tm_label : string |>
 
+(* Type-1 block: escape hatch per the arc-10 audit fix (see above). *)
+declare {lean} skip_instances type het_tree_node
+declare {lean} skip_instances type het_tree_meta
+
 let meta1 = <| tm_depth = 3; tm_label = "root" |>
 let het_leaf1 : het_tree_node nat = HTLeaf 42
 let het_branch1 : het_tree_node nat = HTBranch meta1
@@ -206,6 +219,11 @@ and ann2 = <| a2_line : nat; a2_col : nat |>
 and ctx2 =
   | C2Top
   | C2Nested of ctx2
+
+(* Type-1 block: escape hatch per the arc-10 audit fix (see above). *)
+declare {lean} skip_instances type expr2
+declare {lean} skip_instances type ann2
+declare {lean} skip_instances type ctx2
 
 let ann = <| a2_line = 10; a2_col = 5 |>
 

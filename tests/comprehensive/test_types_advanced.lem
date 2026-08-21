@@ -133,6 +133,15 @@ and branch3 'a =
 and leaf_count =
   | LC of nat
 
+(* Arc-10 audit fix (auditor A F1): Type-1 blocks (heterogeneous param
+   counts) no longer get sorry-bodied BEq/Ord instances — reaching
+   instance emission there is a fail-closed generation-time error
+   (negative probe: negative/neg_type1_comparison.lem). skip_instances
+   is the documented escape hatch; no comparison is demanded here. *)
+declare {lean} skip_instances type tree3
+declare {lean} skip_instances type branch3
+declare {lean} skip_instances type leaf_count
+
 let lc1 = LC 0
 
 (* --- Opaque type in mutual block with variant --- *)
