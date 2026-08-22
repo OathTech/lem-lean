@@ -4449,11 +4449,27 @@ type pat_style = FunParam | MatchArm
           else
             (* SetType/Eq0/Ord0 (lem classes): bridge to the Lean BEq/Ord
                instances wherever those are real — derived-with-`deriving`
-               (monomorphic: unconditional, default priority — the
-               historical emission; parameterized: [BEq tv]/[Ord tv]
+               (monomorphic: unconditional; parameterized: [BEq tv]/[Ord tv]
                bounds, arc-10 S2) or comparison-derived (bounds from the
                derivation plan). Residual types (and the open-tyvar fallback
-               for parameterized ones) carry loud failwithI bodies. *)
+               for parameterized ones) carry loud failwithI bodies.
+
+               PRIORITY (arc-14 S2 B4, be:G1 + sem:S2): the AUTO trio is
+               emitted at (priority := 500) — the "auto" slot of the
+               normative lattice (doc/notes/2026-08-22_arc14-instance-
+               priority-lattice.md): strictly BELOW model-declared lem
+               `instance` declarations and hand-written overrides (default
+               = 1000), so a model's own Eq0/SetType/Ord0 wins by PRIORITY
+               (previously both were default and the model instance won
+               only by newest-declaration-first order — the sem:S2
+               accident: e.g. Symbol.identifier's location-sensitive auto
+               Eq0 vs the model's name-only Eq0); strictly ABOVE the
+               generic low(=100) bridges/defaults in LemLib/Basic_classes
+               and the open-tyvar fallbacks (50), so where no model
+               instance exists the real auto trio still beats every
+               fallback. Resolution probe: tests/comprehensive
+               instance_priority.lem (build-failing if the wrong instance
+               wins). *)
             let real_trio (bounds : string list) (inst_kw : string) : Output.t =
               Output.flat [
                 from_string inst_kw; bare_tvs; cls_bounds "Ord" bounds;
@@ -4485,14 +4501,14 @@ type pat_style = FunParam | MatchArm
                   from_string " "; from_string y; from_string (String.concat "" [" with "; arms]);
                 ] in
               Output.flat [
-                from_string "\ninstance"; bare_tvs; cls_bounds "Ord" bounds;
+                from_string "\ninstance (priority := 500)"; bare_tvs; cls_bounds "Ord" bounds;
                 from_string " : Lem_Basic_classes.SetType ("; o; type_args;
                 from_string ") where\n  setElemCompare x y := "; lem_of_cmp "x" "y";
-                from_string "\ninstance"; bare_tvs; cls_bounds "BEq" bounds;
+                from_string "\ninstance (priority := 500)"; bare_tvs; cls_bounds "BEq" bounds;
                 from_string " : Lem_Basic_classes.Eq0 ("; o; type_args;
                 from_string ") where\n  isEqual := "; bd; from_string ".beq_derived";
                 from_string "\n  isInequal x y := !("; bd; from_string ".beq_derived x y)";
-                from_string "\ninstance"; bare_tvs; cls_bounds "Ord" bounds;
+                from_string "\ninstance (priority := 500)"; bare_tvs; cls_bounds "Ord" bounds;
                 from_string " : Lem_Basic_classes.Ord0 ("; o; type_args;
                 from_string ") where\n  compare x y := "; lem_of_cmp "x" "y";
                 from_string "\n  isLess x y := "; bool_of_cmp "x" "y" "| .lt => true | _ => false";
@@ -4531,8 +4547,8 @@ type pat_style = FunParam | MatchArm
               beq_instance;
               ord_instance;
               fallback_beq_ord;
-              (if has_deriving && tnvar_list = [] then real_trio [] "\ninstance"
-               else if has_deriving then real_trio all_ty_tvs "\ninstance"
+              (if has_deriving && tnvar_list = [] then real_trio [] "\ninstance (priority := 500)"
+               else if has_deriving then real_trio all_ty_tvs "\ninstance (priority := 500)"
                else match derived_cmp with
                  | Some bounds -> derived_trio bounds
                  | None -> residual_trio fn_reason "\ninstance (priority := low)");

@@ -35,12 +35,12 @@ inductive  bitSequence : Type where
 export bitSequence (BitSeq)
 instance : Inhabited (bitSequence) where
   default := BitSeq default default default
-instance : Lem_Basic_classes.SetType (bitSequence) where
+instance (priority := 500) : Lem_Basic_classes.SetType (bitSequence) where
   setElemCompare := defaultCompare
-instance : Lem_Basic_classes.Eq0 (bitSequence) where
+instance (priority := 500) : Lem_Basic_classes.Eq0 (bitSequence) where
   isEqual x y := x == y
   isInequal x y := !(x == y)
-instance : Lem_Basic_classes.Ord0 (bitSequence) where
+instance (priority := 500) : Lem_Basic_classes.Ord0 (bitSequence) where
   compare := defaultCompare
   isLess := defaultLess
   isLessEqual := defaultLessEq
