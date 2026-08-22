@@ -5233,10 +5233,10 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
           let bridges_import = if has_bridges then emp
             else from_string "import LemLib.Bridges\n" in
           let lib_namespaces = Types.Pfmap.fold (fun acc _path md ->
-            let has_coq_rename =
-              Target.Targetmap.apply_target md.Typed_ast.mod_target_rep
-                (Target.Target_no_ident Target.Target_coq) <> None in
-            if has_coq_rename then begin
+            (* be:G5 consolidation: the ONE library test
+               (Backend_common.lean_module_is_library) — this scan
+               previously re-implemented the coq-rename proxy inline. *)
+            if Backend_common.lean_module_is_library md then begin
               let mod_name = Path.to_string md.Typed_ast.mod_binding in
               let lean_mod = String.concat "" ["LemLib."; String.capitalize_ascii mod_name] in
               let ns = lean_ns_name lean_mod in

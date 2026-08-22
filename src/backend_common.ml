@@ -251,19 +251,35 @@ let inline_pat_macro (target : Target.non_ident_target) env _ _ p =
   generalised_inline_pat_macro false (Target.Target_no_ident target) env p
 
 
+(* THE library-module test for the Lean target — the ONE implementation
+   (arc-14 S2 B5, be:G5 consolidation; the transitive-opens scan in
+   lean_backend.ml calls this too, where it previously re-implemented it).
+
+   REGISTERED RESIDUAL (be:G5, price M): the test itself is still a
+   PROXY — "declares a {coq} module rename" — which every lem library
+   .lem file does (e.g. {coq} rename module = lem_bool) and no cerberus
+   model file does, but which a user module could legally declare,
+   silently reclassifying it (LemLib namespace wrapper, different
+   import/open scheme, Te_opaque filtering). The principled marker is a
+   SOURCE-PATH test (md.mod_filename's directory against lem's library
+   paths — the Isabelle branch of get_module_open_string already walks
+   mod_filename this way), but the library-path list lives in main.ml
+   (lib_paths_ref), which backends cannot depend on — threading it
+   cleanly needs a Backend.Make/def_ctxt parameter, not another mutable
+   side channel (the be:G3 lesson). Registered with that design; until
+   then this comment is the single normative statement of the proxy. *)
+let lean_module_is_library (md : Typed_ast.mod_descr) : bool =
+  Target.Targetmap.apply_target md.mod_target_rep
+    (Target.Target_no_ident Target.Target_coq) <> None
+
 let get_module_name_from_descr md mod_name extra_rename target = begin
   let transform_name_for_target n = match target with
     | Target.Target_no_ident (Target.Target_coq) -> Util.uncapitalize_prefix n
     | Target.Target_no_ident (Target.Target_hol) -> Util.string_map (fun c -> if c = '-' then  '_' else c) (Util.uncapitalize_prefix n)
     | Target.Target_no_ident (Target.Target_lean) ->
-        (* Library modules get the LemLib. prefix so they live under the LemLib namespace.
-           We detect library modules by checking for a Coq rename — all library .lem files
-           declare one (e.g. {coq} rename module = lem_bool). *)
-        let is_library_module =
-          Target.Targetmap.apply_target md.mod_target_rep
-            (Target.Target_no_ident Target.Target_coq) <> None
-        in
-        if is_library_module then String.concat "" ["LemLib."; n] else n
+        (* Library modules get the LemLib. prefix so they live under the
+           LemLib namespace (detection: lean_module_is_library above). *)
+        if lean_module_is_library md then String.concat "" ["LemLib."; n] else n
     | _ -> n
   in
   let lem_mod_name = match Target.Targetmap.apply_target md.mod_target_rep target with

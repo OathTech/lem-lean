@@ -80,6 +80,11 @@ val component_to_output : Ast.component -> Output.t
 
 (** [get_module_name env targ mod_path mod_name] looks up the name of module [mod_path.mod_name] in environment [env] for
     target [targ].*)
+(* THE library-module test for the Lean target (arc-14 S2 B5, be:G5
+   consolidation — one implementation; see the .ml for the registered
+   proxy residual). *)
+val lean_module_is_library : Typed_ast.mod_descr -> bool
+
 val get_module_name : env -> Target.target -> Name.t list -> Name.t -> Name.t
 
 (** [get_module_open_string l env targ dir relative mod_path] looks up how to represent this module in import / open statements. *)
