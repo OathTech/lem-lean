@@ -62,13 +62,34 @@ attribute [never_extract] runEffectful
 /- Default fuel for 'declare {lean} fuel val' wrappers: bounds recursion
    DEPTH at declared non-structural points only (never value size), so any
    well-formed input stays far under it. Proof-side statements carry
-   "fuel large enough" side conditions on the worker instead. -/
+   "fuel large enough" side conditions on the worker instead.
+   PROVENANCE (be:N10): 10^6 chosen at the arc-3 totality sweep as
+   "orders of magnitude above any observed depth" (deepest measured
+   consumer recursion at the time: cerberus Core-typing/pp descents,
+   O(10^2-10^3)); it is a per-consumer empirical margin, not a theorem —
+   exhaustion is LOUD (fuelExhausted panics), so an inadequate budget is
+   a visible failure, never a wrong value. Consumers needing more thread
+   their own fuel via the worker. -/
 def lemDefaultFuel : Nat := 1000000
 
 /- Lem uses lowercase 'vector' for its built-in vector type -/
 abbrev vector (α : Type) (n : Nat) := Vector α n
 
-/- Vector slice: v.[i..j] extracts elements from index i to j (half-open) -/
+/- Vector slice — lem `vector` slicing (be:S13, conventions documented):
+   * WIDTH-FROM-RETURN-TYPE: the result length is the implicit `m`
+     inferred from the USE SITE's expected type — the same convention as
+     mwordExtract/mwordConcat below ("hi is redundant", Isabelle
+     Word.slice); the `_stop` argument is therefore IGNORED by design
+     (redundant with `m`), and is named `_stop` to say so.
+   * PAD-WITH-DEFAULT, deliberately: out-of-range reads yield `default`
+     rather than panicking — lem's vector slicing is total on
+     type-correct input (the typechecker relates m/start/stop), so the
+     pad arm is unreachable from generated code; it exists to keep the
+     def total without a proof obligation. A panic here would add a
+     runtime trap to a statically-safe operation.
+   * Injected into the core `Vector` namespace so generated projections
+     `v.slice` resolve (be:S13 residual: a LemLib-local name would need
+     backend qualification — registered, not done). -/
 namespace Vector
 def slice [Inhabited α] {n m : Nat} (v : Vector α n) (start _stop : Nat) : Vector α m :=
   Vector.ofFn fun i => (v.toArray.extract start (start + m)).getD i.val default

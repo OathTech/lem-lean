@@ -1,6 +1,60 @@
 (**************************************************************************)
 (*                        Lem                                             *)
 (*                                                                        *)
+(*          Dominic Mulligan, University of Cambridge                     *)
+(*          Francesco Zappa Nardelli, INRIA Paris-Rocquencourt            *)
+(*          Gabriel Kerneis, University of Cambridge                      *)
+(*          Kathy Gray, University of Cambridge                           *)
+(*          Peter Boehm, University of Cambridge (while working on Lem)   *)
+(*          Peter Sewell, University of Cambridge                         *)
+(*          Scott Owens, University of Kent                               *)
+(*          Thomas Tuerk, University of Cambridge                         *)
+(*          Brian Campbell, University of Edinburgh                       *)
+(*          Shaked Flur, University of Cambridge                          *)
+(*          Thomas Bauereiss, University of Cambridge                     *)
+(*          Stephen Kell, University of Cambridge                         *)
+(*          Thomas Williams                                               *)
+(*          Lars Hupel                                                    *)
+(*          Basile Clement                                                *)
+(*                                                                        *)
+(*  The Lem sources are copyright 2010-2025                               *)
+(*  by the authors above and Institut National de Recherche en            *)
+(*  Informatique et en Automatique (INRIA).                               *)
+(*                                                                        *)
+(*  All files except ocaml-lib/pmap.{ml,mli} and ocaml-libpset.{ml,mli}   *)
+(*  are distributed under the license below.  The former are distributed  *)
+(*  under the LGPLv2, as in the LICENSE file.                             *)
+(*                                                                        *)
+(*                                                                        *)
+(*  Redistribution and use in source and binary forms, with or without    *)
+(*  modification, are permitted provided that the following conditions    *)
+(*  are met:                                                              *)
+(*  1. Redistributions of source code must retain the above copyright     *)
+(*  notice, this list of conditions and the following disclaimer.         *)
+(*  2. Redistributions in binary form must reproduce the above copyright  *)
+(*  notice, this list of conditions and the following disclaimer in the   *)
+(*  documentation and/or other materials provided with the distribution.  *)
+(*  3. The names of the authors may not be used to endorse or promote     *)
+(*  products derived from this software without specific prior written    *)
+(*  permission.                                                           *)
+(*                                                                        *)
+(*  THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS    *)
+(*  OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED     *)
+(*  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE    *)
+(*  ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY       *)
+(*  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL    *)
+(*  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE     *)
+(*  GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS         *)
+(*  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER  *)
+(*  IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR       *)
+(*  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN   *)
+(*  IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.                         *)
+(*                                                                        *)
+(**************************************************************************)
+
+(**************************************************************************)
+(*                        Lem                                             *)
+(*                                                                        *)
 (*  Lean 4 backend                                                        *)
 (*                                                                        *)
 (*  Translates Lem definitions into Lean 4 syntax. Uses the shared        *)
@@ -257,6 +311,14 @@ module St = struct
      yet by design). *)
   let _ = reset_invocation
 end
+
+(* Location of a clause group's first clause's body — plumbed into the
+   fail-closed guards below so refusals name WHERE, not just what
+   (arc-14 S2 B6, be:S6; Reporting_basic threads it into the message). *)
+let locn_of_clause_group g =
+  match g with
+  | (_, _, _, _, _, e) :: _ -> Typed_ast.exp_to_locn e
+  | [] -> Ast.Unknown
 let inhabited_census_lookup (p : Path.t) : (string * inh_status) option =
   Option.map snd
     (List.find_opt (fun (q, _) -> Path.compare p q = 0) !St.inhabited_census)
@@ -319,8 +381,9 @@ let lean_reader_get_params env =
    persists across modules (processed in dependency order). Instance defs
    are never lifted (their methods cannot take extra parameters); an
    instance method that uses a lifted/reader constant fails closed at
-   emission. Nested modules lift coarsely (all defs together — sound,
-   possibly-unused parameter). *)
+   emission. Nested modules collect at Val_def granularity (the arc-2
+   audit fix; this comment previously still claimed the pre-fix coarse
+   all-defs-together lifting — corrected arc-14 S2 B6, be:N3). *)
 let lean_reader_prepass env (ds : def list) =
   if lean_reader_get_params env <> [] then begin
     let target = Target.Target_no_ident Target.Target_lean in
@@ -398,9 +461,14 @@ let tnvar_kind = function
 let check_beq_target_rep c_descr =
   match Target.Targetmap.apply_target c_descr.target_rep (Target.Target_no_ident Target.Target_lean) with
   | Some (CR_infix (_, _, _, ident)) ->
-    let name = Ident.to_string ident in
-    if name = "==" || name = " ==" then Some true
-    else if name = "!=" || name = " !=" then Some false
+    (* Compare the TRIMMED rendering (arc-14 S2 B6, be:S9): lex_skips
+       leak into Ident.to_string (the historical " ==" variant), so the
+       raw string is a whitespace artifact any upstream rendering change
+       would silently perturb. Trimming keys the semantics on the
+       operator itself. *)
+    let name = String.trim (Ident.to_string ident) in
+    if name = "==" then Some true
+    else if name = "!=" then Some false
     else None
   | _ -> None
 
@@ -2098,7 +2166,7 @@ type pat_style = FunParam | MatchArm
                   let needs = List.exists (fun (_, _, _, _, _, e) ->
                       exp_needs_reader e) group in
                   if needs && inside_instance then
-                    raise (Reporting_basic.err_general true Ast.Unknown
+                    raise (Reporting_basic.err_general true (locn_of_clause_group group)
                       "Lean backend: reader-lifted call inside an instance method (unsupported: instance fields cannot take extra parameters)");
                   lifted && not inside_instance
                 in
@@ -2158,13 +2226,13 @@ type pat_style = FunParam | MatchArm
                     | [({term = n}, c, _, _, _, _)] when fuel_sentinel_for c <> None ->
                         let base = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
                         Some (c, String.concat "" [base; "_lemFuel"])
-                    | (({term = _}, c, _, _, _, _) :: _ :: _) when fuel_sentinel_for c <> None ->
-                        raise (Reporting_basic.err_general true Ast.Unknown
+                    | ((({term = _}, c, _, _, _, _) :: _ :: _) as g) when fuel_sentinel_for c <> None ->
+                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
                           "Lean backend: 'declare {lean} fuel val' on a multi-clause definition (unsupported)")
                     | _ -> None) groups in
                 if is_truly_mutual && fuel_plan <> []
                    && List.length fuel_plan <> List.length groups then
-                  raise (Reporting_basic.err_general true Ast.Unknown
+                  raise (Reporting_basic.err_general true (locn_of_clause_group (List.concat groups))
                     "Lean backend: fuel in a mutual block requires EVERY member to carry a 'declare {lean} fuel val' (all-or-none)");
                 let saved_plan = !St.fuel_workers in
                 St.fuel_workers := fuel_plan;
@@ -2181,7 +2249,7 @@ type pat_style = FunParam | MatchArm
                       | (({term = _}, c, _, _, _, _) :: _) ->
                           (match fuel_sentinel_for c with
                            | Some _ ->
-                             raise (Reporting_basic.err_general true Ast.Unknown
+                             raise (Reporting_basic.err_general true (locn_of_clause_group g)
                                "Lean backend: 'declare {lean} fuel val' on a multi-clause definition (unsupported)")
                            | None -> None)
                       | [] -> None in
@@ -2196,13 +2264,13 @@ type pat_style = FunParam | MatchArm
                               | P_var n | P_var_annot (n, _) ->
                                 Some (Name.to_string (Name.strip_lskip n))
                               | _ ->
-                                raise (Reporting_basic.err_general true Ast.Unknown
+                                raise (Reporting_basic.err_general true (locn_of_clause_group g)
                                   "Lean backend: reader_seed def's first argument must be a simple variable"))
                            | [] ->
-                             raise (Reporting_basic.err_general true Ast.Unknown
+                             raise (Reporting_basic.err_general true (locn_of_clause_group g)
                                "Lean backend: reader_seed def must take the seed as its first argument"))
                       | (( _, c, _, _, _, _) :: _) when is_seed_cref c ->
-                          raise (Reporting_basic.err_general true Ast.Unknown
+                          raise (Reporting_basic.err_general true (locn_of_clause_group g)
                             "Lean backend: reader_seed on a multi-clause or mutual definition (unsupported)")
                       | _ -> None in
                     (match seed_info with
@@ -2210,22 +2278,22 @@ type pat_style = FunParam | MatchArm
                        (* The seed name overrides EVERY injected reader
                           parameter — with more than one reader that would
                           silently conflate them (audit finding). *)
-                       raise (Reporting_basic.err_general true Ast.Unknown
+                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: reader_seed requires exactly one declared reader")
                      | Some _ when is_truly_mutual ->
-                       raise (Reporting_basic.err_general true Ast.Unknown
+                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: reader_seed in a mutual block (unsupported; the mutual partner would escape lifting)")
                      | Some _ when inside_instance ->
-                       raise (Reporting_basic.err_general true Ast.Unknown
+                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: reader_seed inside an instance (unsupported)")
                      | Some _ when fuel_info <> None ->
-                       raise (Reporting_basic.err_general true Ast.Unknown
+                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: reader_seed combined with fuel (unsupported)")
                      | _ -> ());
                     let lifted = register_group g in
                     (match seed_info with
                      | Some _ when lifted ->
-                       raise (Reporting_basic.err_general true Ast.Unknown
+                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: reader_seed def unexpectedly reader-lifted")
                      | _ -> ());
                     let saved_seed = !St.reader_seed_param in
@@ -2233,10 +2301,10 @@ type pat_style = FunParam | MatchArm
                     Fun.protect ~finally:(fun () -> St.reader_seed_param := saved_seed) @@ fun () ->
                     (match fuel_info with
                      | Some _ when inside_instance ->
-                       raise (Reporting_basic.err_general true Ast.Unknown
+                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: 'declare {lean} fuel val' inside an instance (unsupported)")
                      | Some _ when is_truly_mutual && lifted ->
-                       raise (Reporting_basic.err_general true Ast.Unknown
+                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: 'declare {lean} fuel val' in a mutual block combined with reader lifting (unsupported; extend when needed)")
                      | _ -> ());
                     (* fuel x reader composes (arc 3, B1): the worker's fuel
@@ -2275,8 +2343,14 @@ type pat_style = FunParam | MatchArm
                       let saved_rb = !St.reader_binder in
                       St.fuel_emit := Some s;
                       St.reader_binder := lifted;
-                      (* worker name must agree with the block-level plan *)
-                      assert (List.assoc_opt c !St.fuel_workers = Some worker);
+                      (* worker name must agree with the block-level plan —
+                         a real error, not a bare assert (arc-14 S2 B6,
+                         be:N1: `assert` is compiled out under -noassert;
+                         this file's own history hunted `assert false`
+                         down in favor of Reporting_basic). *)
+                      if List.assoc_opt c !St.fuel_workers <> Some worker then
+                        raise (Reporting_basic.err_general true Ast.Unknown
+                          "Lean backend: internal error — fuel worker name disagrees with the block-level fuel plan");
                       Fun.protect ~finally:(fun () ->
                           St.fuel_emit := saved_e;
                           St.reader_binder := saved_rb)
@@ -2370,7 +2444,9 @@ type pat_style = FunParam | MatchArm
             | (Rule(_,_, _, _, _, _, _, name_lskips_annot, c, _),_)::xs ->
               let name = name_lskips_annot.term in
               let name = Name.strip_lskip name in
-              if List.exists (fun (n, _) -> Stdlib.compare n name = 0) buffer then
+              (* Name.compare, not polymorphic Stdlib.compare on the
+                 abstract Name.t (arc-14 S2 B6, be:N2). *)
+              if List.exists (fun (n, _) -> Name.compare n name = 0) buffer then
                 gather_names_aux buffer xs
               else
                 gather_names_aux ((name, c)::buffer) xs
@@ -2395,7 +2471,7 @@ type pat_style = FunParam | MatchArm
       let compare_clauses_by_name name (Rule(_,_, _, _, _, _, _, name', _, _),_) =
         let name' = name'.term in
         let name' = Name.strip_lskip name' in
-          Stdlib.compare name name' = 0
+          Name.compare name name' = 0  (* be:N2: not polymorphic compare *)
       in
       let indrelns =
         List.map (fun (name, c_ref) ->
@@ -2737,10 +2813,20 @@ type pat_style = FunParam | MatchArm
                         let args_out = List.map trans args in
                         [Output.flat (func_out
                           :: List.map (fun a -> Output.flat [from_string " "; a]) args_out)]
-                      else if is_reader_cref cd.descr then
+                      else if is_reader_cref cd.descr then begin
                         (* Application of the reader constant itself: 'tagDefs ()'
-                           becomes the reader parameter. The only argument is unit. *)
+                           becomes the reader parameter. The only argument is
+                           unit — CHECKED (arc-14 S2 B6, be:S8): the rewrite
+                           replaces the whole application spine, so a reader
+                           constant of arity beyond `unit -> T` applied to
+                           extra arguments would silently DROP them; the
+                           assumption is now a guard, not luck. *)
+                        if List.length args <> 1 then
+                          raise (Reporting_basic.err_general true
+                            (Typed_ast.exp_to_locn e)
+                            "Lean backend: a reader constant must be applied to exactly one (unit) argument (the rewrite replaces the whole application spine)");
                         [from_string (reader_inject_name (reader_param_name cd.descr))]
+                      end
                       else if ground_rep_for cd.descr <> None
                               && Types.TNset.is_empty (Types.free_vars (Typed_ast.exp_to_typ e)) then
                         (* Ground-typed site of a ground_rep constant:
@@ -5073,8 +5159,22 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
          Also guard-sweeps instance methods (rule 3). *)
       lean_failwith_thread_prepass A.env ds;
       let lean_defs = defs false false ds in
-      (* Drain any deferred abbrevs (e.g., abbrev mword after class Size) *)
-      let deferred = Output.flat (List.rev !St.pending_abbrevs) in
+      (* Drain any deferred abbrevs (e.g., abbrev mword after class Size).
+
+         INVARIANT (arc-14 S2 B6, be:S17, previously unstated): a deferred
+         abbrev is for HAND-WRITTEN consumers only. Deferral to end-of-file
+         is sound because TYR_subst substitutes the underlying type INLINE
+         at every generated use, so nothing in the generated file ever
+         references the abbrev by name before it appears. Making generated
+         code use the abbrev name would create forward references — do not.
+
+         ORDER (be:S17): DECLARATION order, deliberately: defs folds
+         last-to-first and each abbrev PREPENDS, so the drained list is
+         already in declaration order — no rev (the historical `List.rev`
+         emitted reverse-declaration order, an accident of a twice-reversed
+         cons; single-abbrev files — the only occupied case today — are
+         unaffected, byte-compare-verified). *)
+      let deferred = Output.flat !St.pending_abbrevs in
       St.pending_abbrevs := [];
       let lean_defs = lean_defs ^ deferred in
       let lean_defs_extra = defs_extra false false ds in
