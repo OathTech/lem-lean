@@ -112,7 +112,7 @@ instance (a : Type) [SetType a] : Eq0 (List  a) where
 
 /- removed value specification -/
  
-def  filter  {a : Type} [SetType a]  (P : a → Bool) (s : List a)  : List a :=  let  x2   := (setEmpty);  setFold  (fun (e : a) (x2 : List a) =>  if  P  e then setAdd e  x2  else  x2)  s  x2
+def  filter  {a : Type} [SetType a]  (P : a → Bool) (s : List a)  : List a :=  let  x2   := (setEmpty);  setFold  (fun (e : a) (x2 : List a) =>  if  P  e then setAddBy  setElemCompare  e  x2  else  x2)  s  x2
 /- removed value specification -/
 
 def  partition0  {a : Type} [SetType a]  (P : a → Bool) (s : List a)  : (List a ×List a) :=  (filter  P  s, filter  (fun (e : a) =>  not  (P  e))  s)
@@ -148,10 +148,10 @@ def  splitMember  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : List a)  : (List
 /- removed value specification -/
 
 
-def  bigunion  {a : Type} [SetType a]  (bs : List (List a))  : List a :=  let  x2   := (setEmpty);  setFold  (fun (s : List a) (x2 : List a) =>  setFold  (fun (x : a) (x2 : List a) =>  if  true then setAdd x  x2  else  x2)  s  x2)  bs  x2
+def  bigunion  {a : Type} [SetType a]  (bs : List (List a))  : List a :=  let  x2   := (setEmpty);  setFold  (fun (s : List a) (x2 : List a) =>  setFold  (fun (x : a) (x2 : List a) =>  if  true then setAddBy  setElemCompare  x  x2  else  x2)  s  x2)  bs  x2
 /- removed value specification -/
 
-def  bigintersection  {a : Type} [SetType a]  (bs : List (List a))  : List a :=  let  x2   := (setEmpty);  setFold  (fun (x : a) (x2 : List a) =>  if  setForAll  (fun (s : List a) =>  (setMemberBy  (@setElemCompare (a) _)  x  s))  bs then setAdd x  x2  else  x2)  (bigunion  bs)  x2
+def  bigintersection  {a : Type} [SetType a]  (bs : List (List a))  : List a :=  let  x2   := (setEmpty);  setFold  (fun (x : a) (x2 : List a) =>  if  setForAll  (fun (s : List a) =>  (setMemberBy  (@setElemCompare (a) _)  x  s))  bs then setAddBy  setElemCompare  x  x2  else  x2)  (bigunion  bs)  x2
 /- removed value specification -/
 
 /- removed value specification -/
@@ -169,7 +169,7 @@ def  bigintersection  {a : Type} [SetType a]  (bs : List (List a))  : List a := 
 
 /- removed value specification -/
  /-  before image  -/
-def  map0  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → b) (s : List a)  : List b :=  let  x2   := (setEmpty);  setFold  (fun (e : a) (x2 : List b) =>  if  true then setAdd  (f  e)  x2  else  x2)  s  x2
+def  map0  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → b) (s : List a)  : List b :=  let  x2   := (setEmpty);  setFold  (fun (e : a) (x2 : List b) =>  if  true then setAddBy  setElemCompare  (f  e)  x2  else  x2)  s  x2
 /- removed value specification -/
 
 /- removed value specification -/
@@ -210,7 +210,7 @@ def  sigma  {a : Type} {b : Type} [SetType a] [SetType b]  (sa : List a) (sb : a
 /- removed value specification -/
 
 
-def  cross  {a : Type} {b : Type} [SetType a] [SetType b]  (s1 : List a) (s2 : List b)  : List ((a ×b)) :=  let  x2   := (setEmpty);  setFold  (fun (e1 : a) (x2 : List ((a ×b))) =>  setFold  (fun (e2 : b) (x2 : List ((a ×b))) =>  if  true then setAdd  (e1, e2)  x2  else  x2)  s2  x2)  s1  x2
+def  cross  {a : Type} {b : Type} [SetType a] [SetType b]  (s1 : List a) (s2 : List b)  : List ((a ×b)) :=  let  x2   := (setEmpty);  setFold  (fun (e1 : a) (x2 : List ((a ×b))) =>  setFold  (fun (e2 : b) (x2 : List ((a ×b))) =>  if  true then setAddBy  setElemCompare  (e1, e2)  x2  else  x2)  s2  x2)  s1  x2
 /- removed value specification -/
 
 

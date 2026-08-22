@@ -78,10 +78,10 @@ def  relIdOn  {a : Type} [SetType a] [Eq0 a]  (s : List a)  : List ((a ×a)) := 
 
 /- removed value specification -/
 
-def  relComp  {a : Type} {b : Type} {c : Type} [SetType a] [SetType b] [SetType c] [Eq0 a] [Eq0 b]  (r1 : List ((a ×b))) (r2 : List ((b ×c)))  : List ((a ×c)) :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : List ((a ×c))) =>  match p, x2 with | (e1, e2),  x2 =>  setFold  (fun (p : (b ×c)) (x2 : List ((a ×c))) =>  match p, x2 with | (e2', e3),  x2 => ( if  e2  ==  e2' then setAdd (e1, e3)  x2  else  x2) )  (r2)  x2 )  (r1)  x2
+def  relComp  {a : Type} {b : Type} {c : Type} [SetType a] [SetType b] [SetType c] [Eq0 a] [Eq0 b]  (r1 : List ((a ×b))) (r2 : List ((b ×c)))  : List ((a ×c)) :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : List ((a ×c))) =>  match p, x2 with | (e1, e2),  x2 =>  setFold  (fun (p : (b ×c)) (x2 : List ((a ×c))) =>  match p, x2 with | (e2', e3),  x2 => ( if  e2  ==  e2' then setAddBy  setElemCompare  (e1, e3)  x2  else  x2) )  (r2)  x2 )  (r1)  x2
 /- removed value specification -/
 
-def  relRestrict  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) (s : List a)  : List ((a ×a)) :=  (let  x2   := (setEmpty);  setFold  (fun (a1 : a) (x2 : List ((a ×a))) =>  setFold  (fun (b : a) (x2 : List ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (a1, b)  r) then setAdd  (a1, b)  x2  else  x2)  s  x2)  s  x2)
+def  relRestrict  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) (s : List a)  : List ((a ×a)) :=  (let  x2   := (setEmpty);  setFold  (fun (a1 : a) (x2 : List ((a ×a))) =>  setFold  (fun (b : a) (x2 : List ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (a1, b)  r) then setAddBy  setElemCompare  (a1, b)  x2  else  x2)  s  x2)  s  x2)
 /- removed value specification -/
 
 def  relConverse  {a : Type} {b : Type} [SetType a] [SetType b]  (r : List ((a ×b)))  : List ((b ×a)) :=  (Lem_Set.map0  swap  (r))
@@ -99,7 +99,7 @@ def  relRange  {a : Type} {b : Type} [SetType a] [SetType b]  (r : List ((a ×b)
 def  relOver  {a : Type} [SetType a]  (r : List ((a ×a))) (s : List a)  : Bool :=  ( (setSubsetBy  (@setElemCompare (a) _) (( (setUnionBy  (@setElemCompare (a) _) (relDomain  r)  (relRange  r))))  s))
 /- removed value specification -/
 
-def  relApply  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a]  (r : List ((a ×b))) (s : List a)  : List b :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : List b) =>  match p, x2 with | (x,  y),  x2 => ( if  (setMemberBy  (@setElemCompare (a) _)  x  s) then setAdd  y  x2  else  x2) )  (r)  x2
+def  relApply  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a]  (r : List ((a ×b))) (s : List a)  : List b :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : List b) =>  match p, x2 with | (x,  y),  x2 => ( if  (setMemberBy  (@setElemCompare (a) _)  x  s) then setAddBy  setElemCompare  y  x2  else  x2) )  (r)  x2
 /- removed value specification -/
 
 
@@ -131,7 +131,7 @@ def  isAntisymmetric  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a)))  : Bo
 def  isTransitiveOn  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) (s : List a)  : Bool :=  (setForAll  (fun (e1 : a) =>  setForAll  (fun (e2 : a) =>  setForAll  (fun (e3 : a) =>  ((not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e1, e2)  r)))  ||  ((not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e2, e3)  r)))  ||  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e1, e3)  r)))))  s)  s)  s)
 /- removed value specification -/
 
-def  isTransitive  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a)))  : Bool :=  (setForAll  (fun (p : (a ×a)) =>  match p with |  (e1,  e2) =>  setForAll  (fun (e3 : a) =>  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (e1, e3)  r))  (relApply  r  (setFromList [e2])) )  r)
+def  isTransitive  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a)))  : Bool :=  (setForAll  (fun (p : (a ×a)) =>  match p with |  (e1,  e2) =>  setForAll  (fun (e3 : a) =>  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (e1, e3)  r))  (relApply  r  (setFromListBy setElemCompare [e2])) )  r)
 /- removed value specification -/
 
 def  isTotalOn  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) (s : List a)  : Bool :=  (setForAll  (fun (e1 : a) =>  setForAll  (fun (e2 : a) =>  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e1, e2)  r))  ||  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e2, e1)  r)))  s)  s)
@@ -144,7 +144,7 @@ def  isTrichotomousOn  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) (s :
 
 /- removed value specification -/
 
-def  isSingleValued  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a] [Eq0 b]  (r : List ((a ×b)))  : Bool :=  (setForAll  (fun (p : (a ×b)) =>  match p with |  (e1,  e2a) =>  setForAll  (fun (e2b : b) =>  e2a  ==  e2b)  (relApply  r  (setFromList [e1])) )  r)
+def  isSingleValued  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a] [Eq0 b]  (r : List ((a ×b)))  : Bool :=  (setForAll  (fun (p : (a ×b)) =>  match p with |  (e1,  e2a) =>  setForAll  (fun (e2b : b) =>  e2a  ==  e2b)  (relApply  r  (setFromListBy setElemCompare [e1])) )  r)
 /- removed value specification -/
 
 def  isEquivalenceOn  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) (s : List a)  : Bool :=  isReflexiveOn  r  s  &&  (isSymmetricOn  r  s  &&  isTransitiveOn  r  s)
@@ -192,7 +192,7 @@ def  isStrictTotalOrderOn  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) 
 
 
 def  transitiveClosureAdd  {a : Type} [SetType a] [Eq0 a]  (x : a) (y : a) (r : List ((a ×a)))  : List ((a ×a)) :=  
-  (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (((setAdd  (x,y)  (r))))  ((( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : List ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (y, z)  r) then setAdd (x, z)  x2  else  x2)  (relRange  r)  x2))  ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : List ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (z, x)  r) then setAdd (z, y)  x2  else  x2)  (relDomain  r)  x2)))))))))
+  (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (((setAddBy  setElemCompare  (x,y)  (r))))  ((( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : List ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (y, z)  r) then setAddBy  setElemCompare  (x, z)  x2  else  x2)  (relRange  r)  x2))  ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : List ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (z, x)  r) then setAddBy  setElemCompare  (z, y)  x2  else  x2)  (relDomain  r)  x2)))))))))
 /- removed value specification -/
 
 def  reflexiveTransitiveClosureOn  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) (s : List a)  : List ((a ×a)) :=  (set_tc  (fun x y => x == y)  (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (r)  ((relIdOn  s))))))
@@ -202,6 +202,6 @@ def  reflexiveTransitiveClosureOn  {a : Type} [SetType a] [Eq0 a]  (r : List ((a
 
 def  withoutTransitiveEdges  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a)))  : List ((a ×a)) := 
   let  tc   := (set_tc  (fun x y => x == y)  r); 
-  let  x2   := (setEmpty);  setFold  (fun (p : (a ×a)) (x2 : List ((a ×a))) =>  match p, x2 with | (a1,  c),  x2 => ( if  setForAll  (fun (b : a) =>  ((not  ((a1  !=  b)  &&  (b  !=  c)))  ||  not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (a1, b)  tc)  &&  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (b, c)  tc))))  (relRange  r) then setAdd (a1, c)  x2  else  x2) )  r  x2
+  let  x2   := (setEmpty);  setFold  (fun (p : (a ×a)) (x2 : List ((a ×a))) =>  match p, x2 with | (a1,  c),  x2 => ( if  setForAll  (fun (b : a) =>  ((not  ((a1  !=  b)  &&  (b  !=  c)))  ||  not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (a1, b)  tc)  &&  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (b, c)  tc))))  (relRange  r) then setAddBy  setElemCompare  (a1, c)  x2  else  x2) )  r  x2
 end Lem_Relation
 

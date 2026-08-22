@@ -2910,8 +2910,15 @@ type pat_style = FunParam | MatchArm
                     skips; from_string "(setEmpty)"
                   ]
                 else
+                  (* Comparator-keyed literal (arc-14 S2 B3, be:G4): set
+                     literals dedupe by the SetType comparator — matching
+                     OCaml lem's comparator-keyed Pset — never by BEq
+                     (a BEq finer than the comparator, e.g. cerberus sym,
+                     could otherwise keep comparator-EQ duplicates). The
+                     lem type of a set literal carries SetType 'a, so the
+                     instance is resolvable at every splice site. *)
                   Output.flat [
-                    skips; from_string "(setFromList ["; body; from_string "])"; ws skips'
+                    skips; from_string "(setFromListBy setElemCompare ["; body; from_string "])"; ws skips'
                   ])
           | Begin (skips, e, skips') ->
               (* Lem's begin...end is a grouping construct. In Lean, use parens. *)

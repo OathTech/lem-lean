@@ -347,7 +347,12 @@ val insert : forall 'a. SetType 'a => 'a -> set 'a -> set 'a (* before add *)
 
 declare ocaml    target_rep function insert = `Pset.add`
 declare coq      target_rep function insert = `set_add`
-declare lean     target_rep function insert = `setAdd`
+(* arc-14 S2 B3 (be:G4): comparator-keyed insert — dedupe by the SetType
+   comparator (OCaml Pset.add parity), never by BEq. The args form
+   splices the setElemCompare dictionary method at each call site (the
+   leastFixedPoint precedent below); insert's lem type carries
+   SetType 'a, so the instance always resolves. *)
+declare lean     target_rep function insert x s = `setAddBy` `setElemCompare` x s
 declare hol      target_rep function insert = infix `INSERT`
 declare isabelle target_rep function insert = `Set.insert`
 

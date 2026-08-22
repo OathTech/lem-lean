@@ -250,13 +250,41 @@ def sort_by_ordering (cmp : α → α → LemOrdering) (l : List α) : List α :
     | .GT => false
   l.mergeSort leanCmp
 
-/- Set operations (using List as a simple set representation) -/
+/- ============================================================================
+   Set operations (List representation, COMPARATOR-keyed)
+
+   SOUNDNESS NOTE (arc-14 S2 B3, be:G4 — the Fmap section's standard,
+   see its bucket rationale below at the Fmap header):
+
+   OCaml lem sets are `Pset` — keyed by ONE comparator for membership,
+   insertion-dedup, and equality. This section mirrors that: EVERY
+   operation that decides element identity does so through the SAME
+   `cmp : α → α → LemOrdering` (the SetType dictionary's setElemCompare
+   at all generated call sites — the backend splices it explicitly for
+   `insert` and set literals; the *By family takes it as an argument).
+
+   THE HAZARD THIS CLOSES: the previous `setAdd`/`setFromList` deduped by
+   [BEq α] while `setMemberBy`/`setUnionBy`/`setEqualBy` used the
+   comparator — two equalities in one representation. With a BEq strictly
+   FINER than the comparator (exactly the cerberus `sym` situation the
+   Fmap section documents as load-bearing: BEq compares digest+num,
+   setElemCompare orders by a coarser projection in adversarial cases), a
+   set could hold comparator-EQ, BEq-distinct duplicates — and
+   setEqualBy's length guard then DENIES extensional equality of equal
+   sets. The BEq-keyed setAdd/setFromList are DELETED, not kept beside
+   the comparator versions: a mixed-equality API is the defect, not a
+   convenience. Adversarial-key property tests: LemLibTest.lean
+   (setCoherence section, the Fmap tests' pattern).
+
+   INVARIANT (representation): a set list holds no two comparator-EQ
+   elements; order is insertion-derived (setAddBy prepends new elements;
+   setFromListBy folds from the right, so the LAST comparator-duplicate's
+   representative survives — pinned in LemLibTest's SetCoherence guards.
+   Pset iteration order differs, a deliberate divergence the Fmap
+   section's order-observable tests keep honest at the consumer level). -/
 def setEmpty : List α := []
 @[inline] def setIsEmpty : List α → Bool := List.isEmpty
 def setSingleton (x : α) : List α := [x]
-
-def setAdd [BEq α] (x : α) (s : List α) : List α :=
-  if s.elem x then s else x :: s
 
 def setMemberBy (cmp : α → α → LemOrdering) (x : α) (s : List α) : Bool :=
   match s with
@@ -265,10 +293,13 @@ def setMemberBy (cmp : α → α → LemOrdering) (x : α) (s : List α) : Bool 
     | .EQ => true
     | _ => setMemberBy cmp x ys
 
-@[inline] def setCardinal : List α → Nat := List.length
+/-- Comparator-keyed insert — Pset.add parity (arc-14 S2 B3; replaces the
+    BEq-keyed setAdd; the backend's `insert` target_rep splices
+    setElemCompare here). No-op iff a comparator-EQ element is present. -/
+def setAddBy (cmp : α → α → LemOrdering) (x : α) (s : List α) : List α :=
+  if setMemberBy cmp x s then s else x :: s
 
-def setFromList [BEq α] (l : List α) : List α :=
-  l.foldr (fun x acc => if acc.elem x then acc else x :: acc) []
+@[inline] def setCardinal : List α → Nat := List.length
 
 def setFromListBy (cmp : α → α → LemOrdering) (l : List α) : List α :=
   l.foldr (fun x acc => if setMemberBy cmp x acc then acc else x :: acc) []

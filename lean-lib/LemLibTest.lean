@@ -441,6 +441,55 @@ def checkPairs [BEq α] [BEq β] (c : α → α → LemOrdering)
 
 end PropertyTests
 
+section SetCoherence
+/- ========================================================================
+   Set-layer comparator coherence (arc-14 S2 B3, be:G4) — the Fmap
+   property tests' standard, same adversarial key type K2 (BEq strictly
+   finer than the comparator cK2: the cerberus `sym` shape).
+
+   THE CLOSED HAZARD, pinned: pre-B3, setAdd/setFromList deduped by BEq
+   while setEqualBy/setMemberBy used the comparator, so a set could hold
+   comparator-EQ, BEq-distinct duplicates and setEqualBy's length guard
+   then denied extensional equality of equal sets. Everything below is
+   bounded-exhaustive over adversarial universes. -/
+
+/-- All sequences (with repetition) of length ≤ n over a pool. -/
+private def allSeqs (pool : List α) : Nat → List (List α)
+  | 0 => [[]]
+  | n + 1 => [] :: (pool.flatMap (fun x => (allSeqs pool n).map (x :: ·)))
+
+/-- Representation invariant: no two comparator-EQ elements. -/
+private def noCmpDup (cmp : α → α → LemOrdering) : List α → Bool
+  | [] => true
+  | x :: xs => !(setMemberBy cmp x xs) && noCmpDup cmp xs
+
+private def advPool : List K2 := [⟨0, 0⟩, ⟨0, 1⟩, ⟨1, 0⟩, ⟨1, 1⟩]
+private def buildSet (l : List K2) : List K2 := l.foldl (fun s x => setAddBy cK2 x s) []
+
+-- comparator-EQ, BEq-distinct insert is a no-op (the exact sym shape)
+#guard setAddBy cK2 ⟨0, 1⟩ [⟨0, 0⟩] == [⟨0, 0⟩]
+-- setFromListBy keeps the LAST duplicate's representative (foldr builds
+-- right-to-left; cf. the domainBy comment below) — pinned, not assumed
+#guard setFromListBy cK2 [⟨0, 0⟩, ⟨0, 1⟩, ⟨1, 0⟩] == [⟨0, 1⟩, ⟨1, 0⟩]
+-- invariant: every setAddBy-built set is comparator-duplicate-free
+#guard (allSeqs advPool 4).all (fun l => noCmpDup cK2 (buildSet l))
+-- extensional equality: any two builds with the same comparator content
+-- are setEqualBy-equal (the pre-B3 denial scenario, now exhaustively green)
+#guard
+  let sets := (allSeqs advPool 3).map buildSet
+  sets.all (fun s1 => sets.all (fun s2 =>
+    let sameContent :=
+      advPool.all (fun k => setMemberBy cK2 k s1 == setMemberBy cK2 k s2)
+    setEqualBy cK2 s1 s2 == sameContent))
+-- union/inter/diff preserve the no-duplicate invariant
+#guard
+  let sets := (allSeqs advPool 2).map buildSet
+  sets.all (fun s1 => sets.all (fun s2 =>
+    noCmpDup cK2 (setUnionBy cK2 s1 s2)
+    && noCmpDup cK2 (setInterBy cK2 s1 s2)
+    && noCmpDup cK2 (setDiffBy cK2 s1 s2)))
+end SetCoherence
+
 /- ========================================================================
    LemLibLegacy FREEZE-GUARD (arc-6 S5f, per audit-2).
 
