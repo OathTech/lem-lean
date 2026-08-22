@@ -161,8 +161,13 @@ type inh_plan =
 
 (* ===== Arc-14 S2 B1: the backend analysis-state module (be:G3) =====
 
-   EVERY module-level mutable cell of this backend lives HERE — one
+   EVERY module-level mutable cell OF LEAN_BACKEND.ML lives HERE — one
    declaration site, a stated lifetime class and invariant per field.
+   (Two cells live outside this file by interface necessity and are
+   documented at their homes: Backend_common.on_cr_simple_applied — the
+   per-file callback this backend registers at lean_defs entry — and
+   process_file.ml's pre-call module-name write into St.current_module_name;
+   both are the registered be:S15 interface residual.)
    (Previously: ~22 refs scattered across 1,100 lines — the "hidden
    global state machine" of the arc-14 backend audit.)
 
@@ -1745,8 +1750,16 @@ type pat_style = FunParam | MatchArm
               ]
             else match compare_method with
             | Some cmp_name ->
+              (* (priority := 500) — arc-14 re-mark R3 de-tie: the
+                 comparator-derived BEq bridge ([SetType a]/[MapKeyType a]
+                 : BEq a) sits in the lattice's 500 slot, strictly BELOW
+                 the isEqual bridge and derived BEq (default = 1000): a
+                 comparator can be COARSER than a type's own equality, so
+                 when both apply the finer Eq0-route must win by PRIORITY,
+                 not by declaration order (the former third default tie —
+                 doc/notes/2026-08-22_arc14-instance-priority-lattice.md). *)
               Output.flat [
-                from_string "\ninstance {"; tv; from_string " : "; from_string tv_kind;
+                from_string "\ninstance (priority := 500) {"; tv; from_string " : "; from_string tv_kind;
                 from_string "} ["; name; from_string " "; tv; from_string "] : BEq "; tv;
                 from_string (String.concat "" [" where\n  beq x y := match "; cmp_name; " x y with | .EQ => true | _ => false\n"])
               ]
@@ -2290,6 +2303,33 @@ type pat_style = FunParam | MatchArm
                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: reader_seed combined with fuel (unsupported)")
                      | _ -> ());
+                    (* THE RESERVED-NAME CONTRACT (arc-14 re-mark, be:S2;
+                       doc/notes/2026-08-22_arc14-reserved-names.md): the
+                       backend synthesizes binders `lemFuel` (fuel) and
+                       `_lemReader_<name>` (reader injection) into user
+                       signatures. A user PARAMETER with one of those
+                       names silently SHADOWS the synthesized binder —
+                       probe-measured (probe_fuel_shadow, 2026-08-22):
+                       the worker matched the USER's lemFuel, returning
+                       the 999 sentinel for shadow_probe 0 3. Fail
+                       closed at generation time. (Residual, registered:
+                       binders introduced by matches INSIDE the body are
+                       not yet scanned — the contract note carries it.) *)
+                    let reserved_binder_check () =
+                      let bound = List.concat_map (fun (_, _, pats, _, _, _) ->
+                          List.concat_map (fun p ->
+                            List.map (fun a ->
+                              Name.to_string (Name.strip_lskip a.term))
+                              (Pattern_syntax.pat_vars_src p)) pats) g in
+                      List.iter (fun n ->
+                        if n = "lemFuel" || String.length n >= 11 && String.sub n 0 11 = "_lemReader_" then
+                          raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                            (Printf.sprintf
+                              "Lean backend: parameter '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel' and the '_lemReader_' prefix are the backend's; a shadowed fuel/reader binder is silently wrong) — rename the variable" n)))
+                        bound in
+                    (if fuel_info <> None || seed_info <> None then reserved_binder_check ()
+                     else if List.exists (fun (_, cr, _, _, _, _) ->
+                              Types.Cdset.mem cr !St.reader_lifted) g then reserved_binder_check ());
                     let lifted = register_group g in
                     (match seed_info with
                      | Some _ when lifted ->

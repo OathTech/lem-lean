@@ -177,7 +177,7 @@ class SetType (a : Type) where
 
 export SetType (setElemCompare)
 
-instance {a : Type} [SetType a] : BEq a where
+instance (priority := 500) {a : Type} [SetType a] : BEq a where
   beq x y := match setElemCompare x y with | .EQ => true | _ => false
 
 

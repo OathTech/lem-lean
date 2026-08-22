@@ -488,6 +488,27 @@ private def buildSet (l : List K2) : List K2 := l.foldl (fun s x => setAddBy cK2
     noCmpDup cK2 (setUnionBy cK2 s1 s2)
     && noCmpDup cK2 (setInterBy cK2 s1 s2)
     && noCmpDup cK2 (setDiffBy cK2 s1 s2)))
+
+-- transitive closure joins by the COMPARATOR (re-mark R1): the middle
+-- elements ⟨1,0⟩/⟨1,1⟩ are comparator-EQ but BEq-DISTINCT — the ByEq
+-- closure MISSES the (0,·)→(2,·) hop that Pset.tc takes.
+private def cPair : (K2 × K2) → (K2 × K2) → LemOrdering :=
+  fun p q => match cK2 p.1 q.1 with | .EQ => cK2 p.2 q.2 | o => o
+#guard
+  let r : List (K2 × K2) := [(⟨0, 0⟩, ⟨1, 0⟩), (⟨1, 1⟩, ⟨2, 0⟩)]
+  let closed := set_tcByCmp cPair r
+  setMemberBy cPair (⟨0, 0⟩, ⟨2, 0⟩) closed        -- the comparator hop
+  && !(setMemberBy cPair (⟨0, 0⟩, ⟨2, 0⟩)
+        (set_tc (fun (x y : K2) => x == y) r))     -- ByEq misses it (pinned)
+-- closure output stays comparator-duplicate-free, and closing a closed
+-- relation is a no-op (bounded check over adversarial pair pools)
+#guard
+  let pool : List (K2 × K2) :=
+    [(⟨0, 0⟩, ⟨0, 1⟩), (⟨0, 1⟩, ⟨1, 0⟩), (⟨1, 0⟩, ⟨0, 0⟩), (⟨1, 1⟩, ⟨1, 0⟩)]
+  (allSeqs pool 3).all (fun raw =>
+    let r := setFromListBy cPair raw      -- closure inputs are SETS
+    let c := set_tcByCmp cPair r
+    noCmpDup cPair c && setEqualBy cPair (set_tcByCmp cPair c) c)
 end SetCoherence
 
 /- ========================================================================

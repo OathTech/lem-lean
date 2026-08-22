@@ -626,9 +626,14 @@ declare hol      target_rep function transitiveClosure = `transitive_closure`
 declare isabelle target_rep function transitiveClosure = `trancl`
 declare coq      target_rep function transitiveClosureByEq = `set_tc`
 declare lean     target_rep function transitiveClosureByEq = `set_tc`
+(* arc-14 re-mark R1 (the be:G4 class): the lean transitiveClosure inline
+   routes through the COMPARATOR form, mirroring the ocaml inline — the
+   ByEq route joined/deduped by lem (=) (BEq), which with a BEq finer
+   than the set comparator diverges from the comparator-keyed Pset.tc. *)
+declare lean     target_rep function transitiveClosureByCmp = `set_tcByCmp`
 
 let inline {coq} transitiveClosure = transitiveClosureByEq (=)
-let inline {lean} transitiveClosure = transitiveClosureByEq (=)
+let inline {lean} transitiveClosure = transitiveClosureByCmp setElemCompare
 let inline {ocaml} transitiveClosure = transitiveClosureByCmp setElemCompare
 
 

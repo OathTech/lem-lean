@@ -195,13 +195,13 @@ def  transitiveClosureAdd  {a : Type} [SetType a] [Eq0 a]  (x : a) (y : a) (r : 
   (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (((setAddBy  setElemCompare  (x,y)  (r))))  ((( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : List ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (y, z)  r) then setAddBy  setElemCompare  (x, z)  x2  else  x2)  (relRange  r)  x2))  ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : List ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (z, x)  r) then setAddBy  setElemCompare  (z, y)  x2  else  x2)  (relDomain  r)  x2)))))))))
 /- removed value specification -/
 
-def  reflexiveTransitiveClosureOn  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) (s : List a)  : List ((a ×a)) :=  (set_tc  (fun x y => x == y)  (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (r)  ((relIdOn  s))))))
+def  reflexiveTransitiveClosureOn  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a))) (s : List a)  : List ((a ×a)) :=  (set_tcByCmp  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (r)  ((relIdOn  s))))))
 /- removed value specification -/
 
 /- removed value specification -/
 
 def  withoutTransitiveEdges  {a : Type} [SetType a] [Eq0 a]  (r : List ((a ×a)))  : List ((a ×a)) := 
-  let  tc   := (set_tc  (fun x y => x == y)  r); 
+  let  tc   := (set_tcByCmp  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  r); 
   let  x2   := (setEmpty);  setFold  (fun (p : (a ×a)) (x2 : List ((a ×a))) =>  match p, x2 with | (a1,  c),  x2 => ( if  setForAll  (fun (b : a) =>  ((not  ((a1  !=  b)  &&  (b  !=  c)))  ||  not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (a1, b)  tc)  &&  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (b, c)  tc))))  (relRange  r) then setAddBy  setElemCompare  (a1, c)  x2  else  x2) )  r  x2
 end Lem_Relation
 

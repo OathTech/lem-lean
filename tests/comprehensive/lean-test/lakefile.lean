@@ -26,10 +26,12 @@ lean_lib LemComprehensiveTest where
     `Test_derived_inhabited, `Test_derived_inhabited_auxiliary,
     `TestDerivedInhabitedCheck,  -- hand-written arc-8 S1 instance-shape checks
     `TestInstancePriorityCheck,  -- hand-written arc-14 B4 resolution probe (be:G1/sem:S2)
+    `TestNameCaptureCheck,  -- arc-14 re-mark be:S1 none-binder pin
     `Test_deriving, `Test_deriving_auxiliary,
     `Test_either_maybe, `Test_either_maybe_auxiliary,
     `Test_expressions, `Test_expressions_auxiliary,
     `Test_instance_priority, `Test_instance_priority_auxiliary,
+    `Test_name_capture, `Test_name_capture_auxiliary,
     `Test_failwith_threading, `Test_failwith_threading_auxiliary,
     `TestFailwithThreadingCheck,  -- hand-written arc-8 S2 signature-shape checks
     `Test_functions, `Test_functions_auxiliary,

@@ -16,11 +16,15 @@ every deliberate tie below is justified; adding a new tie is a finding).
 |------|----------|----------------|
 | model/override | 1000 (default) | lem `instance` declarations from the source model (e.g. symbol.lem's name-only `Eq0 identifier`); hand-written override files (e.g. cerberus CerbStepInstances); LemLib's concrete instances for base types; the generic `[Eq0 a] : BEq a` / `[SetType a] : BEq a` bridges (see "deliberate ties") |
 | derived BEq/Ord | 1000 (default) | the backend's derived/`deriving`-bridged **BEq/Ord** instances — MUST stay at default: below the default-priority `[Eq0 a] : BEq a` bridge they would be shadowed and the bridge would complete through `isEqual := x == y`, i.e. through THEMSELVES or a fallback (the pre-arc-10 failwithI race) |
-| **auto trio** | **500** | the backend's auto **SetType/Eq0/Ord0** trio (deriving-bridge and comparison-derived) — BELOW every model/override instance (they win by PRIORITY, not order — the sem:S2 fix), ABOVE every generic default and fallback |
+| **auto trio + comparator bridges** | **500** | the backend's auto **SetType/Eq0/Ord0** trio (deriving-bridge and comparison-derived) — BELOW every model/override instance (they win by PRIORITY, not order — the sem:S2 fix), ABOVE every generic default and fallback. ALSO (re-mark R3): the class emitter's comparator-derived **BEq** bridges (`[SetType a] : BEq a`, `[MapKeyType a] : BEq a`) — a comparator can be COARSER than a type's own equality, so the isEqual bridge/derived BEq (1000) must beat them by priority (this was the third default-priority tie, now DE-TIED) |
 | generic defaults | 100 (low) | `Basic_classes`: `[BEq a] : Eq0 a`, `[Ord a] : SetType a`, `[Ord0 a] : OrdMaxMin a`; LemLib's low-priority Sum right-inhabitant; residual (failwithI-bodied) trios/instances for underivable types |
 | open-tyvar fallback | 50 | the unconstrained fallbacks for parameterized types (reached only when the bounded instance's `[BEq tv]`/`[Ord tv]` bounds cannot be synthesized; failwithI bodies — loud) |
 
 ## Deliberate ties (each with its justification)
+
+(The third default tie the arc-14 re-mark found — the comparator-derived
+BEq bridge vs the isEqual bridge, both formerly 1000 — is DE-TIED: the
+comparator bridge now sits at 500, see the table.)
 
 1. **derived BEq/Ord (1000) vs the generic `[Eq0 a] : BEq a` bridge
    (1000).** Newest-first: the derived instance (declared in the

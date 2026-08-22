@@ -1,0 +1,6 @@
+open import Pervasives_extra
+val shadow_probe : nat -> nat -> nat
+let rec shadow_probe lemFuel n =
+  if n = 0 then lemFuel else shadow_probe lemFuel (n - 1)
+declare {lean} fuel val shadow_probe = `999`
+let shadow_result = shadow_probe 0 3

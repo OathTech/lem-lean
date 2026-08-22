@@ -869,19 +869,52 @@ def natLsr (a b : Nat) : Nat := a >>> b
 def natAsr (a b : Nat) : Nat := a >>> b  -- same as lsr for Nat (unsigned)
 
 /- Transitive closure of a relation represented as a list of pairs.
-   Iterates composition until no new pairs are added. Used by Relation module. -/
-partial def set_tc (eq : α → α → Bool) (r : List (α × α)) : List (α × α) :=
-  let mem (p : α × α) (s : List (α × α)) : Bool :=
-    s.any (fun q => eq p.1 q.1 && eq p.2 q.2)
-  let compose := r.foldl (fun acc (a, b) =>
-    r.foldl (fun acc2 (c, d) =>
-      let p := (a, d)
-      if eq b c && !mem p acc2 then p :: acc2
-      else acc2
-    ) acc
-  ) r
-  if compose.length == r.length then r
-  else set_tc eq compose
+   Iterates composition until no new pairs are added.
+
+   TERMINATION (be:S12, totalized arc-14 re-mark — was `partial`): every
+   productive iteration strictly grows the pair list, and pairs are
+   drawn from the finite square of r's endpoints, so the pair count is
+   bounded by (2·|r|)²; fuel = that bound + 1 can never exhaust — the
+   exhaustion arm is the loud fuelExhaustedWith sentinel, never a
+   silent truncation. -/
+private def set_tc_go (join : α → α → Bool)
+    (mem : (α × α) → List (α × α) → Bool) :
+    Nat → List (α × α) → List (α × α)
+  | 0, cur =>
+    fuelExhaustedWith "LemLib.set_tc: fuel exhausted (unreachable: (2|r|)^2+1 bound)" cur
+  | fuel + 1, cur =>
+    let compose := cur.foldl (fun acc (a, b) =>
+      cur.foldl (fun acc2 (c, d) =>
+        let p := (a, d)
+        if join b c && !mem p acc2 then p :: acc2
+        else acc2
+      ) acc
+    ) cur
+    if compose.length == cur.length then cur
+    else set_tc_go join mem fuel compose
+
+/-- Equality-keyed transitive closure (the transitiveClosureByEq rep;
+    coq shares the name). Prefer the comparator form below — with a BEq
+    finer than a set's comparator this one can MISS joins (the be:G4
+    hazard class); the lem `transitiveClosure` inline no longer routes
+    here (re-mark R1). -/
+def set_tc (eq : α → α → Bool) (r : List (α × α)) : List (α × α) :=
+  set_tc_go eq (fun p s => s.any (fun q => eq p.1 q.1 && eq p.2 q.2))
+    ((2 * r.length) * (2 * r.length) + 1) r
+
+/-- Comparator-keyed transitive closure — Pset.tc parity (arc-14 re-mark
+    R1: the lem `transitiveClosure` inline now routes HERE via
+    transitiveClosureByCmp setElemCompare, mirroring the ocaml inline —
+    the ByEq route diverged from the comparator-keyed set layer exactly
+    like the deleted BEq setAdd). Elements join via the pair comparator's
+    diagonal (cmp (b,b) (c,c) = EQ ⇔ b ~ c for the componentwise
+    comparators every call site passes); membership is setMemberBy on
+    the same comparator. Fuel-totalized as above (be:S12 rides along). -/
+def set_tcByCmp (cmp : (α × α) → (α × α) → LemOrdering) (r : List (α × α)) : List (α × α) :=
+  set_tc_go
+    (fun b c => match cmp (b, b) (c, c) with | .EQ => true | _ => false)
+    (fun p s => setMemberBy cmp p s)
+    ((2 * r.length) * (2 * r.length) + 1) r
 
 /- ============================================================ -/
 /- Total implementations for generated library functions         -/
