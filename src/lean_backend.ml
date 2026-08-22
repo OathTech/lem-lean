@@ -58,9 +58,6 @@ let lean_string_escape s =
   Buffer.contents buf
 ;;
 
-(* Collects type namespace names that need 'open' in the auxiliary file *)
-let lean_auxiliary_opens : string list ref = ref []
-(* Tracks current namespace nesting for qualified open names *)
 (* Lean 4 syntax keywords that cannot be used as bare identifiers.
    When these appear as local variable names, they're escaped with «» guillemets. *)
 let lean_syntax_keywords = [
@@ -78,22 +75,6 @@ let lean_syntax_keywords = [
   "this"; "rfl"; "calc"; "decide"; "sorry";
   "pure"; "get"; "set"; "throw"; "panic"; "admit"; "trivial"
 ]
-let lean_namespace_stack : string list ref = ref []
-(* Record types that ended up in mutual blocks — rendered as inductives, not structures.
-   Record construction ({..}) and field projection (.field) don't work for these;
-   use constructor syntax and pattern matching instead. *)
-let lean_mutual_records : Path.t list ref = ref []
-(* Collects import module names — emitted at top of file before any other content *)
-let lean_collected_imports : string list ref = ref []
-(* Tracks locally-defined module names within the current file (via Module definitions).
-   These should not be emitted as imports since they're namespaces, not separate files. *)
-let lean_local_modules : string list ref = ref []
-(* Fully-qualified paths of nested modules that need 'open' at file level.
-   Lean's 'open' inside a namespace is scoped, so nested module opens must
-   be deferred to the enclosing top-level scope. *)
-let lean_deferred_opens : string list ref = ref []
-(* Set by process_file.ml before calling lean_defs — used for namespace wrapping *)
-let lean_current_module_name : string ref = ref ""
 (* Arc-8 S1 (derived Inhabited instances, replacing the DAEMON fallback):
    process-global census of the Inhabited instances this backend has
    emitted, keyed by type Path (modules are processed in dependency order
@@ -110,13 +91,178 @@ let lean_current_module_name : string ref = ref ""
 type inh_status =
   | Inh_instances of int list list
   | Inh_none
-let lean_inhabited_census : (Path.t * (string * inh_status)) list ref = ref []
+(* Arc-8 S1: per-type tier-2 derivation PLAN, computed by
+   lean_inhabited_prepass (in declaration order) and only RENDERED at
+   emission time. Needed because the main emission walks definitions
+   with fold_right — side effects run last-to-first (see the
+   lean_reader_prepass / St.mutual_records precedent) — so census
+   population cannot be interleaved with emission. *)
+type inh_plan =
+  | Plan_variant of (int * string list) list
+      (* usable constructor indices (into the Te_variant ctor list) with
+         their [Inhabited tv] bound sets, in emission order: first at
+         default priority, rest (priority := low) *)
+  | Plan_record of string list  (* all fields derivable; bound set *)
+  | Plan_none                   (* fail-closed: NO instance, no fallback *)
+
+(* ===== Arc-14 S2 B1: the backend analysis-state module (be:G3) =====
+
+   EVERY module-level mutable cell of this backend lives HERE — one
+   declaration site, a stated lifetime class and invariant per field.
+   (Previously: ~22 refs scattered across 1,100 lines — the "hidden
+   global state machine" of the arc-14 backend audit.)
+
+   LIFETIME CLASSES:
+     [file]        reset at every lean_defs entry (St.reset_per_file);
+                   meaningful only within one output file's emission.
+     [invocation]  grows monotonically across the modules of ONE lem
+                   invocation (lem processes modules in dependency
+                   order, so earlier modules' facts must stay visible
+                   to later ones: census, threading, reader lifting,
+                   mutual-record accumulation, the reader-param cache).
+                   Reset only by St.reset_invocation.
+     [render]      save/restore-scoped around a single definition's
+                   rendering (Fun.protect at every write site); at its
+                   neutral value between definitions.
+
+   REENTRANCY: emission is still effectful (the upstream-inherited
+   fold_right skeleton — the effect-free-emission rewrite is the parked
+   be:G3/S5 residual, priced L in the arc-14 disposition table), but
+   the whole mutable surface is now resettable in one call:
+   St.reset_invocation () gives a fresh backend within one process,
+   where previously a second invocation inherited unspecified state. *)
+module St = struct
+  (* [file] Type namespace names that need 'open' in the auxiliary file. *)
+  let auxiliary_opens : string list ref = ref []
+  (* [file] Current namespace nesting, for qualified open names. *)
+  let namespace_stack : string list ref = ref []
+  (* [invocation] Record types that ended up in mutual blocks — rendered
+     as inductives, not structures. Record construction ({..}) and field
+     projection (.field) don't work for these; use constructor syntax and
+     pattern matching instead. Accumulates across files so cross-file
+     record updates on mutual-block records are detected. *)
+  let mutual_records : Path.t list ref = ref []
+  (* [file] Import module names — emitted at the top of the file before
+     any other content. *)
+  let collected_imports : string list ref = ref []
+  (* [file] Locally-defined module names of the current file (Module
+     definitions): namespaces, not separate files — never imports. *)
+  let local_modules : string list ref = ref []
+  (* [file] Fully-qualified paths of nested modules needing 'open' at
+     file level (Lean's 'open' inside a namespace is scoped, so nested
+     module opens are deferred to the enclosing top-level scope). *)
+  let deferred_opens : string list ref = ref []
+  (* [file] Set by process_file.ml before each lean_defs call — used for
+     namespace wrapping. (The S15 interface-hygiene residual: this is a
+     pre-call side channel no other backend needs.) *)
+  let current_module_name : string ref = ref ""
+  (* [invocation] The Inhabited-instance census (see the inh_status
+     comment above). *)
+  let inhabited_census : (Path.t * (string * inh_status)) list ref = ref []
+  (* [invocation] Per-type tier-2 derivation plans (see inh_plan above). *)
+  let inhabited_tier2_plans : (Path.t * inh_plan) list ref = ref []
+  (* [render] When true, isEqual outputs propositional = instead of BEq
+     ==. Set during indreln antecedent processing where Prop is needed
+     (function types lack BEq; indreln antecedents live in Prop). *)
+  let prop_equality : bool ref = ref false
+  (* [file] Deferred abbrev definitions for types with TYR_subst target
+     reps — collected during type processing, drained at the end of
+     lean_defs after all definitions complete. *)
+  let pending_abbrevs : Output.t list ref = ref []
+  (* [render] const_descr_ref -> type-parameter names for polymorphic
+     indreln: set during antecedent rendering so exp inserts type params
+     for self-references in premises. *)
+  let indreln_params : (Types.const_descr_ref * string) list ref = ref []
+  (* [invocation] Reader lifting (declare {lean} reader val): crefs of
+     lifted defs — a def is lifted if it (transitively) uses a reader
+     constant or a lifted def. Grows monotonically (dependency order:
+     callees registered before callers). *)
+  let reader_lifted : Types.Cdset.t ref = ref Types.Cdset.empty
+  (* [render] Set while rendering a lifted def so the three def-assembly
+     sites emit the reader binder. *)
+  let reader_binder : bool ref = ref false
+  (* [render] Arc-8 S2: [Inhabited tv] instance-implicit binders for the
+     def group being rendered (tyvar names in parameter-declaration
+     order, from the threading census failwith_threaded below). *)
+  let inhabited_binder : string list ref = ref []
+  (* [render] Fuel emission (declare {lean} fuel val f = `sentinel`):
+     the sentinel text while rendering a fuel'd def's clause (consumed
+     by funcl_aux: rename to worker, add the Nat binder, wrap the body). *)
+  let fuel_emit : string option ref = ref None
+  (* [render] All fuel'd defs of the block being rendered (one entry for
+     a plain fuel'd def; every member for a fuel'd mutual block —
+     all-or-none, arc 3 B2). Self- and cross-member calls rewrite to
+     '(worker lemFuel)'. *)
+  let fuel_workers : (Types.const_descr_ref * string) list ref = ref []
+  (* [render] reader_seed (declare {lean} reader_seed val f): while
+     rendering a seed-marked def's body, the name of its first argument,
+     which OVERRIDES the injected reader parameter name at every
+     injection site within (lexically-scoped seeding, not dynamic
+     rebinding). *)
+  let reader_seed_param : string option ref = ref None
+  (* [invocation] Cache of the (cref, param name) reader list computed
+     from the whole constant environment (stable within an invocation). *)
+  let reader_params_cache : (Types.const_descr_ref * string) list option ref = ref None
+  (* [render] True while rendering a definition emitted only as a BLOCK
+     COMMENT (a def whose Lean target uses an inline/target_rep — the
+     `Comment` def form). Fail-closed generation-time errors (e.g. the
+     arc-10 set-comprehension rejection) must not fire for such dead
+     text; they emit the historical inert placeholder instead. *)
+  let rendering_comment = ref false
+  (* [invocation] Threaded-def census: cref -> ([Inhabited]-bound
+     type-parameter positions (indices into const_tparams, for call-site
+     propagation), bound tyvar names in parameter-declaration order (for
+     signature rendering)). Persists across modules (dependency order —
+     the reader_lifted precedent). *)
+  let failwith_threaded : (int list * string list) Types.Cdmap.t ref = ref Types.Cdmap.empty
+  (* [invocation] Synthesized-name counter (generate_fresh_name: x<n>). *)
+  let fresh_name_counter = ref 0
+
+  (* Reset the [file]-lifetime fields — called at every lean_defs entry.
+     (current_module_name and local_modules are not cleared here: both
+     are unconditionally re-SET before use on every file — the module
+     name by process_file.ml before the call, local_modules by the
+     pre-collection in lean_defs itself.) *)
+  let reset_per_file () =
+    auxiliary_opens := [];
+    namespace_stack := [];
+    collected_imports := [];
+    pending_abbrevs := [];
+    deferred_opens := []
+
+  (* Full reset — the reentrancy hook (be:G3): a second lem invocation in
+     one process starts from a fresh backend. Not called on the normal
+     one-invocation path. *)
+  let reset_invocation () =
+    reset_per_file ();
+    mutual_records := [];
+    local_modules := [];
+    current_module_name := "";
+    inhabited_census := [];
+    inhabited_tier2_plans := [];
+    prop_equality := false;
+    indreln_params := [];
+    reader_lifted := Types.Cdset.empty;
+    reader_binder := false;
+    inhabited_binder := [];
+    fuel_emit := None;
+    fuel_workers := [];
+    reader_seed_param := None;
+    reader_params_cache := None;
+    rendering_comment := false;
+    failwith_threaded := Types.Cdmap.empty;
+    fresh_name_counter := 0
+
+  (* Warning-32 suppression for the reentrancy hook (no in-tree caller
+     yet by design). *)
+  let _ = reset_invocation
+end
 let inhabited_census_lookup (p : Path.t) : (string * inh_status) option =
   Option.map snd
-    (List.find_opt (fun (q, _) -> Path.compare p q = 0) !lean_inhabited_census)
+    (List.find_opt (fun (q, _) -> Path.compare p q = 0) !St.inhabited_census)
 let inhabited_census_debug = (try Sys.getenv "LEM_INH_DEBUG" <> "" with Not_found -> false)
 let inhabited_census_add (p : Path.t) (name : string) (st : inh_status) : unit =
-  lean_inhabited_census := (p, (name, st)) :: !lean_inhabited_census;
+  St.inhabited_census := (p, (name, st)) :: !St.inhabited_census;
   if inhabited_census_debug then
     Printf.eprintf "CENSUS add %s (%s) %s\n%!" (Path.to_string p) name
       (match st with Inh_none -> "NONE" | Inh_instances es -> String.concat ";" (List.map (fun e -> Printf.sprintf "[%s]" (String.concat "," (List.map string_of_int e))) es))
@@ -136,73 +282,11 @@ let lean_builtin_inhabited_entries (p : Path.t) : int list list =
     | "either" -> [[0]; [1]]
     | "vector" -> [[0]]
     | _ -> [[]]
-(* Arc-8 S1: per-type tier-2 derivation PLAN, computed by
-   lean_inhabited_prepass (in declaration order) and only RENDERED at
-   emission time. Needed because the main emission walks definitions
-   with fold_right — side effects run last-to-first (see the
-   lean_reader_prepass / lean_mutual_records precedent) — so census
-   population cannot be interleaved with emission. *)
-type inh_plan =
-  | Plan_variant of (int * string list) list
-      (* usable constructor indices (into the Te_variant ctor list) with
-         their [Inhabited tv] bound sets, in emission order: first at
-         default priority, rest (priority := low) *)
-  | Plan_record of string list  (* all fields derivable; bound set *)
-  | Plan_none                   (* fail-closed: NO instance, no fallback *)
-let lean_inhabited_tier2_plans : (Path.t * inh_plan) list ref = ref []
 let inhabited_plan_lookup (p : Path.t) : inh_plan option =
   Option.map snd
-    (List.find_opt (fun (q, _) -> Path.compare p q = 0) !lean_inhabited_tier2_plans)
+    (List.find_opt (fun (q, _) -> Path.compare p q = 0) !St.inhabited_tier2_plans)
 let inhabited_plan_add (p : Path.t) (pl : inh_plan) : unit =
-  lean_inhabited_tier2_plans := (p, pl) :: !lean_inhabited_tier2_plans
-(* When true, isEqual outputs propositional = instead of BEq ==.
-   Set during indreln antecedent processing where Prop is needed.
-   Reason: Lean's == requires BEq instances, but function types lack BEq.
-   Indreln antecedents live in Prop, so = (propositional equality) is correct. *)
-let lean_prop_equality : bool ref = ref false
-(* Deferred abbrev definitions for types with TYR_subst target reps.
-   These are collected during type processing and drained at the end of
-   lean_defs, after all definitions complete. *)
-let lean_pending_abbrevs : Output.t list ref = ref []
-(* Map from const_descr_ref to type parameter names for polymorphic indreln.
-   Set during indreln antecedent rendering so that exp inserts type params
-   for self-references in premises (Lean requires explicit parameters). *)
-let lean_indreln_params : (Types.const_descr_ref * string) list ref = ref []
-
-(* Reader lifting (declare {lean} reader val): generated defs that
-   (transitively) use a reader constant take the reader values as leading
-   extra parameters; calls to the reader constant become the parameter.
-   lean_reader_lifted: crefs of lifted defs (grows monotonically; modules
-   are processed in dependency order, so callees are registered before
-   callers). lean_reader_binder: set while rendering a lifted def so the
-   three def-assembly sites emit the binder. *)
-let lean_reader_lifted : Types.Cdset.t ref = ref Types.Cdset.empty
-let lean_reader_binder : bool ref = ref false
-
-(* Arc-8 S2: [Inhabited tv] instance-implicit binders for the def group
-   currently being rendered (tyvar names in parameter-declaration order,
-   from the threading pre-pass census lean_failwith_threaded). Set while
-   rendering a threaded def so the def-assembly sites emit the binders;
-   [] otherwise. *)
-let lean_inhabited_binder : string list ref = ref []
-
-(* Fuel emission (declare {lean} fuel val f = `sentinel`): while rendering a
-   fuel'd def's clause, lean_fuel_emit holds the sentinel text (consumed by
-   funcl_aux: rename to worker, add the Nat binder, wrap the body) and
-   lean_fuel_workers holds (cref, worker name)s so self-calls rewrite to
-   'worker lemFuel' (the decremented binder in scope). *)
-let lean_fuel_emit : string option ref = ref None
-(* All fuel'd defs of the block being rendered (one entry for a plain fuel'd
-   def; every member for a fuel'd mutual block — all-or-none, arc 3 B2).
-   Self- and cross-member calls rewrite to '(worker lemFuel)'. *)
-let lean_fuel_workers : (Types.const_descr_ref * string) list ref = ref []
-
-(* reader_seed (declare {lean} reader_seed val f): while rendering a
-   seed-marked def's body, this holds the name of its first argument,
-   which OVERRIDES the injected reader parameter name at every injection
-   site within — the def itself is not lifted (lexically-scoped seeding,
-   not dynamic rebinding). *)
-let lean_reader_seed_param : string option ref = ref None
+  St.inhabited_tier2_plans := (p, pl) :: !St.inhabited_tier2_plans
 
 let lean_reader_is_reader env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
@@ -216,9 +300,8 @@ let lean_reader_param_name env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
   String.concat "" ["_lemReader_"; Name.to_string (Path.get_name cd.const_binding)]
 
-let lean_reader_params_cache : (Types.const_descr_ref * string) list option ref = ref None
 let lean_reader_get_params env =
-  match !lean_reader_params_cache with
+  match !St.reader_params_cache with
   | Some l -> l
   | None ->
     let l =
@@ -228,9 +311,9 @@ let lean_reader_get_params env =
           else None)
         (c_env_all_consts env.c_env) in
     let l = List.sort (fun (_, a) (_, b) -> String.compare a b) l in
-    lean_reader_params_cache := Some l; l
+    St.reader_params_cache := Some l; l
 
-(* Pre-pass over one module's defs: grow lean_reader_lifted to a fixpoint —
+(* Pre-pass over one module's defs: grow St.reader_lifted to a fixpoint —
    a def is lifted if it (transitively) uses a reader constant or a lifted
    def. Must run BEFORE emission (defs renders last-to-first). The set
    persists across modules (processed in dependency order). Instance defs
@@ -268,13 +351,13 @@ let lean_reader_prepass env (ds : def list) =
     while !changed do
       changed := false;
       List.iter (fun (defined, used) ->
-          if not (Types.Cdset.subset defined !lean_reader_lifted) then begin
+          if not (Types.Cdset.subset defined !St.reader_lifted) then begin
             let needs =
               Types.Cdset.exists (lean_reader_is_reader env) used
               || not (Types.Cdset.is_empty
-                        (Types.Cdset.inter used !lean_reader_lifted)) in
+                        (Types.Cdset.inter used !St.reader_lifted)) in
             if needs then begin
-              lean_reader_lifted := Types.Cdset.union defined !lean_reader_lifted;
+              St.reader_lifted := Types.Cdset.union defined !St.reader_lifted;
               changed := true
             end
           end) infos
@@ -283,7 +366,7 @@ let lean_reader_prepass env (ds : def list) =
 
 (* Collect import for a qualified identifier from a target_rep.
    If the identifier has a module prefix (e.g., CerberusImpl.sizeof_ity),
-   add the module to lean_collected_imports for the current file. *)
+   add the module to St.collected_imports for the current file. *)
 (* Extract a module import from a CR_simple target rep body expression.
    Called via Backend_common.on_cr_simple_applied callback during rendering.
    Only fires for the current file's expressions — giving per-file scoping. *)
@@ -297,8 +380,8 @@ let collect_cr_simple_import (is_library : bool) (id_str : string) =
       let mod_name = String.sub id_str 0 dot_pos in
       if String.length mod_name > 0 &&
          Char.uppercase_ascii mod_name.[0] = mod_name.[0] &&
-         not (List.mem mod_name !lean_collected_imports) then
-        lean_collected_imports := mod_name :: !lean_collected_imports
+         not (List.mem mod_name !St.collected_imports) then
+        St.collected_imports := mod_name :: !St.collected_imports
     | _ -> ()
 
 (* Extract the name string from a type/numeric variable *)
@@ -338,7 +421,7 @@ let lean_ns_name mod_name =
   else mod_name
 
 let lean_qualified_name name_str =
-  match !lean_namespace_stack with
+  match !St.namespace_stack with
     | [] -> name_str
     | ns -> String.concat "." (List.rev ns @ [name_str])
 
@@ -538,7 +621,7 @@ let skip_inhabited_for_type_env env t path =
    tier-2 derivation plans for a whole file IN DECLARATION ORDER,
    before emission (which walks definitions with fold_right, i.e.
    last-to-first side effects — the lean_reader_prepass /
-   lean_mutual_records precedent). Mirrors the emission dispatch
+   St.mutual_records precedent). Mirrors the emission dispatch
    exactly: Seplist.length > 1 -> the mutual machinery (all tier-1
    instances of a block precede all its tier-2 instances), otherwise
    the single-type path. The census persists across files (types from
@@ -569,7 +652,7 @@ let lean_inhabited_prepass env (ds : def list) =
   let process_block defs =
     let multi = Seplist.length defs > 1 in
     let ts_list = Seplist.to_list defs in
-    let is_lib = is_library_module !lean_current_module_name in
+    let is_lib = is_library_module !St.current_module_name in
     let ts_list = if is_lib then List.filter (fun (_, _, _, t, _) -> t <> Te_opaque) ts_list else ts_list in
     let non_abbrev = List.filter (fun (_, _, _, t, _) ->
       match t with Te_abbrev _ -> false | _ -> true) ts_list in
@@ -748,22 +831,8 @@ let rec lean_cmp_shape (d : Types.type_defs) (derived : (Path.t * string) list)
 
 let lean_cmp_shape_is_bad = function CSbad _ -> true | _ -> false
 
-(* True while rendering a definition that is emitted only as a BLOCK
-   COMMENT (a def whose Lean target uses an inline/target_rep — the
-   `Comment` def form). Fail-closed generation-time errors (e.g. the
-   arc-10 set-comprehension rejection) must not fire for such dead
-   text; they emit the historical inert placeholder instead. *)
-let lean_rendering_comment = ref false
-
-(* Threaded-def census: cref -> ([Inhabited]-bound type-parameter
-   positions (indices into const_tparams, for call-site propagation),
-   bound tyvar names in parameter-declaration order (for signature
-   rendering)). Persists across modules within one lem invocation
-   (modules are processed in dependency order — the lean_reader_lifted
-   precedent). *)
-let lean_failwith_threaded : (int list * string list) Types.Cdmap.t ref = ref Types.Cdmap.empty
 let lean_thread_lookup (c : Types.const_descr_ref) : (int list * string list) option =
-  Types.Cdmap.apply !lean_failwith_threaded c
+  Types.Cdmap.apply !St.failwith_threaded c
 let lean_thread_debug = (try Sys.getenv "LEM_THREAD_DEBUG" <> "" with Not_found -> false)
 
 (* Constants whose LEAN target_rep is the bare identifier `failwith`
@@ -970,7 +1039,7 @@ let lean_failwith_thread_prepass env (ds : def list) =
               (match lean_thread_lookup c with
                | Some (old_poss, _) when old_poss = poss -> ()
                | _ ->
-                 lean_failwith_threaded := Types.Cdmap.insert !lean_failwith_threaded (c, (poss, names_in_order));
+                 St.failwith_threaded := Types.Cdmap.insert !St.failwith_threaded (c, (poss, names_in_order));
                  if lean_thread_debug then
                    Printf.eprintf "THREAD %s [%s]\n%!" (Path.to_string cd.const_binding)
                      (String.concat "," names_in_order);
@@ -1017,18 +1086,18 @@ let lean_failwith_thread_prepass env (ds : def list) =
    sets/maps only grow, and re-insertions are equal), so the re-run is
    harmless. *)
 let lean_analysis_prepass_all env (mods : checked_module list) =
-  let saved = !lean_current_module_name in
+  let saved = !St.current_module_name in
   List.iter (fun m ->
       let (mod_path, mod_name) = Path.to_name_list m.module_path in
       let module_name = Name.to_string
           (Backend_common.get_module_name env (Target.Target_no_ident Target.Target_lean) mod_path mod_name) in
-      lean_current_module_name := module_name;
+      St.current_module_name := module_name;
       let (ds, _) = m.typed_ast in
       lean_reader_prepass env ds;
       lean_inhabited_prepass env ds;
       lean_failwith_thread_prepass env ds)
     mods;
-  lean_current_module_name := saved
+  St.current_module_name := saved
 
 let wrap_lean_comment x = Ulib.Text.(^^^) (Ulib.Text.(^^^) (r"/- ") x) (r" -/")
 
@@ -1133,11 +1202,11 @@ let name_var_output v =
 
 (* If the type is a record rendered as a single-constructor inductive
    (due to being in a mutual block), return its path. Uses the per-compilation-unit
-   list lean_mutual_records which accumulates across files in one lem invocation. *)
+   list St.mutual_records which accumulates across files in one lem invocation. *)
 let mutual_record_path typ : Path.t option =
   match typ.Types.t with
     | Types.Tapp (_, path) ->
-        if List.exists (fun p -> Path.compare p path = 0) !lean_mutual_records
+        if List.exists (fun p -> Path.compare p path = 0) !St.mutual_records
         then Some path
         else None
     | _ -> None
@@ -1157,11 +1226,9 @@ let lean_format_op use_infix a x =
     id a x
 
 
-let fresh_name_counter = ref 0
-
 let generate_fresh_name () =
-  let n = !fresh_name_counter in
-  fresh_name_counter := n + 1;
+  let n = !St.fresh_name_counter in
+  St.fresh_name_counter := n + 1;
   Stdlib.(^) "x" (string_of_int n)
 
 type variable
@@ -1368,13 +1435,13 @@ type pat_style = FunParam | MatchArm
     let exp_needs_reader (e : exp) : bool =
       let ue = add_exp_entities empty_used_entities e in
       List.exists (fun cref ->
-          is_reader_cref cref || Types.Cdset.mem cref !lean_reader_lifted)
+          is_reader_cref cref || Types.Cdset.mem cref !St.reader_lifted)
         ue.used_consts
 
     (* Injection value name: the enclosing def's injected parameter, or —
        inside a reader_seed def — its first argument. *)
     let reader_inject_name pname =
-      match !lean_reader_seed_param with
+      match !St.reader_seed_param with
       | Some seed -> seed
       | None -> pname
 
@@ -1480,23 +1547,23 @@ type pat_style = FunParam | MatchArm
           val_def false None is_real_rec try_term def tv_set class_constraints
       | Module (skips, (name, l), mod_binding, skips', skips'', defs, skips''') ->
         let name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip name)) in
-        lean_local_modules := name_str :: !lean_local_modules;
-        lean_namespace_stack := name_str :: !lean_namespace_stack;
+        St.local_modules := name_str :: !St.local_modules;
+        St.namespace_stack := name_str :: !St.namespace_stack;
         (* Build fully-qualified path for this module *)
-        let fq_path = String.concat "." (List.rev !lean_namespace_stack) in
+        let fq_path = String.concat "." (List.rev !St.namespace_stack) in
         let name = lskips_t_to_output name in
         let body = Fun.protect ~finally:(fun () ->
-          lean_namespace_stack := (match !lean_namespace_stack with _ :: tl -> tl | [] -> [])
+          St.namespace_stack := (match !St.namespace_stack with _ :: tl -> tl | [] -> [])
         ) (fun () -> callback defs) in
           (* In Lem, module contents are implicitly available after the module
              definition. Lean namespaces are not — we need an explicit 'open'.
              For top-level modules, emit 'open' directly plus any deferred
              opens from nested modules. For nested modules, defer the open
              since Lean's 'open' inside a namespace is scoped to that block. *)
-          let is_top_level = !lean_namespace_stack = [] in
+          let is_top_level = !St.namespace_stack = [] in
           if is_top_level then
-            let deferred = !lean_deferred_opens in
-            lean_deferred_opens := [];
+            let deferred = !St.deferred_opens in
+            St.deferred_opens := [];
             let deferred_opens = flat @@ List.map (fun p ->
               from_string (String.concat "" ["\nopen "; p])
             ) deferred in
@@ -1506,7 +1573,7 @@ type pat_style = FunParam | MatchArm
               from_string "\nopen "; name; deferred_opens; ws skips'''
             ]
           else begin
-            lean_deferred_opens := fq_path :: !lean_deferred_opens;
+            St.deferred_opens := fq_path :: !St.deferred_opens;
             Output.flat [
               ws skips; from_string "namespace "; name; ws skips'; ws skips'';
               body; from_string "\nend "; name;
@@ -1525,17 +1592,17 @@ type pat_style = FunParam | MatchArm
       | OpenImportTarget(oi, _, []) -> ws (oi_get_lskip oi)
       | OpenImportTarget (Ast.OI_open skips, targets, mod_descrs) ->
           ws skips ^
-          let is_user_module = not (is_library_module !lean_current_module_name) in
+          let is_user_module = not (is_library_module !St.current_module_name) in
           let handle_mod (sk, md) =
-            (if not (List.mem md !lean_local_modules) then
-              lean_collected_imports := md :: !lean_collected_imports);
+            (if not (List.mem md !St.local_modules) then
+              St.collected_imports := md :: !St.collected_imports);
             (* Emit 'open' for:
                - Local modules (defined in this file via Module) — they create namespaces
                - Library modules in library context — they have Lem_X namespaces
                User modules from other files have no namespace; import alone suffices.
                In non-library (user) modules, skip inline opens for library imports —
                transitive_opens will emit them for both main and auxiliary files. *)
-            if List.mem md !lean_local_modules then
+            if List.mem md !St.local_modules then
               Output.flat [
                 from_string "open"; ws sk; from_string md; from_string "\n"
               ]
@@ -1561,7 +1628,7 @@ type pat_style = FunParam | MatchArm
       | Class (Ast.Class_inline_decl (skips, _), _, _, _, _,_, _, _) -> ws skips
       | Class (Ast.Class_decl skips, skips', (name, l), tv, p, skips'', body, skips''') ->
           let name_str = Name.to_string (B.class_path_to_name p) in
-          lean_auxiliary_opens := lean_qualified_name name_str :: !lean_auxiliary_opens;
+          St.auxiliary_opens := lean_qualified_name name_str :: !St.auxiliary_opens;
           let name = from_string name_str in
           let tv_kind = tnvar_kind tv in
           let tv = from_string (tnvar_to_string tv) in
@@ -1807,22 +1874,22 @@ type pat_style = FunParam | MatchArm
           | _ -> None
         in
         let comment =
-          let saved = !lean_rendering_comment in
-          lean_rendering_comment := true;
-          Fun.protect ~finally:(fun () -> lean_rendering_comment := saved) @@ fun () ->
+          let saved = !St.rendering_comment in
+          St.rendering_comment := true;
+          Fun.protect ~finally:(fun () -> St.rendering_comment := saved) @@ fun () ->
           Output.flat [
             skips; from_string "/- "; def inside_instance callback inside_module def_aux; from_string " -/"
           ] in
         begin match abbrev_for_target_rep with
         | Some abbrev_out ->
-          lean_pending_abbrevs := abbrev_out :: !lean_pending_abbrevs;
+          St.pending_abbrevs := abbrev_out :: !St.pending_abbrevs;
           comment
         | None -> comment
         end
       | Declaration (Decl_extra_import (_, _, _, _, mod_name)) ->
           (* Add user-requested import to this file's import list *)
-          if not (List.mem mod_name !lean_collected_imports) then
-            lean_collected_imports := mod_name :: !lean_collected_imports;
+          if not (List.mem mod_name !St.collected_imports) then
+            St.collected_imports := mod_name :: !St.collected_imports;
           emp
       | Declaration _ -> emp  (* Other declarations processed earlier *)
       | Lemma _ -> emp  (* Lemmas are handled by def_extra, not def *)
@@ -1877,14 +1944,14 @@ type pat_style = FunParam | MatchArm
                   then from_string "@[never_extract, noinline] " else emp in
                 let let_lifted =
                   let lifted = List.exists (fun (_, cref) ->
-                      Types.Cdset.mem cref !lean_reader_lifted) name_map in
+                      Types.Cdset.mem cref !St.reader_lifted) name_map in
                   if exp_needs_reader e && inside_instance then
                     raise (Reporting_basic.err_general true Ast.Unknown
                       "Lean backend: reader-lifted call inside an instance method (unsupported: instance fields cannot take extra parameters)");
                   lifted && not inside_instance in
-                let saved_reader_binder = !lean_reader_binder in
-                lean_reader_binder := let_lifted;
-                Fun.protect ~finally:(fun () -> lean_reader_binder := saved_reader_binder) @@ fun () ->
+                let saved_reader_binder = !St.reader_binder in
+                St.reader_binder := let_lifted;
+                Fun.protect ~finally:(fun () -> St.reader_binder := saved_reader_binder) @@ fun () ->
                 let defs = List.map (fun (_orig_name, cref) ->
                   let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
                   let (_, renamed, _) = Typed_ast_syntax.constant_descr_to_name
@@ -2027,7 +2094,7 @@ type pat_style = FunParam | MatchArm
                    fail closed if an instance method needs the reader. *)
                 let register_group group =
                   let lifted = List.exists (fun (_, c, _, _, _, _) ->
-                      Types.Cdset.mem c !lean_reader_lifted) group in
+                      Types.Cdset.mem c !St.reader_lifted) group in
                   let needs = List.exists (fun (_, _, _, _, _, e) ->
                       exp_needs_reader e) group in
                   if needs && inside_instance then
@@ -2099,9 +2166,9 @@ type pat_style = FunParam | MatchArm
                    && List.length fuel_plan <> List.length groups then
                   raise (Reporting_basic.err_general true Ast.Unknown
                     "Lean backend: fuel in a mutual block requires EVERY member to carry a 'declare {lean} fuel val' (all-or-none)");
-                let saved_plan = !lean_fuel_workers in
-                lean_fuel_workers := fuel_plan;
-                Fun.protect ~finally:(fun () -> lean_fuel_workers := saved_plan) @@ fun () ->
+                let saved_plan = !St.fuel_workers in
+                St.fuel_workers := fuel_plan;
+                Fun.protect ~finally:(fun () -> St.fuel_workers := saved_plan) @@ fun () ->
                 let bodies = List.map (fun g ->
                     (* Fuel emission (declare {lean} fuel val): single-clause,
                        non-mutual, non-instance, not reader-lifted (extend on
@@ -2161,9 +2228,9 @@ type pat_style = FunParam | MatchArm
                        raise (Reporting_basic.err_general true Ast.Unknown
                          "Lean backend: reader_seed def unexpectedly reader-lifted")
                      | _ -> ());
-                    let saved_seed = !lean_reader_seed_param in
-                    lean_reader_seed_param := seed_info;
-                    Fun.protect ~finally:(fun () -> lean_reader_seed_param := saved_seed) @@ fun () ->
+                    let saved_seed = !St.reader_seed_param in
+                    St.reader_seed_param := seed_info;
+                    Fun.protect ~finally:(fun () -> St.reader_seed_param := saved_seed) @@ fun () ->
                     (match fuel_info with
                      | Some _ when inside_instance ->
                        raise (Reporting_basic.err_general true Ast.Unknown
@@ -2187,14 +2254,14 @@ type pat_style = FunParam | MatchArm
                             | Some (_, ns) -> ns
                             | None -> [])
                         | None -> [] in
-                    let saved_inh = !lean_inhabited_binder in
-                    lean_inhabited_binder := thread_names;
-                    Fun.protect ~finally:(fun () -> lean_inhabited_binder := saved_inh) @@ fun () ->
+                    let saved_inh = !St.inhabited_binder in
+                    St.inhabited_binder := thread_names;
+                    Fun.protect ~finally:(fun () -> St.inhabited_binder := saved_inh) @@ fun () ->
                     match fuel_info with
                     | None ->
-                      let saved = !lean_reader_binder in
-                      lean_reader_binder := lifted;
-                      Fun.protect ~finally:(fun () -> lean_reader_binder := saved)
+                      let saved = !St.reader_binder in
+                      St.reader_binder := lifted;
+                      Fun.protect ~finally:(fun () -> St.reader_binder := saved)
                         (fun () -> (attr_for g, def_keyword_for g, render_group g, emp))
                     | Some (n, c, s) ->
                       let base_name = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
@@ -2204,15 +2271,15 @@ type pat_style = FunParam | MatchArm
                       let tv_out =
                         if Types.TNset.cardinal tv = 0 then emp
                         else Output.flat [from_string " "; let_type_variables true tv] in
-                      let saved_e = !lean_fuel_emit in
-                      let saved_rb = !lean_reader_binder in
-                      lean_fuel_emit := Some s;
-                      lean_reader_binder := lifted;
+                      let saved_e = !St.fuel_emit in
+                      let saved_rb = !St.reader_binder in
+                      St.fuel_emit := Some s;
+                      St.reader_binder := lifted;
                       (* worker name must agree with the block-level plan *)
-                      assert (List.assoc_opt c !lean_fuel_workers = Some worker);
+                      assert (List.assoc_opt c !St.fuel_workers = Some worker);
                       Fun.protect ~finally:(fun () ->
-                          lean_fuel_emit := saved_e;
-                          lean_reader_binder := saved_rb)
+                          St.fuel_emit := saved_e;
+                          St.reader_binder := saved_rb)
                         (fun () ->
                           let body = render_group g in
                           (* Point-free wrapper at the default fuel: call sites
@@ -2285,13 +2352,13 @@ type pat_style = FunParam | MatchArm
       end
     (* Inductive relation (indreln) rendering. Phases:
        1. Gather unique relation names with their const_descr_refs
-       2. Set lean_indreln_params so exp can insert type parameters for
+       2. Set St.indreln_params so exp can insert type parameters for
           polymorphic self-references in premises
        3. Build inductive definitions using renamed names from const_descr
           (handles cross-module collisions like thread_trans → thread_trans0)
-       4. Render clauses with lean_prop_equality set so antecedents use
+       4. Render clauses with St.prop_equality set so antecedents use
           propositional = instead of BEq ==
-       lean_indreln_params is saved/restored so nested indreln blocks don't
+       St.indreln_params is saved/restored so nested indreln blocks don't
        clobber the outer scope. *)
     and clauses (inside_instance: bool) clause_list =
       (* Gather unique relation names from clauses, paired with their
@@ -2312,9 +2379,9 @@ type pat_style = FunParam | MatchArm
       in
       let gathered = gather_names clause_list in
       (* For polymorphic indreln: compute type parameter names per relation
-         and set lean_indreln_params so exp can insert them in premises. *)
-      let saved_indreln_params = !lean_indreln_params in
-      lean_indreln_params := List.filter_map (fun (_name, c_ref) ->
+         and set St.indreln_params so exp can insert them in premises. *)
+      let saved_indreln_params = !St.indreln_params in
+      St.indreln_params := List.filter_map (fun (_name, c_ref) ->
         let cd = c_env_lookup Ast.Unknown A.env.c_env c_ref in
         let tvs = Types.free_vars cd.const_type in
         if Types.TNset.cardinal tvs = 0 then None
@@ -2324,7 +2391,7 @@ type pat_style = FunParam | MatchArm
               (Types.TNset.elements tvs) in
           Some (c_ref, params_str)
       ) gathered;
-      Fun.protect ~finally:(fun () -> lean_indreln_params := saved_indreln_params) (fun () ->
+      Fun.protect ~finally:(fun () -> St.indreln_params := saved_indreln_params) (fun () ->
       let compare_clauses_by_name name (Rule(_,_, _, _, _, _, _, name', _, _),_) =
         let name' = name'.term in
         let name' = Name.strip_lskip name' in
@@ -2361,9 +2428,9 @@ type pat_style = FunParam | MatchArm
                     | ants ->
                       (* Use propositional = in indreln antecedents instead of BEq ==.
                          Functions and other types without BEq need propositional equality. *)
-                      let saved = !lean_prop_equality in
-                      lean_prop_equality := true;
-                      Fun.protect ~finally:(fun () -> lean_prop_equality := saved) (fun () ->
+                      let saved = !St.prop_equality in
+                      St.prop_equality := true;
+                      Fun.protect ~finally:(fun () -> St.prop_equality := saved) (fun () ->
                         flat [
                           concat_str " → "
                             (List.map (fun e ->
@@ -2532,7 +2599,7 @@ type pat_style = FunParam | MatchArm
            can have arguments on a new line at field-name indentation, which Lean
            misparses as a new field definition. *)
         let body = if inside_instance then flatten_newlines body else body in
-        (match !lean_fuel_emit with
+        (match !St.fuel_emit with
          | Some sentinel ->
            Output.flat [
              ws name_skips; from_string " "; name; from_string "_lemFuel";
@@ -2556,7 +2623,7 @@ type pat_style = FunParam | MatchArm
              fun_pattern_list inside_instance pats; ws skips; typ_opt; from_string " := "; body
            ])
     and reader_binder_output () =
-      if not !lean_reader_binder then emp else
+      if not !St.reader_binder then emp else
       Output.flat (List.map (fun (cref, pname) ->
           Output.flat [
             from_string " ("; from_string pname; from_string " : ";
@@ -2568,7 +2635,7 @@ type pat_style = FunParam | MatchArm
     and inhabited_binder_output () =
       Output.flat (List.map (fun n ->
           Output.flat [from_string " [Inhabited "; from_string n; from_string "]"])
-        !lean_inhabited_binder)
+        !St.inhabited_binder)
 
     and funcl inside_instance i_ref_opt constraints tv_set ({term = n}, c, pats, typ_opt, skips, e) =
       let n =
@@ -2606,8 +2673,8 @@ type pat_style = FunParam | MatchArm
     (* Expression rendering. Lean 4 parser-specific rules:
        - Match/if/let/fun in function args or case bodies are parenthesized
          (Lean's greedy rightward match would otherwise consume too much)
-       - In indreln antecedents (lean_prop_equality), == and != become = and ≠
-       - For polymorphic indreln self-references (lean_indreln_params), explicit
+       - In indreln antecedents (St.prop_equality), == and != become = and ≠
+       - For polymorphic indreln self-references (St.indreln_params), explicit
          type parameters are inserted since Lean can't infer them
        - Class method constants get explicit @ type application when used bare *)
     and exp inside_instance e =
@@ -2650,7 +2717,7 @@ type pat_style = FunParam | MatchArm
                     (* In indreln antecedents (Prop context), == and != applied via
                        App nodes (e.g. from <> decomposition: not (isEqual x y)) must
                        use propositional =/≠ instead of BEq ==/!=. *)
-                    let raw_output = begin match !lean_prop_equality, args, check_beq_target_rep c_descr with
+                    let raw_output = begin match !St.prop_equality, args, check_beq_target_rep c_descr with
                     | true, [arg0; arg1], Some is_eq ->
                       let l_out = trans arg0 in
                       let r_out = trans arg1 in
@@ -2660,8 +2727,8 @@ type pat_style = FunParam | MatchArm
                       let is_fuel_self =
                         (* only while rendering a fuel'd body: elsewhere the
                            lemFuel binder is not in scope *)
-                        !lean_fuel_emit <> None
-                        && List.mem_assoc cd.descr !lean_fuel_workers in
+                        !St.fuel_emit <> None
+                        && List.mem_assoc cd.descr !St.fuel_workers in
                       if is_fuel_self then
                         (* Self-call in a fuel'd worker: 'trans e0' reaches the
                            bare-Constant case, which rewrites to
@@ -2699,7 +2766,7 @@ type pat_style = FunParam | MatchArm
                           @ [from_string " : "; pat_typ (C.t_to_src_t site_t);
                              from_string ")"])]
                       end
-                      else if Types.Cdset.mem cd.descr !lean_reader_lifted then
+                      else if Types.Cdset.mem cd.descr !St.reader_lifted then
                         (* Call of a lifted def: `trans e0` reaches the bare-
                            Constant case, which injects the reader parameters
                            exactly once; just apply the original arguments. *)
@@ -2708,7 +2775,7 @@ type pat_style = FunParam | MatchArm
                         [Output.flat (func_out
                           :: List.map (fun a -> Output.flat [from_string " "; a]) args_out)]
                       else
-                      begin match List.assoc_opt cd.descr !lean_indreln_params with
+                      begin match List.assoc_opt cd.descr !St.indreln_params with
                       | Some params_str ->
                         let func_out = trans e0 in
                         let args_out = List.map trans args in
@@ -2763,14 +2830,14 @@ type pat_style = FunParam | MatchArm
               let default_const_output () =
                 Output.concat emp (B.function_application_to_output (exp_to_locn e) (exp inside_instance) false e const [] (use_ascii_rep_for_const const.descr))
               in
-              begin match (if !lean_fuel_emit = None then None
-                           else List.assoc_opt const.descr !lean_fuel_workers) with
+              begin match (if !St.fuel_emit = None then None
+                           else List.assoc_opt const.descr !St.fuel_workers) with
               | Some w ->
                 (* Self- or cross-member call inside a fuel'd block: recurse
                    on the decremented fuel binder; a lifted worker also
                    re-injects its reader binders (arc 3, B1/B2). *)
                 let readers =
-                  if !lean_reader_binder then reader_args_output () else emp in
+                  if !St.reader_binder then reader_args_output () else emp in
                 Output.flat [from_string "("; from_string w;
                              from_string " lemFuel"; readers; from_string ")"]
               | None ->
@@ -2779,7 +2846,7 @@ type pat_style = FunParam | MatchArm
                    eta-expand so the unit-function type is preserved. *)
                 Output.flat [from_string "(fun (_ : Unit) => ";
                              from_string (reader_inject_name (reader_param_name const.descr)); from_string ")"]
-              else if Types.Cdset.mem const.descr !lean_reader_lifted then
+              else if Types.Cdset.mem const.descr !St.reader_lifted then
                 (* Bare reference to a lifted def (e.g. passed to a HOF):
                    partially apply the reader parameters. *)
                 Output.flat [from_string "("; default_const_output ();
@@ -3000,7 +3067,7 @@ type pat_style = FunParam | MatchArm
                          propositional =/≠. This handles the Infix AST case;
                          the App case above handles decomposed forms like not(isEqual x y). *)
                       let c_descr = c_env_lookup Ast.Unknown A.env.c_env cd.descr in
-                      match !lean_prop_equality, check_beq_target_rep c_descr with
+                      match !St.prop_equality, check_beq_target_rep c_descr with
                       | true, Some is_eq ->
                         (* Parenthesize both sides to avoid chained = ambiguity *)
                         let l_out = Output.flat [from_string "("; trans l; from_string ")"] in
@@ -3069,13 +3136,13 @@ type pat_style = FunParam | MatchArm
                  FAIL-CLOSED: a loud generation-time error (arc-10 S2,
                  decision log D1 ruling 3 — formerly an opaque `(sorry ...)`
                  stub). *)
-              if !lean_rendering_comment then
+              if !St.rendering_comment then
                 from_string "(sorry /- Lean backend: set comprehension binding not supported -/)"
               else
                 raise (Reporting_basic.err_general true (exp_to_locn e)
                   "Lean backend: set comprehensions ({ e | bindings ... }) are not supported by the Lean backend; workarounds: rewrite using explicit Set/List library functions (e.g. Set.filter / Set.map / Set.cross, which have Lean target reps), or give the enclosing definition a 'declare lean target_rep'")
           | Setcomp (_, _, _, _, _, _) ->
-              if !lean_rendering_comment then
+              if !St.rendering_comment then
                 from_string "(sorry /- Lean backend: set comprehension not supported -/)"
               else
                 raise (Reporting_basic.err_general true (exp_to_locn e)
@@ -3487,7 +3554,7 @@ type pat_style = FunParam | MatchArm
       ) (Seplist.to_list defs) in
       let type_names = List.map fst type_info in
       (* Also register these for the auxiliary file (with namespace qualification) *)
-      lean_auxiliary_opens := !lean_auxiliary_opens @ List.map lean_qualified_name type_names;
+      St.auxiliary_opens := !St.auxiliary_opens @ List.map lean_qualified_name type_names;
       let open_decls = flat (List.map (fun (name_str, ctor_names) ->
         if ctor_names = [] then
           (* Records/opaque types: just open *)
@@ -3532,8 +3599,8 @@ type pat_style = FunParam | MatchArm
         let abbrevs_after_output = flat @@ List.map render_abbrev abbrevs_after in
         let mutual_n = List.length mutual_defs in
         (* Note: mutual record names are pre-collected in lean_defs before the
-           main fold_right, so we don't register them here. See lean_mutual_records
-           pre-collection near lean_local_modules. *)
+           main fold_right, so we don't register them here. See St.mutual_records
+           pre-collection near St.local_modules. *)
         let mutual_output =
           if mutual_n > 1 then
             let mutual_sep = Seplist.from_list_default None mutual_defs in
@@ -3622,8 +3689,8 @@ type pat_style = FunParam | MatchArm
                     let mod_name = String.sub target_id_str 0 dot_pos in
                     if String.length mod_name > 0 &&
                        Char.uppercase_ascii mod_name.[0] = mod_name.[0] &&
-                       not (List.mem mod_name !lean_collected_imports) then
-                      lean_collected_imports := mod_name :: !lean_collected_imports
+                       not (List.mem mod_name !St.collected_imports) then
+                      St.collected_imports := mod_name :: !St.collected_imports
                   | _ -> ());
                 let name = B.type_path_to_name n0 t_path in
                 let name_out = Name.to_output (Type_ctor (false, false)) name in
@@ -4808,7 +4875,7 @@ type pat_style = FunParam | MatchArm
          In user modules, opaque types (e.g., tid, location in cmm.lem) may
          appear as constructor arguments, so downstream types need their
          BEq/Ord instances for deriving to work. *)
-      let is_lib = is_library_module !lean_current_module_name in
+      let is_lib = is_library_module !St.current_module_name in
       let ts = if is_lib then List.filter (fun (_, _, _, t, _) -> t <> Te_opaque) ts else ts in
       (* Treat each single type like a mutual block of one, so self-referential
          constructors (e.g. Unop : op → op0 → op1 → op1) are detected and
@@ -4819,7 +4886,7 @@ type pat_style = FunParam | MatchArm
         Output.flat [concat_str "\n" mapped; concat emp beq_instances]
     and generate_default_values_mutual ts : Output.t =
       let ts_list = Seplist.to_list ts in
-      let is_lib = is_library_module !lean_current_module_name in
+      let is_lib = is_library_module !St.current_module_name in
       let ts_list = if is_lib then List.filter (fun (_, _, _, t, _) -> t <> Te_opaque) ts_list else ts_list in
       (* Filter out abbreviations for mutual_paths, is_type1, and emit_deriving decisions.
          Abbreviations don't participate in mutual recursion or instance generation. *)
@@ -4921,18 +4988,15 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
        Library modules: wrapped in 'namespace Lem_ModuleName ... end' with imports at top.
        User modules: no namespace wrapper; automatically open all transitive library
        namespaces so types/classes from Pervasives etc. are in scope.
-       Abbrev definitions may be deferred (lean_pending_abbrevs) until after their
+       Abbrev definitions may be deferred (St.pending_abbrevs) until after their
        dependencies are defined (e.g., abbrev mword after class Size). *)
     let lean_defs ((ds : def list), end_lex_skips) =
-      lean_auxiliary_opens := [];
-      lean_namespace_stack := [];
-      lean_collected_imports := [];
-      lean_pending_abbrevs := [];
+      St.reset_per_file ();
       (* Set callback for per-file CR_simple import collection *)
       Backend_common.on_cr_simple_applied := collect_cr_simple_import;
-      (* Note: lean_mutual_records is NOT reset — it accumulates across files
-         so that cross-file record updates on mutual-block records are detected. *)
-      lean_deferred_opens := [];
+      (* Note: St.mutual_records is NOT reset — [invocation] lifetime: it
+         accumulates across files so that cross-file record updates on
+         mutual-block records are detected. *)
       (* Pre-collect local module names before main processing, because
          defs uses fold_right (processes last-to-first). Without this,
          'open Operators' would be processed before 'module Operators',
@@ -4947,11 +5011,11 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
           | _ -> []
         ) ds
       in
-      lean_local_modules := collect_local_modules ds;
+      St.local_modules := collect_local_modules ds;
       (* Pre-collect mutual record type names. Type_def blocks with >1 member
          that contain Te_record entries will render records as inductives.
          We need this list before defs runs (fold_right = last-to-first). *)
-      lean_mutual_records := !lean_mutual_records @ List.concat_map (fun (((d, _), _, _) : def) ->
+      St.mutual_records := !St.mutual_records @ List.concat_map (fun (((d, _), _, _) : def) ->
         match d with
         | Type_def (_, defs) when Seplist.length defs > 1 ->
             let all = Seplist.to_list defs in
@@ -4967,7 +5031,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
             else []
         | _ -> []
       ) ds;
-      let mod_name = !lean_current_module_name in
+      let mod_name = !St.current_module_name in
       let ns_name = lean_ns_name mod_name in
       let is_library = ns_name <> mod_name in
       (* For library modules, push the top-level namespace so that
@@ -4975,7 +5039,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
          instead of bare "Eq0"). Auxiliary files need these qualified opens
          since they don't have the namespace wrapper. *)
       if is_library then
-        lean_namespace_stack := [ns_name];
+        St.namespace_stack := [ns_name];
       lean_reader_prepass A.env ds;
       (* Arc-8 S1: compute the Inhabited census + tier-2 plans in
          declaration order before emission (defs is fold_right). *)
@@ -4987,8 +5051,8 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
       lean_failwith_thread_prepass A.env ds;
       let lean_defs = defs false false ds in
       (* Drain any deferred abbrevs (e.g., abbrev mword after class Size) *)
-      let deferred = Output.flat (List.rev !lean_pending_abbrevs) in
-      lean_pending_abbrevs := [];
+      let deferred = Output.flat (List.rev !St.pending_abbrevs) in
+      St.pending_abbrevs := [];
       let lean_defs = lean_defs ^ deferred in
       let lean_defs_extra = defs_extra false false ds in
       (* Ensure LemLib.Pervasives is always imported for non-library modules.
@@ -4996,15 +5060,15 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
          are available for auto-generated instances even when the source .lem file
          doesn't explicitly import Pervasives (e.g., linux.lem). *)
       let _ = if not is_library &&
-                not (List.mem "LemLib.Pervasives" !lean_collected_imports) then
-        lean_collected_imports := "LemLib.Pervasives" :: !lean_collected_imports
+                not (List.mem "LemLib.Pervasives" !St.collected_imports) then
+        St.collected_imports := "LemLib.Pervasives" :: !St.collected_imports
       in
       (* Imports for target_rep references are collected per-file during rendering:
          - Function CR_simple target reps: via Backend_common.on_cr_simple_applied callback
          - Type TYR_simple target reps: directly in type_def_variant
          This ensures each file only imports modules it actually references. *)
       (* Prepend collected imports (deduplicated, in order) to main body *)
-      let imports = List.rev !lean_collected_imports in
+      let imports = List.rev !St.collected_imports in
       let seen = Hashtbl.create 16 in
       let unique_imports = List.filter (fun m ->
         if Hashtbl.mem seen m then false
@@ -5026,7 +5090,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
          library namespaces. For transitive deps that come through Pervasives,
          we derive all library namespaces from the module environment. *)
       let transitive_opens = if not is_library then begin
-        let all_imports = List.rev !lean_collected_imports in
+        let all_imports = List.rev !St.collected_imports in
         let has_pervasives = List.exists (fun m ->
           m = "LemLib.Pervasives" || m = "LemLib.Pervasives_extra"
         ) all_imports in
@@ -5074,7 +5138,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
          can reference constructors and class methods unqualified *)
       let opens = List.map (fun name_str ->
         from_string (String.concat "" ["open "; name_str; "\n"])
-      ) !lean_auxiliary_opens in
+      ) !St.auxiliary_opens in
       let opens_output = Output.flat opens in
         ((to_rope (r"\"") lex_skip need_space @@ imports_output ^ transitive_opens ^ ns_start ^ lean_defs ^ ns_end ^ ws end_lex_skips),
           to_rope (r"\"") lex_skip need_space @@ transitive_opens ^ opens_output ^ lean_defs_extra ^ ws end_lex_skips)
