@@ -1,8 +1,0 @@
-open import Pervasives_extra
-val capture_probe : maybe (maybe nat) -> maybe nat
-let capture_probe x = match x with
-  | Just none -> Nothing
-  | Just y    -> y
-  | Nothing   -> Nothing
-end
-let capture_result = capture_probe (Just (Just 5))
