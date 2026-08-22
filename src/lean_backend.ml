@@ -781,6 +781,71 @@ let lean_inhabited_prepass env (ds : def list) =
    renaming — the same defs are re-walked by emission). *)
 module ExpW = Exps_in_context(struct let env_opt = None let avoid = None end)
 
+(* Every name BOUND anywhere inside an expression — pattern binders of
+   funs/matches/lets/do-lines/quantifiers, compiled or not (arc-14
+   re-mark RG1, be:S2: the reserved-name scan must cover CLAUSE BODIES —
+   the parameter-only scan missed body-level binders, and a body binder
+   named lemFuel/_lemReader_* silently shadows the synthesized binder at
+   self-call/injection sites; A' witness: use2 100 (1,2) = 5, not 103).
+   Conservative over-collection is fine: the consumer only greps for the
+   reserved names. *)
+let rec exp_bound_names (e : exp) : string list =
+  let pat_names p =
+    List.map (fun a -> Name.to_string (Name.strip_lskip a.term))
+      (Pattern_syntax.pat_vars_src p) in
+  let seplist_exps sl = Seplist.to_list sl in
+  match ExpW.exp_to_term e with
+  | Var _ | Backend _ | Nvar_e _ | Constant _ | Lit _ -> []
+  | Fun (_, ps, _, e1) -> List.concat_map pat_names ps @ exp_bound_names e1
+  | Function (_, arms, _) ->
+    List.concat_map (fun (p, _, e1, _) -> pat_names p @ exp_bound_names e1)
+      (Seplist.to_list arms)
+  | App (e1, e2) -> exp_bound_names e1 @ exp_bound_names e2
+  | Infix (e1, e2, e3) ->
+    exp_bound_names e1 @ exp_bound_names e2 @ exp_bound_names e3
+  | Record (_, fes, _) | Recup (_, _, _, fes, _) ->
+    let base = (match ExpW.exp_to_term e with
+      | Recup (_, e0, _, _, _) -> exp_bound_names e0 | _ -> []) in
+    base @ List.concat_map (fun (_, _, e1, _) -> exp_bound_names e1)
+      (Seplist.to_list fes)
+  | Field (e1, _, _) -> exp_bound_names e1
+  | Vector (_, es, _) | Tup (_, es, _) | List (_, es, _) | Set (_, es, _) ->
+    List.concat_map exp_bound_names (seplist_exps es)
+  | VectorSub (e1, _, _, _, _, _) | VectorAcc (e1, _, _, _) -> exp_bound_names e1
+  | Case (_, _, e0, _, arms, _) ->
+    exp_bound_names e0 @
+    List.concat_map (fun (p, _, e1, _) -> pat_names p @ exp_bound_names e1)
+      (Seplist.to_list arms)
+  | Typed (_, e1, _, _, _) | Paren (_, e1, _) | Begin (_, e1, _) ->
+    exp_bound_names e1
+  | Let (_, (lb, _), _, e1) ->
+    (match lb with
+     | Let_val (p, _, _, e2) -> pat_names p @ exp_bound_names e2
+     | Let_fun (n, ps, _, _, e2) ->
+       Name.to_string (Name.strip_lskip n.term)
+       :: List.concat_map pat_names ps @ exp_bound_names e2)
+    @ exp_bound_names e1
+  | If (_, e1, _, e2, _, e3) ->
+    exp_bound_names e1 @ exp_bound_names e2 @ exp_bound_names e3
+  | Setcomp (_, e1, _, e2, _, ns) ->
+    NameSet.fold (fun n acc -> Name.to_string n :: acc) ns []
+    @ exp_bound_names e1 @ exp_bound_names e2
+  | Comp_binding (_, _, e1, _, _, qbs, _, e2, _) ->
+    List.concat_map qb_bound_names qbs @ exp_bound_names e1 @ exp_bound_names e2
+  | Quant (_, qbs, _, e1) ->
+    List.concat_map qb_bound_names qbs @ exp_bound_names e1
+  | Do (_, _, dls, _, e1, _, _) ->
+    List.concat_map (fun (Do_line (p, _, e2, _)) ->
+      List.map (fun a -> Name.to_string (Name.strip_lskip a.term))
+        (Pattern_syntax.pat_vars_src p) @ exp_bound_names e2) dls
+    @ exp_bound_names e1
+and qb_bound_names = function
+  | Qb_var n -> [Name.to_string (Name.strip_lskip n.term)]
+  | Qb_restr (_, _, p, _, e, _) ->
+    List.map (fun a -> Name.to_string (Name.strip_lskip a.term))
+      (Pattern_syntax.pat_vars_src p) @ exp_bound_names e
+
+
 (* Types.t analog of derive_field_bounds: which tyvars must carry an
    [Inhabited tv] bound for the type to be synthesizable from the S1
    instance census. Some [] = discharged unconditionally; Some tvs =
@@ -2312,20 +2377,27 @@ type pat_style = FunParam | MatchArm
                        probe-measured (probe_fuel_shadow, 2026-08-22):
                        the worker matched the USER's lemFuel, returning
                        the 999 sentinel for shadow_probe 0 3. Fail
-                       closed at generation time. (Residual, registered:
-                       binders introduced by matches INSIDE the body are
-                       not yet scanned — the contract note carries it.) *)
+                       closed at generation time. COVERAGE (RG1, the
+                       re-mark's A' hole): clause PARAMETERS and every
+                       binder inside the compiled clause BODY
+                       (exp_bound_names — body-level match/let/fun/do
+                       binders shadow the synthesized binder at
+                       self-call/injection sites just as parameters do;
+                       A' witness: a tuple-pattern reader body compiled
+                       and ran silently wrong, use2 100 (1,2) = 5 not
+                       103 — now a negative probe). *)
                     let reserved_binder_check () =
-                      let bound = List.concat_map (fun (_, _, pats, _, _, _) ->
+                      let bound = List.concat_map (fun (_, _, pats, _, _, e) ->
                           List.concat_map (fun p ->
                             List.map (fun a ->
                               Name.to_string (Name.strip_lskip a.term))
-                              (Pattern_syntax.pat_vars_src p)) pats) g in
+                              (Pattern_syntax.pat_vars_src p)) pats
+                          @ exp_bound_names e) g in
                       List.iter (fun n ->
                         if n = "lemFuel" || String.length n >= 11 && String.sub n 0 11 = "_lemReader_" then
                           raise (Reporting_basic.err_general true (locn_of_clause_group g)
                             (Printf.sprintf
-                              "Lean backend: parameter '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel' and the '_lemReader_' prefix are the backend's; a shadowed fuel/reader binder is silently wrong) — rename the variable" n)))
+                              "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel' and the '_lemReader_' prefix are the backend's, in parameters AND clause bodies; a shadowed fuel/reader binder is silently wrong) — rename the variable" n)))
                         bound in
                     (if fuel_info <> None || seed_info <> None then reserved_binder_check ()
                      else if List.exists (fun (_, cr, _, _, _, _) ->

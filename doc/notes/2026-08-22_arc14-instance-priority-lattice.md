@@ -3,7 +3,7 @@
 Date: 2026-08-22. Status: NORMATIVE — every generated or library
 comparison/equality instance priority is assigned from this table; an
 instance at an undocumented priority is a finding. Enforcement:
-`tests/comprehensive/instance_priority.lem` (build-failing resolution
+`tests/comprehensive/test_instance_priority.lem` (build-failing resolution
 probe) + the emission comments in `src/lean_backend.ml` citing this note.
 
 ## The table
@@ -14,7 +14,7 @@ every deliberate tie below is justified; adding a new tie is a finding).
 
 | Slot | Priority | Who lives here |
 |------|----------|----------------|
-| model/override | 1000 (default) | lem `instance` declarations from the source model (e.g. symbol.lem's name-only `Eq0 identifier`); hand-written override files (e.g. cerberus CerbStepInstances); LemLib's concrete instances for base types; the generic `[Eq0 a] : BEq a` / `[SetType a] : BEq a` bridges (see "deliberate ties") |
+| model/override | 1000 (default) | lem `instance` declarations from the source model (e.g. symbol.lem's name-only `Eq0 identifier`); hand-written override files (e.g. cerberus CerbStepInstances); LemLib's concrete instances for base types; the generic `[Eq0 a] : BEq a` bridge (see "deliberate ties"; the COMPARATOR-derived bridges live in the 500 row below — RG3: each bridge appears at exactly one priority) |
 | derived BEq/Ord | 1000 (default) | the backend's derived/`deriving`-bridged **BEq/Ord** instances — MUST stay at default: below the default-priority `[Eq0 a] : BEq a` bridge they would be shadowed and the bridge would complete through `isEqual := x == y`, i.e. through THEMSELVES or a fallback (the pre-arc-10 failwithI race) |
 | **auto trio + comparator bridges** | **500** | the backend's auto **SetType/Eq0/Ord0** trio (deriving-bridge and comparison-derived) — BELOW every model/override instance (they win by PRIORITY, not order — the sem:S2 fix), ABOVE every generic default and fallback. ALSO (re-mark R3): the class emitter's comparator-derived **BEq** bridges (`[SetType a] : BEq a`, `[MapKeyType a] : BEq a`) — a comparator can be COARSER than a type's own equality, so the isEqual bridge/derived BEq (1000) must beat them by priority (this was the third default-priority tie, now DE-TIED) |
 | generic defaults | 100 (low) | `Basic_classes`: `[BEq a] : Eq0 a`, `[Ord a] : SetType a`, `[Ord0 a] : OrdMaxMin a`; LemLib's low-priority Sum right-inhabitant; residual (failwithI-bodied) trios/instances for underivable types |
@@ -51,7 +51,17 @@ comparator bridge now sits at 500, see the table.)
 
 ## The probe
 
-`tests/comprehensive/instance_priority.lem` declares a type with derived
+RG2 leg (re-mark): `prio_coarse` (coarse model SetType beside derived
+structural BEq) pins that `==` resolves to the DERIVED BEq, not the
+comparator bridge. Plant note (measured 2026-08-22): reverting the
+bridge to default priority did NOT flip the guard — at the restored tie
+the derived instance still wins by newest-declaration order (the bridge
+in Basic_classes necessarily predates every derived instance), so the
+de-tie converts that ORDER argument into a PRIORITY argument rather
+than changing today's winner; the probe pins the intended winner under
+both regimes.
+
+`tests/comprehensive/test_instance_priority.lem` declares a type with derived
 instances AND its own `instance (Eq …)` with distinguishable semantics
 (first-field-only equality), then asserts through lem `=` that the MODEL
 instance decided. If the auto trio ever wins the race again, the assert

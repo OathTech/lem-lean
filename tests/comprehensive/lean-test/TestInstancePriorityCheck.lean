@@ -35,3 +35,14 @@ open Lem_Basic_classes
 #guard Ord0.isLess (Prio_pair 0 1) (Prio_pair 0 2) == true
 #guard (match SetType.setElemCompare (Prio_pair 0 1) (Prio_pair 0 2) with
         | LemOrdering.LT => true | _ => false) == true
+
+/- 4. RG2 (re-mark): the de-tie leg — prio_coarse carries a COARSE model
+   SetType (first field only); `==` must resolve to the DERIVED
+   structural BEq (1000), not the comparator bridge (500): second
+   fields differ -> false. Plant: reverting the bridge to default
+   priority must flip/threaten this guard (measured at RG2). -/
+#guard (Prio_coarse 0 1 == Prio_coarse 0 2) == false
+#guard (Prio_coarse 0 1 == Prio_coarse 0 1) == true
+-- and the coarse comparator itself still decides SetType semantics:
+#guard (match SetType.setElemCompare (Prio_coarse 0 1) (Prio_coarse 0 2) with
+        | LemOrdering.EQ => true | _ => false) == true
