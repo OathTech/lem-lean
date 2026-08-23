@@ -11,17 +11,18 @@ the `-lean` target (`src/main.ml`). It runs after Lem's ordinary
 front end — parsing, typechecking, target-specific transformations —
 and renders each `.lem` source as a Lean module:
 
-- `Foo.lean` — the definitions: inductive types, defs, instances,
-  each Lem module becoming a Lean namespace (`Lem_`-prefixed where
-  needed to avoid clashes, e.g. Lem's `Std` → `Lem_Std`).
+- `Foo.lean` — the definitions: inductive types, defs, instances.
+  User-module definitions are emitted at top level; the Lem library
+  modules are wrapped in `Lem_`-prefixed namespaces (`LemLib.Set` →
+  `namespace Lem_Set`) to keep them clear of Lean's own names.
 - `Foo_auxiliary.lean` — the auxiliary file Lem emits per source
   (assertion/lemma stubs), importing the main module.
 
 Generated files import the **LemLib runtime** (`lean-lib/`): the
 `LemOrdering` comparison type, comparator-keyed set and finite-map
 operations, numeric/string bridges, and the effect boundary
-(below). Generated code and runtime are kept in lock-step by
-consumers via a content-hash pin.
+(below). Build generated code against the LemLib from the same
+checkout as the `lem` that generated it — the two evolve together.
 
 ## What generated code looks like
 
@@ -33,8 +34,9 @@ def double (x : Nat) : Nat := x * 2
 ```
 
 Recursive functions default to `partial def`. With a fuel declare
-(`declare {lean} fuel val fuel_countdown = `999``) the emission is a
-total, kernel-transparent pair:
+(``declare {lean} fuel val fuel_countdown = `fuelExhausted n` `` —
+the backtick payload is the expression returned at fuel exhaustion)
+the emission is a total, kernel-transparent pair:
 
 ```lean
 def fuel_countdown_lemFuel (lemFuel : Nat) (n : Nat) : Nat :=
@@ -50,9 +52,14 @@ def` is executable but invisible to the kernel — any proof about a
 termination proofs (fragile at generated-code scale), the backend
 lets the model author mark functions with a fuel declare: the worker
 recurses structurally on an explicit fuel argument, so the kernel
-sees a total function, and exhaustion is a loud runtime panic rather
-than a wrong answer. Cerberus's execution slice is fully fuel'd and
-gate-enforced total downstream.
+sees a total function, and the wrapper applies the library default
+fuel (`lemDefaultFuel = 10^6` — a bound on recursion *depth* at the
+declared points, never on value size). At zero fuel the worker
+returns the declared sentinel expression; the convention is
+`fuelExhausted <witness>`, a loud panic, so an inadequate budget is
+a visible failure rather than a silent wrong answer. Cerberus
+applies fuel declares across its entire execution path and checks
+that slice's totality in its own build.
 
 **The effect boundary is one axiom, by design.** Lem's model allows
 target-representation functions with pure types but effectful
@@ -80,18 +87,25 @@ derived default, so library-call semantics survive while harnesses
 running with `LEAN_ABORT_ON_PANIC=1` fail-stop. If no instance is
 derivable the backend refuses at generation time, naming the type and
 the escape hatches. (An earlier design used an axiom-valued
-inhabitant; it was logically inconsistent and is deleted — the
-history note at the top of `lean-lib/LemLib.lean` and consumers'
-absence gates keep it gone.)
+inhabitant; it was logically inconsistent and is deleted — see the
+history note at the top of `lean-lib/LemLib.lean`.)
 
 **Comparisons mirror OCaml's polymorphic compare.** `BEq`/`Ord` (and
 the set/map instance trio) are derived structurally per mutual block
 with OCaml parity: nullary constructors rank below non-nullary,
 declaration order within each class, fields left-to-right. Types
 carrying functions — where OCaml's compare raises at runtime — get
-loud `failwithI` residual bodies rather than fake instances, and set
-comprehensions over them are a generation-time error. This keeps the
-two backends' observable behavior aligned even in the corners.
+loud `failwithI` residual bodies rather than fake instances. This
+keeps the two backends' observable behavior aligned even in the
+corners.
+
+**Set comprehensions are rejected, not approximated.** A live
+`{ e | ... }` comprehension is a generation-time error naming the
+rewrite options: the explicit `Set.filter`/`Set.map`/`Set.cross`
+library functions (which have Lean target reps), or a `target_rep`
+on the enclosing definition. The Lem library's own
+comprehension-using definitions are unaffected — behind their target
+reps they render only as comments.
 
 **Instance priorities come from one table.** Every generated or
 library instance takes its priority from a single normative lattice
@@ -113,7 +127,7 @@ live in `lean-lib/LemLibTest.lean`.
 **Backend state lives in one module.** All mutable emission state is
 in `St` (`src/lean_backend.ml`), fields classified by lifetime
 (per-file / per-invocation / per-render) with explicit reset hooks.
-Effect-free emission is a registered future refactor; until then the
+Effect-free emission is a planned refactor; until then the
 discipline is: one module, documented lifetimes, no hidden globals
 elsewhere.
 
@@ -128,7 +142,10 @@ unaffected:
 | ``declare lean target_rep type t = `Lean.Type` `` | map a Lem type to a hand-written Lean type |
 | `declare {lean} skip_instances type t` | suppress all instance generation for `t` (pair with hand-written instances) |
 | `declare {lean} rename module = Name` | rename the generated module |
-| ``declare {lean} fuel val f = `N` `` | emit `f` as a total fuel-indexed worker + wrapper at default fuel `N` |
+| ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total fuel-indexed worker (returning `sentinel` at zero fuel) + a wrapper at the library default fuel |
+| `declare {lean} effectful val f` | wrap `f`'s call sites in `runEffectful` thunks so the optimizer cannot merge them; `f`'s target rep must return `BaseIO α` |
+| `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
+| `declare {lean} reader_seed val f` | do not lift `f`; its first argument supplies the reader value to lifted callees in its body |
 
 ## Why this makes generated code provable
 

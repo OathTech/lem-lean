@@ -1,4 +1,4 @@
-> **HISTORIC (superseded).** This note describes the original effectful-target-rep design, which did not survive Lean's purity-based optimization (CSE). The shipped design is the BaseIO-extern effect boundary + fuel totalization — see doc/lean-backend/DESIGN.md and 2026-08-18_arc3-totality-mechanisms.md. Preserved verbatim below.
+> **HISTORIC (superseded).** This note diagnoses the CSE problem with effectful target reps and surveys the design space. The shipped design refines its Option 3: `declare {lean} effectful val` marks the rep (whose implementation returns `BaseIO α`), and call sites cross back to pure types through the single library axiom `LemLib.runEffectful` rather than per-site `unsafeBaseIO` — see doc/lean-backend/DESIGN.md. Preserved verbatim below.
 
 # Effectful target_rep functions
 

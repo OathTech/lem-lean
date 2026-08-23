@@ -51,9 +51,10 @@ the negative/panic test legs — is `tests/comprehensive/`:
 ## What you can rely on about the output
 
 - **One model, two implementations.** The same Lem source generates
-  both the OCaml and the Lean code; they share semantics by
-  construction. (The heavyweight evidence that this holds in practice
-  lives downstream: the cerberus-lean project runs its generated-Lean
+  both the OCaml and the Lean code, so any semantic divergence between
+  them is a backend bug, not a modelling change. (The heavyweight
+  evidence that divergences are absent in practice lives downstream:
+  the cerberus-lean project runs its generated-Lean
   semantics differentially against the OCaml implementation across
   thousands-of-programs corpora — see that repository's
   `lean_frontend/PROOF.md` and `DESIGN.md`.)
@@ -65,11 +66,14 @@ the negative/panic test legs — is `tests/comprehensive/`:
   greppable runtime failure (`failwithI`), never a silent default.
 - **Totality on demand.** By default, recursive Lem functions emit as
   Lean `partial def` (executable, but opaque to the kernel). Marking
-  a function `declare {lean} fuel val f = `N`` emits a total
-  fuel-indexed worker plus a wrapper at a default fuel — fully
-  kernel-transparent. Consumers that need a total surface (cerberus's
-  execution slice) apply fuel declares and enforce totality with
-  their own build gates.
+  a function ``declare {lean} fuel val f = `sentinel` `` emits a
+  total worker that recurses structurally on an explicit fuel
+  argument, plus a wrapper applying the library default fuel
+  (`lemDefaultFuel`, 10^6) — fully kernel-transparent. The backtick
+  payload is the expression returned when fuel runs out; write it as
+  `fuelExhausted <witness>` to make exhaustion a loud panic. Cerberus
+  applies fuel declares across its whole execution path and checks
+  that slice is total in its own build.
 - **One axiom at the effect boundary.** Lem permits effectful
   target-representation functions (mutable counters, global state)
   behind pure types; Lean's compiler optimizes on purity, so these
@@ -82,6 +86,13 @@ the negative/panic test legs — is `tests/comprehensive/`:
   compare parity; `Inhabited` is derived fail-closed (bounded,
   per-constructor); instance priorities come from one normative
   table so resolution is deliberate, not declaration-order luck.
+- **Unsupported forms are rejected, not approximated.** Notably, live
+  set comprehensions (`{ e | ... }`) are a generation-time error with
+  rewrite suggestions (the explicit `Set.filter`/`Set.map`/`Set.cross`
+  library functions, which have Lean target reps, or a `target_rep`
+  on the enclosing definition). The other unsupported corners follow
+  the same pattern — see the negative suite in
+  `tests/comprehensive/negative/`.
 
 ## How you check it
 
@@ -93,16 +104,19 @@ the negative/panic test legs — is `tests/comprehensive/`:
 - `cd lean-lib && lake build` — the runtime plus `LemLibTest.lean`
   (property tests for the set/map layers, including adversarial-key
   comparator coherence).
+- `grep -rn "^axiom " lean-lib/ --include="*.lean"` — exactly one hit,
+  `LemLib.runEffectful`; `#print axioms` on any downstream theorem
+  shows what its proof actually rests on.
 - Downstream, cerberus-lean's differential lanes are this backend's
   largest consumer test.
 
 ## Status
 
 The backend compiles the full Cerberus C semantics (its flagship
-consumer) plus the comprehensive suite. Registered residuals, tracked
-in the dated records: emission uses a single module-scoped mutable
+consumer) plus the comprehensive suite. Known residual work, tracked
+in the dated notes: emission uses a single module-scoped mutable
 state (`St` in `src/lean_backend.ml`) with per-lifetime reset hooks —
-effect-free emission is a registered future refactor; the Ott grammar
+effect-free emission is a planned refactor; the Ott grammar
 in `language/lem.ott` carries the new declare forms, with
 machine-checking pending Ott tooling. Upstreaming intent: every
 extension is written to be plausibly acceptable to rems-project/lem
