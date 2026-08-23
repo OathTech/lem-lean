@@ -86,12 +86,14 @@ the negative/panic test legs — is `tests/comprehensive/`:
   compare parity; `Inhabited` is derived fail-closed (bounded,
   per-constructor); instance priorities come from one normative
   table so resolution is deliberate, not declaration-order luck.
-- **Unsupported forms are rejected, not approximated.** Notably, live
-  set comprehensions (`{ e | ... }`) are a generation-time error with
-  rewrite suggestions (the explicit `Set.filter`/`Set.map`/`Set.cross`
-  library functions, which have Lean target reps, or a `target_rep`
-  on the enclosing definition). The other unsupported corners follow
-  the same pattern — see the negative suite in
+- **Unsupported forms are rejected, not approximated.** Set
+  comprehensions with `IN`-bounded binders
+  (`{ e | forall (e IN s) | P e }`) are macro-expanded to folds and
+  compile like any other code; the forms that survive expansion — the
+  unbounded `{ x | condition }`, and binder shapes the expansion
+  cannot handle — are a generation-time error with rewrite
+  suggestions, never a silent stub. The other unsupported corners
+  follow the same pattern — see the negative suite in
   `tests/comprehensive/negative/`.
 
 ## How you check it

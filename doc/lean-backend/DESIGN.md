@@ -99,13 +99,18 @@ loud `failwithI` residual bodies rather than fake instances. This
 keeps the two backends' observable behavior aligned even in the
 corners.
 
-**Set comprehensions are rejected, not approximated.** A live
-`{ e | ... }` comprehension is a generation-time error naming the
-rewrite options: the explicit `Set.filter`/`Set.map`/`Set.cross`
-library functions (which have Lean target reps), or a `target_rep`
-on the enclosing definition. The Lem library's own
-comprehension-using definitions are unaffected — behind their target
-reps they render only as comments.
+**Set comprehensions: expanded where possible, rejected otherwise.**
+Comprehensions whose binders are `IN`-bounded
+(`{ e | forall (e IN s) | P e }`) are macro-expanded by Lem's front
+end into comparator-keyed folds and compile like any other code —
+the library's own `filter`/`bigunion`/`map` are exactly this. Forms
+that survive expansion — the unbounded `{ x | condition }`, and
+binder shapes the expansion cannot handle (e.g. a bound depending on
+an earlier binder) — are a generation-time error naming the
+workarounds: rewrite with explicit library functions, or give the
+enclosing definition a `target_rep`. Library definitions in that
+corner render only as comments behind their Lean inlines/target reps
+(`set.lem`'s `sigma`).
 
 **Instance priorities come from one table.** Every generated or
 library instance takes its priority from a single normative lattice
