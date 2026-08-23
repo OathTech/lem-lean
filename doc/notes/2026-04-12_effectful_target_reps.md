@@ -1,3 +1,5 @@
+> **HISTORIC (superseded).** This note describes the original effectful-target-rep design, which did not survive Lean's purity-based optimization (CSE). The shipped design is the BaseIO-extern effect boundary + fuel totalization — see doc/lean-backend/DESIGN.md and 2026-08-18_arc3-totality-mechanisms.md. Preserved verbatim below.
+
 # Effectful target_rep functions
 
 ## Problem

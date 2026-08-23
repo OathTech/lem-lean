@@ -46,6 +46,12 @@ Documentation can be found in `doc/built-doc`, including:
 * the type signatures of the [pervasives](https://www.cl.cam.ac.uk/~pes20/lem/built-doc/lem-libs-pervasives.txt) and [pervasives-extra](https://www.cl.cam.ac.uk/~pes20/lem/built-doc/lem-libs-pervasives.txt) libaries, in `lem-libs-pervasives.txt` and `lem-libs-pervasives-extra.txt`; and
 * source documentation, in [`html-doc`](https://www.cl.cam.ac.uk/~pes20/lem/built-doc/html-doc) and [`lem-doc.pdf`](https://www.cl.cam.ac.uk/~pes20/lem/built-doc/lem-doc.pdf), with a dependency diagram of the source modules in [`dep.pdf`](https://www.cl.cam.ac.uk/~pes20/lem/built-doc/dep.pdf).
 
+This fork adds the **Lean 4 backend** (`lem -lean`) and its runtime
+library (`lean-lib/`) — see [`doc/lean-backend/README.md`](doc/lean-backend/README.md).
+The Lean backend was developed primarily by AI agents (Claude,
+Anthropic) under the direction and review of Mike Dodds; upstream Lem
+is by the authors listed above.
+
 
 ## To install and build
 

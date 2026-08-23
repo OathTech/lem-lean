@@ -1,3 +1,5 @@
+> **HISTORIC (superseded).** This note's fallback design (an opaque inhabitant marker) was replaced by fail-closed derived Inhabited instances with [Inhabited tv] threading — see doc/lean-backend/DESIGN.md and 2026-08-20_arc8-inhabited-threading-design.md. The in-line REVOKED annotations below are earlier partial updates. Preserved verbatim below.
+
 # Inhabited instance design for the Lean backend
 
 ## Problem

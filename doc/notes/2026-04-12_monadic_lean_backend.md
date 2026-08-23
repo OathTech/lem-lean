@@ -1,3 +1,5 @@
+> **HISTORIC (design exploration, not adopted).** This note proposes a monadic lifting of generated code; the shipped design instead keeps generated code pure-typed with effects confined behind BaseIO externs and the runEffectful boundary — see doc/lean-backend/DESIGN.md. Preserved verbatim below.
+
 # Monadic lifting in the Lem-Lean backend
 
 ## Context
