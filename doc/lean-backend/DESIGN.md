@@ -73,7 +73,13 @@ the library axiom `LemLib.runEffectful` (`lean-lib/LemLib.lean`,
 greppable). Consequence for consumers: generated code contributes
 exactly one axiom to downstream proof cones, and the erasure claim it
 represents is a declared, documented trust boundary rather than a
-scattering of ad-hoc unsafe casts.
+scattering of ad-hoc unsafe casts. The boundary is *scheduled, not
+permanent*: a consumer that models its effect state explicitly (as a
+component of its own semantic state, threaded through the generated
+code by per-target declares) retires the axiom from its proof cones
+entirely, leaving the `BaseIO` extern as a compiled-side
+implementation detail — the Cerberus consumer plans exactly this
+migration, targeting cones of exactly the three standard Lean axioms.
 
 **`Inhabited` is derived fail-closed; the unsound fallback is gone.**
 Lem programs have failure sites (incomplete matches, `failwith`) whose
