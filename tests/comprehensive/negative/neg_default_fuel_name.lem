@@ -1,0 +1,16 @@
+(* EXPECT: reserved fuel-budget reference *)
+(* L0 fix-first rider (2026-08-31 backend quality review, notes): a
+   user DEFINITION named lemDefaultFuel silently rebinds every fuel
+   wrapper's budget in its module (the wrappers are point-free
+   `worker lemDefaultFuel`, resolved against the nearest definition).
+   Now a generation-time error under the reserved-name contract. *)
+open import Pervasives
+
+let lemDefaultFuel = (5:nat)
+
+let rec countdown (n : nat) : nat =
+  match n with
+    | 0 -> 0
+    | _ -> countdown (n - 1)
+  end
+declare {lean} fuel val countdown = `100`

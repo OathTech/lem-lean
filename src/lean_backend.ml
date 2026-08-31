@@ -1152,6 +1152,23 @@ let lean_group_funcls (funcls : funcl_aux list)
     funcls;
   List.map (fun c -> (c, Hashtbl.find tbl c)) (List.rev !order)
 
+(* Reserved GENERATED-NAME contract (top-level definition names; the
+   companion of the reserved-BINDER contract at the fuel/reader
+   emission path): 'lemDefaultFuel' is the fuel wrappers' budget
+   reference — a user definition of that name would silently rebind
+   every fuel wrapper's budget in its module (2026-08-31 backend
+   quality review, notes); the 'lemLetRhs_' prefix is the synthesized
+   multi-name destructuring-let RHS family (m7) — a user def there
+   would collide with a synthesized definition. Fail closed at
+   generation time, naming the definition. *)
+let lean_check_reserved_def_name l n =
+  if n = "lemDefaultFuel" then
+    raise (Reporting_basic.err_general true l
+      "Lean backend: definition name 'lemDefaultFuel' collides with the reserved fuel-budget reference (a definition of this name silently rebinds every fuel wrapper's budget in the module; the reserved-name contract) — rename it");
+  if String.length n >= 10 && String.sub n 0 10 = "lemLetRhs_" then
+    raise (Reporting_basic.err_general true l
+      (Printf.sprintf "Lean backend: definition name '%s' uses the reserved 'lemLetRhs_' prefix (synthesized destructuring-let RHS definitions; the reserved-name contract) — rename it" n))
+
 (* Pre-pass (runs after lean_inhabited_prepass, which populates the
    instance census this analysis reads): compute the threaded-def map to
    a fixpoint over this module's Val_defs, then guard-sweep Instance
@@ -2142,7 +2159,8 @@ type pat_style = FunParam | MatchArm
                   let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
                   let (_, renamed, _) = Typed_ast_syntax.constant_descr_to_name
                     (Target.Target_no_ident Target.Target_lean) cd in
-                  Name.to_string renamed in
+                  let s = Name.to_string renamed in
+                  lean_check_reserved_def_name (exp_to_locn e) s; s in
                 (* Arc-8 S2: [Inhabited tv] binders for a threaded
                    Let_def-bound constant. *)
                 let thread_out_of cref =
@@ -2805,6 +2823,8 @@ type pat_style = FunParam | MatchArm
             raise (Reporting_basic.err_general true Ast.Unknown "Lean backend: unexpected Let_fun in let_body (should be compiled away)")
     and funcl_aux inside_instance i_ref_opt constraints tv_set (n, pats, typ_opt, skips, e) =
       let name_skips = Name.get_lskip n in
+      lean_check_reserved_def_name (exp_to_locn e)
+        (Name.to_string (Name.strip_lskip n));
       let name = from_string (Name.to_string (Name.strip_lskip n)) in
       let pat_skips =
         match pats with

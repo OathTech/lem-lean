@@ -3758,7 +3758,11 @@ let rec def_internal callback (inside_module: bool) d is_user_def : Output.t = m
         ws sk2 ^
         T.bkwd "extra_import" ^
         ws sk3 ^
-        core (str (Ulib.Text.of_string mod_name))
+        (* m1 (2026-08-31 review): the -lem identity echo must
+           round-trip — the backtick form, not the "..." string form
+           (which lem's own parser rejects). Matches the Decl_fuel /
+           Decl_ground_rep echoes. *)
+        kwd (String.concat "" ["`"; mod_name; "`"])
       end
   | Comment(d) ->
       let (d',sk) = def_alter_init_lskips (fun sk -> (None, sk)) d in
