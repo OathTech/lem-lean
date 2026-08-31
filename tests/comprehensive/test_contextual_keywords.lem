@@ -1,0 +1,59 @@
+open import Pervasives_extra
+
+(* ================================================================
+   The seven Lean-backend annotation words — fuel, reader, effectful,
+   ground_rep, reader_seed, skip_instances, extra_import — are
+   CONTEXTUAL keywords: they act as keywords only inside `declare`
+   forms and must remain usable as ordinary identifiers everywhere
+   else, on every target (2026-08-31 backend quality review, M1).
+
+   This file is the standing acceptance test for that contract:
+   each word is used as a let-bound name, and the words are also
+   exercised as function names, parameters, pattern variables and
+   record fields.
+   ================================================================ *)
+
+(* === Each word as a let-bound value name === *)
+let fuel = (1:nat)
+let reader = (2:nat)
+let effectful = (3:nat)
+let ground_rep = (4:nat)
+let reader_seed = (5:nat)
+let skip_instances = (6:nat)
+let extra_import = (7:nat)
+
+assert ctx_kw_sum_ok :
+  (fuel + reader + effectful + ground_rep + reader_seed
+     + skip_instances + extra_import = (28:nat))
+
+(* === As function name and as parameter names === *)
+let add_fuel (fuel : nat) (reader : nat) = fuel + reader
+
+assert ctx_kw_param_ok : (add_fuel 20 22 = (42:nat))
+
+(* === As pattern variables (match) === *)
+let match_fuel (x : maybe nat) =
+  match x with
+    | Just fuel -> fuel
+    | Nothing -> (0:nat)
+  end
+
+assert ctx_kw_match_ok : (match_fuel (Just 9) = (9:nat))
+
+(* === As record field names === *)
+type engine = <| fuel : nat; effectful : bool |>
+
+let my_engine = <| fuel = 11; effectful = true |>
+
+assert ctx_kw_field_ok : (my_engine.fuel = (11:nat))
+assert ctx_kw_field2_ok : (my_engine.effectful = true)
+
+(* === The declare forms themselves must keep working alongside === *)
+let rec count_down (n : nat) : nat =
+  match n with
+    | 0 -> 0
+    | _ -> count_down (n - 1)
+  end
+declare {lean} fuel val count_down = `100`
+
+assert ctx_kw_declare_ok : (count_down 5 = (0:nat))

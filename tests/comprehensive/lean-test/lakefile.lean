@@ -15,6 +15,7 @@ lean_lib LemComprehensiveTest where
     `Test_cerberus_patterns, `Test_cerberus_patterns_auxiliary,
     `Test_classes, `Test_classes_auxiliary,
     `Test_collections, `Test_collections_auxiliary,
+    `Test_contextual_keywords, `Test_contextual_keywords_auxiliary,
     `Test_cross_field_access,
     `Test_cross_field_access_import,
     `Test_cross_module, `Test_cross_module_auxiliary,

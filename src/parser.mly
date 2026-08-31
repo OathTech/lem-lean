@@ -188,6 +188,27 @@ let mk_pre_x_l sk1 (sk2,id) sk3 l =
 x:
   | X
     { X_l($1, loc ()) }
+  /* The Lean-backend annotation words are CONTEXTUAL keywords: the lexer
+     always tokenizes them, but they act as keywords only in the `declare`
+     productions (the sole grammar positions expecting these tokens, and
+     positions where `x` can never occur, so no LR conflict arises).
+     Everywhere else they reduce to ordinary identifiers, so `let fuel = 1`
+     etc. keep parsing for every target (blast-radius containment for
+     non-Lean lem users). */
+  | SkipInstances
+    { X_l(($1, r"skip_instances"), loc ()) }
+  | ExtraImport
+    { X_l(($1, r"extra_import"), loc ()) }
+  | Effectful
+    { X_l(($1, r"effectful"), loc ()) }
+  | Reader
+    { X_l(($1, r"reader"), loc ()) }
+  | Fuel
+    { X_l(($1, r"fuel"), loc ()) }
+  | GroundRep
+    { X_l(($1, r"ground_rep"), loc ()) }
+  | ReaderSeed
+    { X_l(($1, r"reader_seed"), loc ()) }
   | Lparen Eq Rparen
     { mk_pre_x_l $1 $2 $3 (loc ()) }
   | Lparen IN Rparen
