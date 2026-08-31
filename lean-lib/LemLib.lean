@@ -396,9 +396,17 @@ def setCase (s : List α) (empty : β) (single : α → β) (otherwise : β) : �
   | [x] => single x
   | _ :: _ => otherwise
 
-def setChoose [Inhabited α] (s : List α) : α :=
+/- Mirrors Pset.choose = min_elt (ocaml-lib/pset.ml:297,358): the
+   comparator-MINIMUM element, not the newest-inserted head — the
+   order is observable downstream (e.g. cerberus Core_linking's
+   topo_order emission order), so head-choice was an undocumented
+   divergence (M4, 2026-08-31 backend quality review). The comparator
+   is spliced at call sites via `setElemCompare`, like setAddBy.
+   Comparator-EQ ties cannot arise (representation invariant: no two
+   comparator-EQ elements in a set list). -/
+def setChoose [Inhabited α] (cmp : α → α → LemOrdering) (s : List α) : α :=
   match s with
-  | x :: _ => x
+  | x :: xs => xs.foldl (fun m y => match cmp y m with | .LT => y | _ => m) x
   | [] => panic! "setChoose: empty set"
 
 def chooseAndSplit (cmp : α → α → LemOrdering) (s : List α) : Option (List α × α × List α) :=

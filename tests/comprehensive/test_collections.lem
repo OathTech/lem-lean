@@ -221,3 +221,14 @@ let qs_rng = Map.range qs_m1
 
 assert qs_dom_ok : "one" IN qs_dom && "two" IN qs_dom && "three" IN qs_dom
 assert qs_rng_ok : (1:nat) IN qs_rng && (2:nat) IN qs_rng
+
+(* === setChoose mirrors Pset.choose = min_elt (M4, 2026-08-31 review) === *)
+(* choose is declared non-deterministic across backends, but the Lean
+   backend now mirrors the OCaml Pset semantics exactly: the
+   comparator-minimum element. Order is observable downstream
+   (topo_order-style consumers), so the choice is pinned here. *)
+let choose_min = choose {(6:nat); 1; 2}
+let choose_sing = choose {(5:nat)}
+
+assert choose_min_ok : (choose_min = (1:nat))
+assert choose_sing_ok : (choose_sing = (5:nat))
