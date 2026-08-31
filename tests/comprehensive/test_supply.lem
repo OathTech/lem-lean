@@ -113,6 +113,24 @@ let sc_nested a b = a || (b && (tick () = 5))
 val sc_imp : bool -> bool
 let sc_imp b = b --> (tick () = 7)
 
+(* PAREN-SPLIT application spine of a short-circuit operator (L1 delta
+   audit NOTE-1; the registered L2 rider, charter §3.2): in
+   `((&&) a) (chk 4)` the head is the PARENTHESIZED partial
+   application `((&&) a)` — strip_app_exp does not unwrap Paren, so
+   the spine head is not the && constant and the application renders
+   through the supply transform's general-head branch: the argument
+   is hoisted and threads STRICTLY (the draw fires even when
+   a = false). This is ORACLE-FAITHFUL: OCaml is strict for exactly
+   this eta-expanded shape too (the flat `a && chk 4` short-circuits
+   on both targets). The coincidence rests on lem's Paren node
+   surviving to the backend — the kernel pins in TestSupplyCheck.lean
+   turn any future spine normalization into a loud diff. *)
+val chk : nat -> bool
+let chk n = tick () = n
+
+val prefsc_paren : bool -> bool
+let prefsc_paren a = ((&&) a) (chk 4)
+
 (* === Section 4: transitive lifting + threaded calls === *)
 val uses_draw_two : nat -> nat
 let uses_draw_two x =

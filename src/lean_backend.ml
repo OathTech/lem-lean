@@ -3802,7 +3802,26 @@ type pat_style = FunParam | MatchArm
          Output.flat [from_string "("; Output.concat (from_string " ") pieces; from_string ")"],
          senv1)
       | _ ->
-        (* general head (variable, threaded subexpression, ...) *)
+        (* general head (variable, threaded subexpression, ...): the
+           head and every argument are hoisted in order — STRICT
+           threading.
+           NOTE (L1 delta audit NOTE-1, pinned in L2): PAREN-WRAPPED
+           heads land here too, because strip_app_exp
+           (typed_ast_syntax.ml) deliberately does not unwrap Paren.
+           In particular the paren-split short-circuit spine
+           `((&&) a) (chk 4)` bypasses the shortcircuit leg above and
+           threads its argument STRICTLY. That is ORACLE-FAITHFUL —
+           OCaml evaluates the argument of the eta-expanded form
+           strictly as well, while the flat `a && chk 4` form
+           short-circuits on both targets — but the case-for-case
+           match rests on lem's Paren node coinciding with OCaml's
+           full-application detection, which is a coincidence of
+           representation, not a theorem. The behavior is
+           kernel-pinned (tests/comprehensive/test_supply.lem
+           prefsc_paren + TestSupplyCheck.lean): any future spine
+           normalization that unwraps Paren will change the threading
+           class of such spines and MUST re-adjudicate those pins
+           against the oracle, not just update them. *)
         let (bs0, v0, senv0) = supply_thread inside_instance senv e0 in
         let (bs, argvs, senv1) = supply_thread_list inside_instance senv0 args in
         (bs0 @ bs,

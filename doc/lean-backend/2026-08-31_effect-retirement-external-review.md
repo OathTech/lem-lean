@@ -254,3 +254,34 @@ scoped, not discovered. Two adjacent flags:
 Net: RATIFY from the consumer seat, with the A1 shape question and
 the A3 deliverable as the two asks. Filed also in our repo's records
 at the next slice commit.
+
+---
+
+## Q1b-rescope notice (2026-09-01, appended at L2; addressed to the consumer seat)
+
+[AGENT] (L2 worker, executing the registered R3.1 rider, charter §3.2.)
+
+Three §2 statements above were superseded after this review was
+filed and read; if your ratification notes quote them, re-key to the
+charter as the correction of record
+(cerberus-lean `lean_frontend/docs/2026-08-31_effect-retirement-design.md`
+@`64dd6efeb`, §3.6.1 / O2 / O6; C1 adjudication [USER 2026-09-01]):
+
+1. **"The one order-moved site" is now a CLASS.** The S0 corpus scan
+   (charter §3.6.1, finding S0-F1) returned NONTRIVIAL: beyond the
+   single `with_block_objects` site, an eager-batch movement class
+   touches 34/39 speclab dumps, 14/21 corpus pin files, and the
+   libc.core pin.
+2. **The Q1b escalation clause is SUPERSEDED.** The R2 ruling's
+   "escalate to a staged pre-slice on nontrivial churn" did not fire:
+   S0-F1 dissolved the staged option's premise. Final ruling
+   [USER 2026-08-31]: TOLERATED, full stop; affected oracle outputs
+   rebaseline once as an adjudicated instrument change per O2/O6,
+   carried by the fork-drift manifest and the C1 upstream-divergence
+   enumeration deliverable.
+3. **"Behavior preserved (O2/O6)" stands, but read it precisely:**
+   oracle dynamic behavior is preserved up to symbol RENAMING;
+   affected oracle text diverges from un-forked upstream
+   up-to-renaming only. Your §3 item-3 position (elaboration-side
+   numbering invisible to your theorems) is unaffected by the
+   rescope.

@@ -296,3 +296,41 @@ work; (1) is violated once but seriously (M1); (3) is good-and-improving
 (the St module) with the residuals honestly registered; (4)'s blockers are
 M1, the stale manual (m5), the global hook (m4), and the library-name
 entanglement (m9) — all bounded, none architectural.
+
+---
+
+## Erratum (2026-09-01, appended at L2 per charter §8.5): M2 WITHDRAWN — VERIFIED-NO-DEFECT
+
+[AGENT] (L2 worker, executing the registered rider; adjudication:
+L0 item 5 + charter §8.5 @64dd6efeb, independently re-verified by the
+L0 fresh-eyes audit — see `2026-08-31_arc-audit-log.md`.)
+
+M2 above asserted lem `integer` division maps to Euclidean `Int.ediv`
+on Lean while the OCaml oracle truncates via zarith `Z.div`. **This is
+FALSE at the actual call target.** The chain is `integerDiv` →
+`Nat_big_num.div` (`library/num.lem:1403` — the OCaml declare;
+`:1405` is the COQ `Z.div` line, itself a plausible source of the
+confusion) → `Big_int_Z.div_big_int` (zarith's num-compat layer) —
+**Euclidean**, agreeing with Lean's `Int.ediv` at every signed corner
+(measured verbatim on both targets, including compiled binaries;
+`integerMod` likewise). Applying M2's remedy (`Int.tdiv`) would have
+INTRODUCED the divergence it warned about. Parity is PINNED on both
+targets: `tests/comprehensive/test_integer_div.lem` + the compiled
+suite phase `lean-div-parity`. Record: L0 fix-first record §"Item 5"
+(`2026-08-31_L0-fix-first-record.md`); correction of record until this
+erratum: the effect-retirement charter §8.5 (cerberus-lean
+`lean_frontend/docs/2026-08-31_effect-retirement-design.md`).
+
+Auditor-recommended residue, kept: raw truncating `Z.div` DOES exist
+in cerberus's hand-written OCaml memory-model seams — four sites:
+`memory/vip/impl_mem.ml:1021` (the `IntDiv` arithmetic op) and `:718`
+(pointer-difference division), `memory/concrete/impl_mem.ml:1393`
+(prefix-offset naming) and `:1967` (pointer-difference division on a
+possibly-negative address difference) — so the mirror obligation lands
+THERE when/where those seams are ported, not in this library's
+`integer` mapping. The ported concrete-model mirror already handles
+the class correctly: cerberus-lean `CerbMem.lean:985` defines
+`integerDiv_t := Int.tdiv` (docstring citing the truncating `Z.div`),
+used at `:1013` (the `IntDiv` op path, explicit zero guard) and
+`:1868` (`diffPtrval`); the vip model is unported and its obligation
+attaches at porting time.

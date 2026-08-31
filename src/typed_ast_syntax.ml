@@ -800,7 +800,21 @@ let dest_app_exp (e :exp) : (exp * exp) option =
     | App (e1, e2) -> Some (e1, e2)
     | _ -> None
 
-let strip_app_exp (e : exp) : exp * exp list = 
+(* NOTE (Lean backend, L1 delta audit NOTE-1): strip_app_exp does NOT
+   unwrap Paren, so a parenthesized partial application used as a
+   spine head — e.g. `((&&) a) (chk 4)` — yields the Paren node as
+   the head, not the underlying constant. The Lean backend's supply
+   transform depends on this: such spines miss its special head
+   classes (short-circuit legs included) and render via its strict
+   general-head branch, which happens to be oracle-faithful for the
+   short-circuit operators (OCaml is strict on the eta-expanded shape
+   too). That coincidence is kernel-pinned in
+   tests/comprehensive/test_supply.lem (prefsc_paren) /
+   lean-test/TestSupplyCheck.lean — if you make this function (or any
+   pre-pass) normalize Paren away, those pins fail and the threading
+   class of paren-split spines must be re-adjudicated against the
+   OCaml oracle (see the general-head note in lean_backend.ml). *)
+let strip_app_exp (e : exp) : exp * exp list =
   let rec aux acc e =
     match dest_app_exp e with
       | None -> (e, acc)

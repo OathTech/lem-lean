@@ -54,6 +54,20 @@ example : sc_imp 10 false = (true, 10) := rfl    -- vacuous antecedent: no draw
 example : sc_imp 7 true = (true, 8) := rfl       -- consequent draws 7 (= 7)
 example : sc_imp 10 true = (false, 11) := rfl    -- consequent draws 10 (≠ 7)
 
+/- PAREN-SPLIT spine strictness pins (L1 delta audit NOTE-1; the
+   registered L2 rider): `((&&) a) (chk 4)` renders through the
+   general-head branch (strip_app_exp does not unwrap Paren), so the
+   argument threads STRICTLY — the draw fires even when a = false.
+   Oracle-faithful: OCaml is strict on exactly this eta-expanded
+   shape (the flat form short-circuits on both targets — contrast
+   the sc_and pins above). These rows pin the strict behavior so any
+   future spine normalization (which would silently change the
+   threading class) fails HERE, loudly. -/
+example : prefsc_paren 10 false = (false, 11) := rfl -- STRICT: draws despite a = false
+example : prefsc_paren 10 true = (false, 11) := rfl  -- draws 10 (≠ 4)
+example : prefsc_paren 4 true = (true, 5) := rfl     -- draws 4 (= 4)
+example : chk 10 4 = (false, 11) := rfl              -- the drawing argument itself
+
 /- multi-clause source (pattern-compiled to one match) threads -/
 example : clausy 20 (some 5) = (25, 21) := rfl
 example : clausy 20 none = (20, 21) := rfl
