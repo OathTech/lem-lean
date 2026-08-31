@@ -227,3 +227,84 @@ C2 ban leg must comment-strip too. Adjudicate there.
   pins to this head).
 - Non-Lean output movement: NONE (byte-identical goldens, zero
   rebaselines).
+
+---
+
+## Addendum (audit response, appended same-day): F1 fix + plant re-execution, F2 name drift, C2 inputs
+
+[AGENT] (L2 worker, responding to the L2 fresh audit's NOT-MERGE-SAFE
+verdict; one audit-response commit.)
+
+### F1 (MAJOR): the converted m7 pin was VACUOUS as shipped — fixed
+
+The auditor demonstrated (compiled IR) that with `never_extract`/
+`noinline` only on `tickPair`/`tickPairImpl`, the compiler extracts
+the closed application `unsafeBaseIO tickPairIO` inside
+`tickPairImpl` into a module-init cached constant
+(`tickPairImpl___closed__0`): the action runs ONCE at init, both
+projections read the cached pair, and the pin stays green even under
+the reverted (duplicated-RHS) emitter. Root cause: closed-term
+extraction reaches THROUGH outer attributes — the extracted closed
+term mentions only `unsafeBaseIO` and `tickPairIO`, neither marked.
+
+Fix (auditor-demonstrated, applied): `@[never_extract, noinline]` on
+`tickIO` AND `tickPairIO` in `TupleLetTick.lean`; the false header
+comment (which credited the outer attributes with preventing the
+caching) replaced by an accurate armour-placement note stating WHY
+the inner names need marking.
+
+**Plant re-executed by this worker post-fix** (m7 emitter reverted
+in-place in `src/lean_backend.ml` — `rhs_binding` forced to `None`
+so multi-name lets duplicate their RHS per binding — root make,
+regenerate, rebuild, run; then `git checkout`-restored, root make,
+regenerate, rebuild, run). Verbatim:
+
+RED (reverted emitter; generated `first_draw`/`second_draw` each
+carry their own `TupleLetTick.tickPair ()` call — verified in the
+regenerated Test_tuple_let_once.lean):
+
+```
+draws: first=1 second=4
+single-evaluation FAILED: RHS did not run exactly once (got (1, 4), want (1, 2))
+red-run exit: 1
+```
+
+GREEN (emitter restored):
+
+```
+draws: first=1 second=2
+single-evaluation: OK
+restored-run exit: 0
+```
+
+### F2 (doc note, no code change): rider probe name drift
+
+The audit log's NOTE-1 rider text quotes the auditor's probe name
+`prefsc2` (`prefsc2 10 false = (false, 11)`); the delivered probe is
+named `prefsc_paren` (`prefsc_paren 10 false = (false, 11)`,
+TestSupplyCheck.lean). Substance identical — same shape
+`((&&) a) (chk 4)`, same pinned strict result.
+
+### Recorded for the C2 brief (no action in this slice)
+
+- The auditor's ratchet-leg proposal is accepted as C2 input —
+  notably leg (3): pin the `@[implemented_by]`/`unsafe` population
+  of the LemLib copy to the enumerated survivor pairs
+  (`failwithIImpl`, `fuelExhaustedWithImpl`), because the zero-axiom
+  census alone does not ban an axiom-free reintroduction of the
+  effect projection via opaque + implemented_by + unsafeBaseIO.
+- Hygiene (accepted, practiced in this addendum's runs): slice
+  baseline/battery logs belong in repo-side or container-`.tmp`
+  logs, never sandbox-private `/tmp`.
+
+### Close-out (post-fix, at the audit-response commit's tree)
+
+Full comprehensive suite exit 0 — verbatim:
+`=== Generation: 47 passed, 0 failed, 0 skipped ===`; negatives
+41/41 (`OK (rejected as declared)` row count 41); m7 phase verbatim
+`OK: draws: first=1 second=2` / `single-evaluation: OK`; all other
+phases green. nonlean-regress verbatim:
+`nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)`.
+Worktree clean after commit; `src/lean_backend.ml` byte-identical to
+`7e56047` (the plant edit was ephemeral and restored from the
+index).
