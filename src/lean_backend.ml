@@ -430,6 +430,61 @@ let lean_reader_param_name env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
   String.concat "" ["_lemReader_"; Name.to_string (Path.get_name cd.const_binding)]
 
+(* reader_consumer (declare {lean} reader_consumer val f, charter §4.2):
+   a target_rep'd val declared a READER CONSUMER — its generated call
+   sites pass ALL reader parameters as extra leading arguments (global
+   sorted order, before f's own arguments), its callers get lifted by
+   the ordinary reader fixpoint, and the hand-written implementation
+   declares the matching leading parameters explicitly. Injection is
+   routed through reader_inject_name, so inside a reader_seed def the
+   seed's first argument is passed instead of the binder — no new seed
+   machinery. *)
+let lean_reader_is_consumer env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  Targetset.mem Target_lean cd.reader_consumer
+
+(* Guards RC-rep / RC-mix, fail-closed for every consumer-marked
+   constant even if unused: the consumer IS an extern boundary, so it
+   must carry an identifier-form Lean target_rep (a parameter-binding
+   rep would consume the leading reader arguments positionally; an
+   infix or missing rep has no sound leading-argument position), and
+   it cannot simultaneously be a reader / reader_seed / supply /
+   effectful val. Idempotent; run at every pre-pass entry. *)
+let lean_reader_consumer_check env =
+  List.iter (fun cref ->
+      if lean_reader_is_consumer env cref then begin
+        let cd = c_env_lookup Ast.Unknown env.c_env cref in
+        let cname = Name.to_string (Path.get_name cd.const_binding) in
+        let mix which =
+          raise (Reporting_basic.err_general true cd.spec_l
+            (Printf.sprintf
+              "Lean backend: val %s is declared both {lean} reader_consumer and {lean} %s (unsupported: RC-mix — one mechanism per val)"
+              cname which)) in
+        if Targetset.mem Target_lean cd.reader then mix "reader";
+        if Targetset.mem Target_lean cd.reader_seed then mix "reader_seed";
+        if Targetset.mem Target_lean cd.supply then mix "supply";
+        if Targetset.mem Target_lean cd.effectful then mix "effectful";
+        (match Target.Targetmap.apply_target cd.target_rep
+                 (Target.Target_no_ident Target.Target_lean) with
+         | Some (CR_simple (_, _, [], _)) | Some (CR_inline (_, _, [], _)) -> ()
+         | Some (CR_simple _) | Some (CR_inline _) ->
+           raise (Reporting_basic.err_general true cd.spec_l
+             (Printf.sprintf
+               "Lean backend: reader_consumer val %s has a parameter-binding Lean target_rep (unsupported: RC-rep — the reader arguments are passed as leading POSITIONAL arguments, which a substituting rep would consume; use an identifier-form rep whose implementation takes the reader parameters explicitly)"
+               cname))
+         | Some _ ->
+           raise (Reporting_basic.err_general true cd.spec_l
+             (Printf.sprintf
+               "Lean backend: reader_consumer val %s has an unsupported Lean target_rep form (RC-rep: identifier-form reps only)"
+               cname))
+         | None ->
+           raise (Reporting_basic.err_general true cd.spec_l
+             (Printf.sprintf
+               "Lean backend: reader_consumer val %s has no Lean target_rep (RC-rep: the consumer is an extern boundary by definition — give it an identifier-form rep whose implementation takes the reader parameters as leading arguments)"
+               cname)))
+      end)
+    (c_env_all_consts env.c_env)
+
 let lean_reader_get_params env =
   match !St.reader_params_cache with
   | Some l -> l
@@ -453,6 +508,7 @@ let lean_reader_get_params env =
    audit fix; this comment previously still claimed the pre-fix coarse
    all-defs-together lifting — corrected arc-14 S2 B6, be:N3). *)
 let lean_reader_prepass env (ds : def list) =
+  lean_reader_consumer_check env;
   if lean_reader_get_params env <> [] then begin
     let target = Target.Target_no_ident Target.Target_lean in
     (* Collect (defined, used) pairs at Val_def granularity, recursing into
@@ -484,7 +540,9 @@ let lean_reader_prepass env (ds : def list) =
       List.iter (fun (defined, used) ->
           if not (Types.Cdset.subset defined !St.reader_lifted) then begin
             let needs =
-              Types.Cdset.exists (lean_reader_is_reader env) used
+              Types.Cdset.exists (fun c ->
+                  lean_reader_is_reader env c || lean_reader_is_consumer env c)
+                used
               || not (Types.Cdset.is_empty
                         (Types.Cdset.inter used !St.reader_lifted)) in
             if needs then begin
@@ -1789,6 +1847,7 @@ type pat_style = FunParam | MatchArm
        the pre-pass lives at module-emission level (lean_reader_prepass). *)
     let is_reader_cref = lean_reader_is_reader A.env
     let is_seed_cref = lean_reader_is_seed A.env
+    let is_consumer_cref = lean_reader_is_consumer A.env
     let reader_param_name = lean_reader_param_name A.env
     let get_reader_params () = lean_reader_get_params A.env
 
@@ -1804,8 +1863,23 @@ type pat_style = FunParam | MatchArm
     let exp_needs_reader (e : exp) : bool =
       let ue = add_exp_entities empty_used_entities e in
       List.exists (fun cref ->
-          is_reader_cref cref || Types.Cdset.mem cref !St.reader_lifted)
+          is_reader_cref cref || is_consumer_cref cref
+          || Types.Cdset.mem cref !St.reader_lifted)
         ue.used_consts
+
+    (* reader_consumer scope guard (RC-rel and friends): a consumer call
+       site needs reader VALUES to pass — available only inside a
+       reader-lifted def (the binders) or a reader_seed def (the seed
+       argument). Everywhere else (indreln rules, lemmas/asserts,
+       instance methods reach the instance error first) is a fail-closed
+       generation-time error. Inert for block comments and vacuous when
+       no reader is declared (nothing to inject). *)
+    let reader_consumer_scope_check (l : Ast.l) : unit =
+      if get_reader_params () <> []
+         && not (!St.reader_binder || !St.reader_seed_param <> None
+                 || !St.rendering_comment) then
+        raise (Reporting_basic.err_general true l
+          "Lean backend: reader_consumer call outside a reader-injection scope (unsupported: indreln rules, lemmas/asserts, and other non-lifted contexts have no reader value to pass — RC-rel/RC-scope)")
 
     (* Injection value name: the enclosing def's injected parameter, or —
        inside a reader_seed def — its first argument. *)
@@ -3432,6 +3506,8 @@ type pat_style = FunParam | MatchArm
                             || Types.Cdset.mem cd.descr !St.supply_lifted ->
            (* G-infix *)
            err "Lean backend: supply constant or supply-lifted definition used in infix position (unsupported; use prefix application so the call can be threaded)"
+         | Constant cd when is_consumer_cref cd.descr ->
+           err "Lean backend: reader_consumer used in infix position (unsupported: the leading reader arguments cannot be injected around an infix operator — use prefix application)"
          | Constant cd ->
            let (bs1, vl, senv1) = supply_thread inside_instance senv le in
            let (bs2, vr, senv2) = supply_thread inside_instance senv1 re in
@@ -3523,6 +3599,16 @@ type pat_style = FunParam | MatchArm
            @ List.concat_map (fun a -> [from_string " "; a]) argvs) in
         let (bind, v, senv2) = supply_join senv1 call in
         (bs @ [bind], v, senv2)
+      | Constant cd when is_consumer_cref cd.descr ->
+        (* reader_consumer head with supply-using arguments: hoist the
+           arguments, render the head through the bare-Constant
+           consumer branch (reader injection + scope check), apply. *)
+        let (bs, argvs, senv1) = supply_thread_list inside_instance senv args in
+        (bs,
+         Output.flat ([from_string "("; pure_out e0]
+                      @ List.concat_map (fun a -> [from_string " "; a]) argvs
+                      @ [from_string ")"]),
+         senv1)
       | Constant cd ->
         (* pure head with supply-using arguments: hoist the arguments in
            order, then render the application through the ordinary
@@ -3717,6 +3803,16 @@ type pat_style = FunParam | MatchArm
                             "Lean backend: a reader constant must be applied to exactly one (unit) argument (the rewrite replaces the whole application spine)");
                         [from_string (reader_inject_name (reader_param_name cd.descr))]
                       end
+                      else if is_consumer_cref cd.descr then
+                        (* reader_consumer call: 'trans e0' reaches the
+                           bare-Constant case, which passes the reader
+                           parameters (seed-name override included)
+                           exactly once; apply the original arguments
+                           after them. *)
+                        let func_out = trans e0 in
+                        let args_out = List.map trans args in
+                        [Output.flat (func_out
+                          :: List.map (fun a -> Output.flat [from_string " "; a]) args_out)]
                       else if ground_rep_for cd.descr <> None
                               && Types.TNset.is_empty (Types.free_vars (Typed_ast.exp_to_typ e)) then
                         (* Ground-typed site of a ground_rep constant:
@@ -3827,6 +3923,16 @@ type pat_style = FunParam | MatchArm
                    eta-expand so the unit-function type is preserved. *)
                 Output.flat [from_string "(fun (_ : Unit) => ";
                              from_string (reader_inject_name (reader_param_name const.descr)); from_string ")"]
+              else if is_consumer_cref const.descr then begin
+                (* reader_consumer: partially apply the reader
+                   parameters onto the rep (type-preserving — the
+                   hand-written implementation takes them as leading
+                   parameters), which repairs bare/HOF references and
+                   serves as the injected head of applied calls. *)
+                reader_consumer_scope_check (Typed_ast.exp_to_locn e);
+                Output.flat [from_string "("; default_const_output ();
+                             reader_args_output (); from_string ")"]
+              end
               else if Types.Cdset.mem const.descr !St.reader_lifted then
                 (* Bare reference to a lifted def (e.g. passed to a HOF):
                    partially apply the reader parameters. *)
@@ -4055,6 +4161,11 @@ type pat_style = FunParam | MatchArm
                          infix position cannot be threaded *)
                       supply_net_check (Typed_ast.exp_to_locn e) cd.descr
                         "infix position";
+                      (* reader_consumer in infix position: the leading
+                         reader arguments have no sound infix placement *)
+                      if is_consumer_cref cd.descr && not !St.rendering_comment then
+                        raise (Reporting_basic.err_general true (Typed_ast.exp_to_locn e)
+                          "Lean backend: reader_consumer used in infix position (unsupported: the leading reader arguments cannot be injected around an infix operator — use prefix application)");
                       (* In indreln antecedents (Prop context), == and != must use
                          propositional =/≠. This handles the Infix AST case;
                          the App case above handles decomposed forms like not(isEqual x y). *)

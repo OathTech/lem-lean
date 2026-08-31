@@ -119,6 +119,33 @@ once per projection call. Tests: `tests/comprehensive/test_supply.lem`
 the `neg_supply_*` probe family, and the non-Lean invariance phase
 (`lean-invariance`, `invariance/inv_supply.lem`).
 
+**`reader_consumer` completes the reader lifting for extern
+boundaries.** A target_rep'd val is opaque to the reader fixpoint: its
+body is hand-written, so a global it reads would silently escape the
+lifting. `declare {lean} reader_consumer val f` closes that seam
+declaratively: `f`'s generated call sites pass ALL declared reader
+parameters as extra leading arguments (global sorted reader order,
+before `f`'s own arguments), callers get lifted by the ordinary
+fixpoint, and the hand-written implementation declares the matching
+leading parameters explicitly. Injection routes through the same
+resolver as lifted-def calls, so inside a `reader_seed` def the seed's
+first argument is passed instead of the binder — no new seed
+machinery. Bare/HOF references repair by (type-preserving) partial
+application over the reader parameters, exactly like lifted-def
+references. Fail-closed guards: RC-rep (the val must carry an
+identifier-form Lean target_rep — it is an extern boundary by
+definition; parameter-binding or infix reps are rejected), RC-mix
+(not simultaneously reader / reader_seed / supply / effectful),
+RC-inst (consumer calls inside instance methods hit the instance
+guard), RC-rel/scope (uses in indreln rules, lemmas/asserts, or any
+context without a reader value to inject are generation-time errors),
+plus an infix-position rejection. Tests:
+`tests/comprehensive/test_reader_consumer.lem`, the pins
+`lean-test/TestReaderConsumerCheck.lean`, the compiled
+`lean-test/TestReaderConsumerExec.lean` (phase
+`lean-reader-consumer`), the `neg_rc_*` probes, and
+`invariance/inv_reader_consumer.lem`.
+
 **`Inhabited` is derived fail-closed; the unsound fallback is gone.**
 Lem programs have failure sites (incomplete matches, `failwith`) whose
 Lean emission needs an inhabitant of the result type. The backend
@@ -196,6 +223,7 @@ unaffected:
 | `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
 | `declare {lean} reader_seed val f` | do not lift `f`; its first argument supplies the reader value to lifted callees in its body |
 | `declare {lean} supply val c` | supply-lift the counter `c : unit -> nat`: every function that (transitively) draws takes the current supply as an extra parameter and returns the successor supply paired with its result (deterministic state-passing; draws are `LemLib.supplySplit`) |
+| `declare {lean} reader_consumer val f` | pass all reader parameters as extra leading arguments at `f`'s call sites (callers get reader-lifted); `f` must carry an identifier-form Lean target_rep whose implementation takes the leading reader parameters explicitly |
 
 ## Why this makes generated code provable
 

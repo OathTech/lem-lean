@@ -47,6 +47,9 @@ lean_lib LemComprehensiveTest where
     `Test_mword, `Test_mword_auxiliary,
     `Test_numeric, `Test_numeric_auxiliary,
     `Test_patterns, `Test_patterns_auxiliary,
+    `Test_reader_consumer, `Test_reader_consumer_auxiliary,
+    `TestReaderConsumerImpl,   -- hand-written consumer implementation (leading reader params)
+    `TestReaderConsumerCheck,  -- hand-written reader_consumer pins (effect-retirement L1)
     `Test_records, `Test_records_auxiliary,
     `Test_scope_shadowing, `Test_scope_shadowing_auxiliary,
     `Test_strings_chars, `Test_strings_chars_auxiliary,
@@ -82,3 +85,9 @@ lean_exe «test-integer-div-parity» where
 -- composition; suite phase lean-supply-draws).
 lean_exe «test-supply-draws» where
   root := `TestSupplyDraws
+
+-- Effect-retirement L1: compiled-binary behavioral test of
+-- reader_consumer injection (lifted caller, HOF partial application,
+-- reader_seed pickup; suite phase lean-reader-consumer).
+lean_exe «test-reader-consumer» where
+  root := `TestReaderConsumerExec

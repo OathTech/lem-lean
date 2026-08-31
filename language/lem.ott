@@ -839,6 +839,7 @@ declare_def :: 'Decl_' ::=
   | declare targets_opt ground_rep val id = backtick_string                                        :: :: ground_rep_decl
   | declare targets_opt reader_seed val id                                                         :: :: reader_seed_decl
   | declare targets_opt supply val id                                                              :: :: supply_decl
+  | declare targets_opt reader_consumer val id                                                     :: :: reader_consumer_decl
 
 val_def :: '' ::= 
   {{ com Value definitions }}

@@ -2,8 +2,8 @@ open import Pervasives_extra
 
 (* ================================================================
    The Lean-backend annotation words — fuel, reader, effectful,
-   ground_rep, reader_seed, skip_instances, extra_import, supply — are
-   CONTEXTUAL keywords: they act as keywords only inside `declare`
+   ground_rep, reader_seed, skip_instances, extra_import, supply,
+   reader_consumer — are CONTEXTUAL keywords: they act as keywords only inside `declare`
    forms and must remain usable as ordinary identifiers everywhere
    else, on every target (2026-08-31 backend quality review, M1).
 
@@ -22,10 +22,11 @@ let reader_seed = (5:nat)
 let skip_instances = (6:nat)
 let extra_import = (7:nat)
 let supply = (8:nat)
+let reader_consumer = (9:nat)
 
 assert ctx_kw_sum_ok :
   (fuel + reader + effectful + ground_rep + reader_seed
-     + skip_instances + extra_import + supply = (36:nat))
+     + skip_instances + extra_import + supply + reader_consumer = (45:nat))
 
 (* === As function name and as parameter names === *)
 let add_fuel (fuel : nat) (reader : nat) = fuel + reader

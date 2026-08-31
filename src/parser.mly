@@ -172,7 +172,7 @@ let mk_pre_x_l sk1 (sk2,id) sk3 l =
 %token <Ast.terminal * Ulib.Text.t> IN MEM MinusMinusGt
 %token <Ast.terminal> Class_ Do LeftArrow
 %token <Ast.terminal> Inst Inst_default
-%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep ReaderSeed Supply
+%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep ReaderSeed Supply ReaderConsumer
 %token <Ast.terminal> RightAssoc LeftAssoc NonAssoc Infix Special TargetRep TargetSorts
 
 %start file
@@ -211,6 +211,8 @@ x:
     { X_l(($1, r"reader_seed"), loc ()) }
   | Supply
     { X_l(($1, r"supply"), loc ()) }
+  | ReaderConsumer
+    { X_l(($1, r"reader_consumer"), loc ()) }
   | Lparen Eq Rparen
     { mk_pre_x_l $1 $2 $3 (loc ()) }
   | Lparen IN Rparen
@@ -1056,6 +1058,8 @@ declaration :
     { Decl_reader_seed_decl($1, $2, $3, $4, $5) }
   | Declare targets_opt Supply Val id
     { Decl_supply_decl($1, $2, $3, $4, $5) }
+  | Declare targets_opt ReaderConsumer Val id
+    { Decl_reader_consumer_decl($1, $2, $3, $4, $5) }
 
 lemma_typ:
   | Lemma

@@ -180,7 +180,8 @@ and const_descr = { const_binding : Path.t;
                     fuel_sentinel: string Targetmap.t;
                     ground_rep: string Targetmap.t;
                     reader_seed: Targetset.t;
-                    supply: Targetset.t}
+                    supply: Targetset.t;
+                    reader_consumer: Targetset.t}
 
 and v_env = const_descr_ref Nfmap.t
 and f_env = const_descr_ref Nfmap.t
@@ -420,6 +421,7 @@ type declare_def =  (* declarations *)
  | Decl_ground_rep          of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
  | Decl_reader_seed         of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_supply              of lskips * targets_opt * lskips * lskips * const_descr_ref id
+ | Decl_reader_consumer     of lskips * targets_opt * lskips * lskips * const_descr_ref id
 (*
  | Decl_set_flag              of lskips * lskips * Name.lskips_t * lskips * Name.lskips_t
 *)
@@ -811,6 +813,9 @@ let rec def_aux_alter_init_lskips (lskips_f : lskips -> lskips * lskips) d : def
             | Decl_supply (sk1, targs, sk2, sk3, c_id) ->
                 let (sk1', s_ret) = lskips_f sk1 in
                 (Decl_supply (sk1', targs, sk2, sk3, c_id), s_ret)
+            | Decl_reader_consumer (sk1, targs, sk2, sk3, c_id) ->
+                let (sk1', s_ret) = lskips_f sk1 in
+                (Decl_reader_consumer (sk1', targs, sk2, sk3, c_id), s_ret)
           in
           res (Declaration d') s_ret
         end

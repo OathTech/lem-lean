@@ -294,6 +294,16 @@ and const_descr =
         and returns the successor supply paired with its result
         (deterministic state-passing — a draw is
         [LemLib.supplySplit s = (s, s+1)]). Lean backend only. *)
+
+    reader_consumer : Target.Targetset.t;
+    (** Targets for which this target_rep'd constant is a READER
+        CONSUMER (declare {targets} reader_consumer val): its
+        generated call sites pass ALL declared reader parameters as
+        extra leading arguments (before its own arguments, in the
+        global sorted reader order), its callers get reader-lifted by
+        the ordinary fixpoint, and the hand-written target
+        representation declares the matching leading parameters
+        explicitly. Lean backend only. *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -545,6 +555,7 @@ type declare_def =  (** Declarations *)
  | Decl_ground_rep            of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
  | Decl_reader_seed           of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_supply                of lskips * targets_opt * lskips * lskips * const_descr_ref id
+ | Decl_reader_consumer       of lskips * targets_opt * lskips * lskips * const_descr_ref id
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

@@ -10,7 +10,24 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-div-parity lean-supply-draws lean-negative lean-invariance
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-div-parity lean-supply-draws lean-reader-consumer lean-negative lean-invariance
+
+# reader_consumer compiled behavioral test (effect-retirement L1,
+# charter §4.2): consumer call sites must receive the reader value in
+# compiled code — lifted-caller injection, HOF partial application,
+# and the reader_seed override (elaborator pins live in
+# TestReaderConsumerCheck.lean).
+lean-reader-consumer:
+	@echo "=== reader_consumer injection pin (compiled) ==="
+	@cd lean-test && lake build test-reader-consumer > /dev/null
+	@out=$$(cd lean-test && ./.lake/build/bin/test-reader-consumer 2>&1); st=$$?; \
+	if [ $$st -ne 0 ]; then \
+		echo "  FAIL (exit $$st):"; echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "reader_consumer: OK"; then \
+		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
+	else \
+		echo "  OK: compiled consumer injection holds"; \
+	fi
 
 # Supply-lifting compiled behavioral test (effect-retirement L1): the
 # threaded supply's draw sequences — strict-order numbering, single
