@@ -74,13 +74,17 @@ the negative/panic test legs — is `tests/comprehensive/`:
   `fuelExhausted <witness>` to make exhaustion a loud panic. Cerberus
   applies fuel declares across its whole execution path and checks
   that slice is total in its own build.
-- **One axiom at the effect boundary.** Lem permits effectful
-  target-representation functions (mutable counters, global state)
-  behind pure types; Lean's compiler optimizes on purity, so these
-  are emitted behind `BaseIO` externs crossed by a single library
-  axiom, `LemLib.runEffectful`. That is the one axiom consumers of
-  generated code carry; everything else in a downstream proof's
-  axiom set comes from Lean itself.
+- **Zero axioms; effects are explicit state.** Neither the library
+  nor generated code declares any axiom: everything in a downstream
+  proof's axiom set comes from Lean itself. Ambient counters are
+  threaded as explicit state by the supply lifting
+  (`declare {lean} supply val`; draws are `LemLib.supplySplit`, a
+  plain def), ambient configuration by the reader lifting. The
+  historical effect boundary (`declare {lean} effectful`, a library
+  axiom projecting `BaseIO` externs into pure types) was retired by
+  the effect-retirement arc: the Lean backend now refuses the
+  annotation fail-closed, naming supply lifting as the migration
+  path (HISTORY note in `lean-lib/LemLib.lean`).
 - **Derived instances are real and OCaml-compatible.** `BEq`/`Ord`
   are derived structurally per mutual block with OCaml polymorphic
   compare parity; `Inhabited` is derived fail-closed (bounded,
@@ -106,9 +110,9 @@ the negative/panic test legs — is `tests/comprehensive/`:
 - `cd lean-lib && lake build` — the runtime plus `LemLibTest.lean`
   (property tests for the set/map layers, including adversarial-key
   comparator coherence).
-- `grep -rn "^axiom " lean-lib/ --include="*.lean"` — exactly one hit,
-  `LemLib.runEffectful`; `#print axioms` on any downstream theorem
-  shows what its proof actually rests on.
+- `grep -rn "^axiom " lean-lib/ --include="*.lean"` — zero hits;
+  `#print axioms` on any downstream theorem shows what its proof
+  actually rests on.
 - Downstream, cerberus-lean's differential lanes are this backend's
   largest consumer test.
 

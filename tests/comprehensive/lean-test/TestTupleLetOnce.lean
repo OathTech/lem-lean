@@ -4,8 +4,8 @@
    The generated `let (first_draw, second_draw) = tick_pair ()` must
    evaluate its RHS once: the bound values are then exactly (1, 2).
    Under the historical RHS-per-binding duplication the second
-   binding's RHS re-evaluates the effectful call and binds (3, 4)'s
-   second component, giving (1, 4). -/
+   binding's RHS re-evaluates the impure extern call and binds
+   (3, 4)'s second component, giving (1, 4). -/
 
 import Test_tuple_let_once
 

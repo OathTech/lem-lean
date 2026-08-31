@@ -73,28 +73,31 @@ non-positive budget, are fail-closed generation-time errors. Cerberus
 applies fuel declares across its entire execution path and checks
 that slice's totality in its own build.
 
-**The effect boundary is one axiom, by design.** Lem's model allows
-target-representation functions with pure types but effectful
-implementations (fresh-name counters, mutable tag state). Lean both
-type-checks purity and *optimizes on it* — the compiler will
-common-subexpression-eliminate two calls to a "pure" `fresh () : Nat`
-into one, which breaks effectful implementations. The resolution:
-effectful target reps are implemented as `BaseIO` externs (opaque to
-the optimizer) and crossed back into pure types at exactly one point,
-the library axiom `LemLib.runEffectful` (`lean-lib/LemLib.lean`,
-greppable). Consequence for consumers: generated code contributes
-exactly one axiom to downstream proof cones, and the erasure claim it
-represents is a declared, documented trust boundary rather than a
-scattering of ad-hoc unsafe casts. The boundary is *scheduled, not
-permanent*: a consumer that models its effect state explicitly (as a
-component of its own semantic state, threaded through the generated
-code by per-target declares) retires the axiom from its proof cones
-entirely, leaving the `BaseIO` extern as a compiled-side
-implementation detail — the Cerberus consumer plans exactly this
-migration, targeting cones of exactly the three standard Lean axioms.
+**The effect boundary is RETIRED: zero axioms, effects as explicit
+state.** Lem's model allows target-representation functions with pure
+types but effectful implementations (fresh-name counters, mutable tag
+state). Lean both type-checks purity and *optimizes on it* — the
+compiler will common-subexpression-eliminate two calls to a "pure"
+`fresh () : Nat` into one, which breaks effectful implementations.
+The historical resolution (`declare {lean} effectful`) implemented
+such reps as `BaseIO` externs crossed back into pure types by a
+single library axiom with call-site thunk wraps and
+`never_extract`/`noinline` armour. The effect-retirement arc DELETED
+that mechanism end-to-end — the axiom from `lean-lib/LemLib.lean`
+(HISTORY note remains there), the wrap emission and the attribute
+machinery from the backend — because its erasure claim was an
+unprovable trust boundary in every downstream proof cone. The
+`{lean} effectful` annotation now gets a fail-closed generation-time
+refusal naming the migration path. Consequence for consumers:
+neither the library nor generated code declares ANY axiom; a
+downstream proof's axiom set comes from Lean itself. Effect state is
+modeled explicitly instead: counters via the supply lifting (below),
+ambient configuration via the reader lifting — the Cerberus consumer
+completed exactly this migration, targeting cones of exactly the
+three standard Lean axioms.
 
-**Supply lifting: the state analog of the reader, and the axiom's
-scheduled replacement for counters.** `declare {lean} supply val c`
+**Supply lifting: the state analog of the reader, and the retired
+axiom's replacement for counters.** `declare {lean} supply val c`
 declares `c : unit -> nat` a lifted SUPPLY: every definition that
 (transitively) draws from it takes the current supply as an extra
 explicit parameter — after any reader binders — and returns the final
@@ -147,7 +150,7 @@ application over the reader parameters, exactly like lifted-def
 references. Fail-closed guards: RC-rep (the val must carry an
 identifier-form Lean target_rep — it is an extern boundary by
 definition; parameter-binding or infix reps are rejected), RC-mix
-(not simultaneously reader / reader_seed / supply / effectful),
+(not simultaneously reader / reader_seed / supply),
 RC-inst (consumer calls inside instance methods hit the instance
 guard), RC-rel/scope (uses in indreln rules, lemmas/asserts, or any
 context without a reader value to inject are generation-time errors),
@@ -232,7 +235,7 @@ unaffected:
 | `declare {lean} rename module = Name` | rename the generated module |
 | ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total fuel-indexed worker (returning `sentinel` at zero fuel) + a wrapper at the library default fuel |
 | `declare {lean} fuel val f = N` | per-declaration fuel BUDGET: `f`'s wrapper uses the literal `N` instead of `lemDefaultFuel` (opt-in; requires the sentinel declare on the same val) |
-| `declare {lean} effectful val f` | wrap `f`'s call sites in `runEffectful` thunks so the optimizer cannot merge them; `f`'s target rep must return `BaseIO α` |
+| `declare {lean} effectful val f` | RETIRED (effect-retirement arc): refused fail-closed with an error naming supply lifting as the migration path; the annotation is retained in the grammar for other targets' potential use |
 | `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
 | `declare {lean} reader_seed val f` | do not lift `f`; its first argument supplies the reader value to lifted callees in its body |
 | `declare {lean} supply val c` | supply-lift the counter `c : unit -> nat`: every function that (transitively) draws takes the current supply as an extra parameter and returns the successor supply paired with its result (deterministic state-passing; draws are `LemLib.supplySplit`) |
@@ -242,7 +245,7 @@ unaffected:
 
 The choices above are one coherent bet: a downstream prover should
 meet **total functions** (where opted), **real instances** with
-stated laws, **exactly one declared axiom**, and **loud failure**
+stated laws, **zero declared axioms**, and **loud failure**
 everywhere something would otherwise be silently wrong. The largest
 deployment of that bet is the cerberus-lean project, whose kernel
 theorems about C programs run through this backend's output — its

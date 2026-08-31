@@ -28,36 +28,19 @@ comparator. Functions without `By` use Lean's `BEq` or `Ord` type classes.
    inhabitant: consumers enforce absence in-build (cerberus-lean
    relsem/RelSem/Audit.lean absence gate). -/
 
-/- runEffectful: execute a thunked BaseIO action, extracting the result.
-   Used by the Lean backend for effectful target_rep functions.
-
-   Correctness depends on two things:
-   - the implementation must RUN the action and project its value
-     (`unsafeBaseIO`), not reinterpret the io-result object;
-   - `@[never_extract, noinline]` prevents the compiler from caching an
-     application as a closed-term constant (evaluated once at startup) or
-     merging identical call sites via CSE. The thunk alone does NOT achieve
-     this: identical closed thunks are shared, making applications identical.
-
-   Generated defs whose bodies DIRECTLY contain effectful call sites carry
-   the same attributes (emitted by the Lean backend). NOTE this protection
-   is one level deep, not transitive: a closed application of a def that
-   merely CALLS an attributed def is still extractable/CSE-able. Sound use
-   therefore requires effectful constants not to be load-bearing on paths
-   where callers are applied to closed arguments — see the consumer's
-   effects design note (audit finding, 2026-08-18). Extern implementations must follow the Lean ≥4.29 world-erased
-   convention: no RealWorld parameter, return the value directly. -/
-@[never_extract, noinline]
-private unsafe def runEffectful_impl {α : Type} (thunk : Unit → BaseIO α) : α :=
-  unsafeBaseIO (thunk ())
-@[implemented_by runEffectful_impl]
-axiom runEffectful {α : Type} : (Unit → BaseIO α) → α
-/- BOTH attribute sites are load-bearing: never_extract on the AXIOM stops
-   LCNF CSE from merging identical call sites (CSE sees `runEffectful`
-   before the implemented_by substitution); the attributes on the IMPL stop
-   closed-term extraction of the specialized application afterwards.
-   Verified against Lean 4.29 via trace.compiler.ir.result. -/
-attribute [never_extract] runEffectful
+/- HISTORY (effect-retirement arc L2, 2026-09-01): the axiom
+   `runEffectful {α : Type} : (Unit → BaseIO α) → α` (with its unsafe
+   `runEffectful_impl`, `implemented_by`, and the load-bearing
+   `never_extract`/`noinline` attribute pair) lived here until this arc.
+   It was the library's ONE axiom — the declared effect-erasure trust
+   boundary for `declare {lean} effectful` target reps. The mechanism is
+   RETIRED: effectful counters are now threaded as explicit state by the
+   supply lifting (`declare {lean} supply val`, `LemLib.supplySplit`
+   below — deterministic, kernel-transparent, axiom-free), and the Lean
+   backend fails closed on any `{lean} effectful` declare. DO NOT
+   REINTRODUCE an axiom or unsafe effect-projection here: consumers
+   gate on a zero-axiom LemLib census (charter: cerberus-lean
+   lean_frontend/docs/2026-08-31_effect-retirement-design.md §7.1/§7.2). -/
 
 /- Default fuel for 'declare {lean} fuel val' wrappers: bounds recursion
    DEPTH at declared non-structural points only (never value size), so any

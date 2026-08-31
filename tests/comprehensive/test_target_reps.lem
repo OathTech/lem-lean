@@ -324,18 +324,14 @@ declare lean target_rep type my_variant_target = `Nat`
 declare lean target_rep function VarA = `(0 : Nat)`
 declare lean target_rep function VarB = `id`
 
-(* === Section 7: effectful target_rep functions === *)
+(* === Section 7: RETIRED — effectful target_rep functions === *)
 
-(* Functions marked effectful get their calls wrapped in unsafeBaseIO
-   to prevent Lean's CSE from merging calls to side-effecting functions.
-   The target_rep function should return BaseIO α, and unsafeBaseIO
-   extracts the result at each call site. *)
-val get_counter : unit -> nat
-declare lean target_rep function get_counter u = `(pure 42 : BaseIO Nat)`
-declare {lean} effectful val get_counter
-
-(* Call site should generate: runEffectful (get_counter ()) *)
-let use_counter (x : nat) : nat = get_counter () + x
+(* 'declare {lean} effectful val' (runEffectful call-site wraps over
+   BaseIO target reps) was retired by the effect-retirement arc
+   (L2, 2026-09-01): the Lean backend now REFUSES the annotation with
+   a fail-closed error naming supply lifting as the migration path.
+   The refusal is pinned by negative/neg_effectful_retired.lem; the
+   replacement mechanism is covered by test_supply.lem. *)
 
 (* === Section 8: reader-lifted constants === *)
 

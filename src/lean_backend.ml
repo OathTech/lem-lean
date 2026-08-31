@@ -443,13 +443,33 @@ let lean_reader_is_consumer env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
   Targetset.mem Target_lean cd.reader_consumer
 
+(* Effectful retirement (effect-retirement arc L2, 2026-09-01): the
+   `declare {lean} effectful val` mechanism — the call-site
+   effect-projection wraps + never_extract/noinline def armour — is
+   DELETED from this backend, and LemLib's effect-projection axiom is
+   deleted with it (see the HISTORY note in lean-lib/LemLib.lean). The
+   annotation itself (grammar word, `Decl_effectful`, the
+   `const_descr.effectful` field) is retained for other targets'
+   potential use; its Lean-target handling is this fail-closed
+   refusal. Fires for every {lean}-effectful-marked constant even if
+   unused; idempotent; run at every pre-pass entry. *)
+let lean_effectful_retired_check env =
+  List.iter (fun cref ->
+      let cd = c_env_lookup Ast.Unknown env.c_env cref in
+      if Targetset.mem Target_lean cd.effectful then
+        raise (Reporting_basic.err_general true cd.spec_l
+          (Printf.sprintf
+            "Lean backend: val %s — 'declare {lean} effectful' is retired on the lean target; use supply lifting instead ('declare {lean} supply val', the deterministic state-passing transform). The library's effect-projection axiom and the call-site wrap were deleted by the effect-retirement arc (charter: cerberus-lean lean_frontend/docs/2026-08-31_effect-retirement-design.md @64dd6efeb, section 7.1)"
+            (Name.to_string (Path.get_name cd.const_binding)))))
+    (c_env_all_consts env.c_env)
+
 (* Guards RC-rep / RC-mix, fail-closed for every consumer-marked
    constant even if unused: the consumer IS an extern boundary, so it
    must carry an identifier-form Lean target_rep (a parameter-binding
    rep would consume the leading reader arguments positionally; an
    infix or missing rep has no sound leading-argument position), and
-   it cannot simultaneously be a reader / reader_seed / supply /
-   effectful val. Idempotent; run at every pre-pass entry. *)
+   it cannot simultaneously be a reader / reader_seed / supply val.
+   Idempotent; run at every pre-pass entry. *)
 let lean_reader_consumer_check env =
   List.iter (fun cref ->
       if lean_reader_is_consumer env cref then begin
@@ -463,7 +483,6 @@ let lean_reader_consumer_check env =
         if Targetset.mem Target_lean cd.reader then mix "reader";
         if Targetset.mem Target_lean cd.reader_seed then mix "reader_seed";
         if Targetset.mem Target_lean cd.supply then mix "supply";
-        if Targetset.mem Target_lean cd.effectful then mix "effectful";
         (match Target.Targetmap.apply_target cd.target_rep
                  (Target.Target_no_ident Target.Target_lean) with
          | Some (CR_simple (_, _, [], _)) | Some (CR_inline (_, _, [], _)) -> ()
@@ -580,6 +599,7 @@ let lean_fuel_budget_completeness_check env (fun_defined : Types.Cdset.t) =
     (c_env_all_consts env.c_env)
 
 let lean_reader_prepass env (ds : def list) =
+  lean_effectful_retired_check env;
   lean_reader_consumer_check env;
   lean_fuel_budget_check env;
   if lean_reader_get_params env <> [] then begin
@@ -654,9 +674,9 @@ let lean_supply_param_name env cref =
 (* The supply list, with the per-constant generation-time guards:
    G-type (a supply val must be [unit -> nat] — the v1 surface; a
    general element type can be added compatibly later) and the
-   annotation-mix guard (supply × effectful/reader/reader_seed on one
-   val is contradictory: a constant cannot be both threaded state and
-   an ambient/effectful representation). *)
+   annotation-mix guard (supply × reader/reader_seed on one val is
+   contradictory: a constant cannot be both threaded state and an
+   ambient representation). *)
 let lean_supply_get_params env =
   match !St.supply_params_cache with
   | Some l -> l
@@ -681,10 +701,6 @@ let lean_supply_get_params env =
               raise (Reporting_basic.err_general true cd.spec_l
                 (Printf.sprintf
                   "Lean backend: 'declare {lean} supply val %s' — a supply val must have type unit -> nat (the v1 supply is a counter; generalize the element type in the feature before annotating other shapes)" cname));
-            if Targetset.mem Target_lean cd.effectful then
-              raise (Reporting_basic.err_general true cd.spec_l
-                (Printf.sprintf
-                  "Lean backend: val %s is declared both {lean} supply and {lean} effectful (unsupported: pick one mechanism per val — the transitional effectful representation cannot also be threaded state)" cname));
             if Targetset.mem Target_lean cd.reader then
               raise (Reporting_basic.err_general true cd.spec_l
                 (Printf.sprintf
@@ -1931,23 +1947,6 @@ let needs_parens term =
    - MatchArm: bare output for match arms and let bindings *)
 type pat_style = FunParam | MatchArm
 
-    (* True iff the expression contains an application of a constant marked
-       'declare {lean} effectful'. Defs containing such call sites must be
-       emitted with @[never_extract, noinline]: never_extract stops Lean from
-       caching a closed application (e.g. 'fresh ()') as a constant evaluated
-       once at startup, and together with noinline it prevents CSE from
-       merging identical call sites. The runEffectful thunk alone cannot
-       achieve this, because identical closed thunks are themselves shared.
-       Limitation: instance fields cannot carry attributes, so effectful
-       calls inside instance methods are only protected one level down (by
-       the attributes on runEffectful_impl itself). *)
-    let exp_contains_effectful (e : exp) : bool =
-      let ue = add_exp_entities empty_used_entities e in
-      List.exists (fun cref ->
-          let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
-          Targetset.mem Target_lean cd.effectful)
-        ue.used_consts
-
     (* --- Reader lifting helpers (declare {lean} reader val) ---
        thin wrappers over the top-level env-parameterized versions;
        the pre-pass lives at module-emission level (lean_reader_prepass). *)
@@ -2568,9 +2567,6 @@ type pat_style = FunParam | MatchArm
                   | None -> emp
                   | Some (_, t) -> Output.flat [from_string " :"; pat_typ t]
                 in
-                let effectful_attr =
-                  if (not inside_instance) && exp_contains_effectful e
-                  then from_string "@[never_extract, noinline] " else emp in
                 let let_lifted =
                   let lifted = List.exists (fun (_, cref) ->
                       Types.Cdset.mem cref !St.reader_lifted) name_map in
@@ -2620,7 +2616,7 @@ type pat_style = FunParam | MatchArm
                 (* m7 (2026-08-31 backend quality review): a multi-name
                    destructuring let must NOT duplicate its RHS per bound
                    name — OCaml evaluates the RHS once, so a duplicated
-                   effectful (or, next arc, supply-drawing) RHS is a
+                   supply-drawing (or hand-written-impure-extern) RHS is a
                    silent divergence. Multi-name lets emit ONE private
                    RHS def plus per-name projections; single-name lets
                    keep the historical shape byte-for-byte. A user val
@@ -2645,7 +2641,7 @@ type pat_style = FunParam | MatchArm
                                      supply_pair_suffix (); from_string ")"]
                       else base in
                     Some (rhs_def_name, Output.flat [
-                      from_string "\n"; effectful_attr;
+                      from_string "\n";
                       from_string "private def "; from_string rhs_def_name;
                       reader_binder_output (); supply_binder_output (); constraints; rhs_thread;
                       from_string "  : "; rhs_typ;
@@ -2681,7 +2677,7 @@ type pat_style = FunParam | MatchArm
                     let states_out = Output.flat (List.concat_map (fun s ->
                         [from_string ", "; from_string s]) states) in
                     Output.flat [
-                      from_string "\n"; effectful_attr; defn; from_string name_str;
+                      from_string "\n"; defn; from_string name_str;
                       reader_binder_output (); supply_binder_output (); constraints; thread_out;
                       from_string "  : (("; var_type; from_string ")";
                       supply_pair_suffix (); from_string ")";
@@ -2692,7 +2688,7 @@ type pat_style = FunParam | MatchArm
                     ]
                   end else
                   Output.flat [
-                    from_string "\n"; effectful_attr; defn; from_string name_str;
+                    from_string "\n"; defn; from_string name_str;
                     reader_binder_output (); constraints; thread_out;
                     from_string "  : "; var_type;
                     from_string " :=\n  let "; pat_out; type_out;
@@ -2794,14 +2790,6 @@ type pat_style = FunParam | MatchArm
                     from_string "partial def"
                   else
                     from_string "def"
-                in
-                (* Defs containing effectful call sites need
-                   @[never_extract, noinline] — see exp_contains_effectful. *)
-                let attr_for group =
-                  if (not inside_instance)
-                     && List.exists (fun (_, _, _, _, _, e) ->
-                            exp_contains_effectful e) group
-                  then from_string "@[never_extract, noinline] " else emp
                 in
                 (* Reader lifting: the lifted set is computed by the module
                    pre-pass (see lean_reader_prepass); emission just consults
@@ -3042,7 +3030,7 @@ type pat_style = FunParam | MatchArm
                       Fun.protect ~finally:(fun () ->
                           St.reader_binder := saved;
                           St.supply_binder := saved_sb)
-                        (fun () -> (attr_for g, def_keyword_for g, render_group g, emp))
+                        (fun () -> (def_keyword_for g, render_group g, emp))
                     | Some (n, c, s) ->
                       let base_name = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
                       let worker = String.concat "" [base_name; "_lemFuel"] in
@@ -3074,12 +3062,6 @@ type pat_style = FunParam | MatchArm
                           (* Point-free wrapper at the default fuel: call sites
                              are unchanged, and proofs unfold wrapper → worker
                              definitionally. *)
-                          (* The wrapper must carry the same never_extract
-                             protection as the worker when the def contains
-                             effectful calls: callers reference the WRAPPER,
-                             and an unattributed wrapper would reopen the
-                             closed-term-extraction hazard one level up
-                             (audit finding, 2026-08-18). *)
                           (* A lifted worker's wrapper has the reader-prefixed
                              type (arc 3, B1): reader binders sit between the
                              fuel binder and the original arguments, so
@@ -3123,7 +3105,7 @@ type pat_style = FunParam | MatchArm
                             | Some b -> from_string (String.concat "" [" "; b])
                             | None -> from_string " lemDefaultFuel" in
                           let wrapper = Output.flat [
-                            from_string "\n\n"; attr_for g;
+                            from_string "\n\n";
                             from_string "def "; from_string base_name; tv_out; cons_out;
                             inhabited_binder_output ();
                             from_string " : "; reader_arrows; supply_arrows;
@@ -3133,7 +3115,7 @@ type pat_style = FunParam | MatchArm
                           (* Wrapper is returned separately: in a mutual
                              block it must be emitted AFTER 'end', or it
                              would join the recursion set (arc 3, B2). *)
-                          (attr_for g, from_string "def", body, wrapper))
+                          (from_string "def", body, wrapper))
                   ) groups in
                 let rec_skips =
                   if is_recursive && not inside_instance then
@@ -3143,10 +3125,10 @@ type pat_style = FunParam | MatchArm
                 if is_truly_mutual then
                   Output.flat [
                     ws skips; from_string "mutual\n"; rec_skips;
-                    concat_str "\n" (List.map (fun (a, k, b, _) -> Output.flat [a; k; b]) bodies);
+                    concat_str "\n" (List.map (fun (k, b, _) -> Output.flat [k; b]) bodies);
                     from_string "\nend";
                     (* fuel wrappers of a mutual block, after 'end' *)
-                    Output.flat (List.map (fun (_, _, _, w) -> w) bodies)
+                    Output.flat (List.map (fun (_, _, w) -> w) bodies)
                   ]
                 else
                   (* de-mutualized members need explicit separation: an
@@ -3154,8 +3136,8 @@ type pat_style = FunParam | MatchArm
                   let sep = if demutualized <> None then from_string "\n" else emp in
                   Output.flat [
                     ws skips; rec_skips;
-                    Output.flat (List.map (fun (a, k, b, w) ->
-                        Output.flat [sep; a; k; b; w]) bodies)
+                    Output.flat (List.map (fun (k, b, w) ->
+                        Output.flat [sep; k; b; w]) bodies)
                   ]
               else
                 from_string "\n/- removed recursive definition intended for another target -/"
@@ -3803,9 +3785,6 @@ type pat_style = FunParam | MatchArm
            argument nodes substituted by their threaded values. The
            special head classes cannot take hoisted arguments soundly
            and fail closed. *)
-        let c_descr = c_env_lookup Ast.Unknown A.env.c_env cd.descr in
-        if Target.Targetset.mem Target.Target_lean c_descr.effectful then
-          err "Lean backend: an effectful call with supply-drawing arguments (unsupported: the transitional effectful mechanism does not compose with supply threading inside one application — bind the drawn values in lets first)";
         if is_lean_failwith_rep cd.descr then
           err "Lean backend: a failwith-mapped call with supply-drawing arguments (unsupported; bind the drawn values in lets first)";
         if ground_rep_for cd.descr <> None then
@@ -3951,8 +3930,6 @@ type pat_style = FunParam | MatchArm
                        unliftable-context class) *)
                     supply_net_check (Typed_ast.exp_to_locn e) cd.descr
                       "an application outside a supply-lifted definition body (instance method, indreln rule, lemma/assert, or another context the pre-pass cannot lift)";
-                    (* Check if this function is marked effectful for Lean *)
-                    let is_effectful = Target.Targetset.mem Target.Target_lean c_descr.effectful in
                     (* In indreln antecedents (Prop context), == and != applied via
                        App nodes (e.g. from <> decomposition: not (isEqual x y)) must
                        use propositional =/≠ instead of BEq ==/!=. *)
@@ -4044,12 +4021,7 @@ type pat_style = FunParam | MatchArm
                         B.function_application_to_output (exp_to_locn e) trans false e cd args (use_ascii_rep_for_const cd.descr)
                       end
                     end in
-                    (* Wrap effectful calls in runEffectful with a thunk to prevent CSE.
-                       Each call site creates a fresh lambda closure, preventing Lean's
-                       CSE from merging calls to side-effecting functions. *)
-                    if is_effectful then
-                      [Output.flat [from_string "(runEffectful (fun () => "; Output.concat (from_string " ") raw_output; from_string "))"]]
-                    else raw_output
+                    raw_output
                   | Backend (_, i) when Ident.to_string i = "sorry" ->
                     (* sorry is a term, not a function — drop applied arguments.
                        Annotate with the expression's type so Lean can infer it
@@ -4334,13 +4306,13 @@ type pat_style = FunParam | MatchArm
               in
               let sep = from_string " " in
               begin
-                (* NOTE (audit, 2026-08-18): this Infix path has NONE of the
-                   reader/fuel/effectful hooks. A lifted, fuel'd, or
-                   effectful constant used in infix position emits without
-                   injection/wrapping — every such case fails VISIBLY at the
-                   Lean build (missing binder / unknown worker / unrun
-                   BaseIO), never silently. Hook here if a legitimate infix
-                   use ever appears. *)
+                (* NOTE (audit, 2026-08-18; effectful leg retired 2026-09-01):
+                   this Infix path has NONE of the reader/fuel hooks. A
+                   lifted or fuel'd constant used in infix position emits
+                   without injection — every such case fails VISIBLY at the
+                   Lean build (missing binder / unknown worker), never
+                   silently. Hook here if a legitimate infix use ever
+                   appears. *)
                 match C.exp_to_term c with
                   | Constant cd ->
                     begin
