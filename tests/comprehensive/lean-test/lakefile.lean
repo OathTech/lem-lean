@@ -31,6 +31,7 @@ lean_lib LemComprehensiveTest where
     `Test_deriving, `Test_deriving_auxiliary,
     `Test_either_maybe, `Test_either_maybe_auxiliary,
     `Test_expressions, `Test_expressions_auxiliary,
+    `Test_integer_div, `Test_integer_div_auxiliary,
     `Test_instance_priority, `Test_instance_priority_auxiliary,
     `Test_name_capture, `Test_name_capture_auxiliary,
     `Test_failwith_threading, `Test_failwith_threading_auxiliary,
@@ -69,3 +70,6 @@ lean_exe «test-failwith-panic» where
 
 lean_exe «test-tuple-let-once» where
   root := `TestTupleLetOnce
+
+lean_exe «test-integer-div-parity» where
+  root := `TestIntegerDivParity

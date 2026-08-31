@@ -1,0 +1,59 @@
+open import Pervasives
+
+(* ================================================================
+   Integer division/remainder parity pin (2026-08-31 backend quality
+   review M2, VERIFIED-NO-DEFECT — see the L0 fix-first record).
+
+   The review claimed lem's Lean `/` (Int.ediv) diverges from the
+   OCaml oracle's Z.div truncation. Measured reality: lem's OCaml
+   integerDiv is `Nat_big_num.div` = `Big_int_Z.div_big_int`, the
+   zarith num-compatibility layer, which is EUCLIDEAN — exactly
+   Int.ediv — and integerMod is `mod_big_int` = Euclidean remainder —
+   exactly Int.emod. Both targets agree at every signed corner; the
+   mapping is left unchanged, and this file pins the agreement.
+
+   Expected values (verbatim from the compiled OCaml probe of
+   Nat_big_num.div/modulus, byte-identical to Lean 4.28.0/4.32.2
+   #eval of / and %):
+     div: (-7,2)->-4 (7,-2)->-3 (-7,-2)->4 (7,2)->3 (-1,3)->-1 (1,-3)->0
+     mod: (-7,2)->1  (7,-2)->1  (-7,-2)->1 (7,2)->1 (-1,3)->2  (1,-3)->1
+
+   The elaborator asserts below run in the suite build; the compiled
+   binary TestIntegerDivParity re-asserts the same values at runtime
+   (compiled Int arithmetic is GMP-backed — asserted, not assumed).
+   ================================================================ *)
+
+let div_m7_2 = integerDiv (0 - 7) 2
+let div_7_m2 = integerDiv 7 (0 - 2)
+let div_m7_m2 = integerDiv (0 - 7) (0 - 2)
+let div_7_2 = integerDiv 7 2
+let div_m1_3 = integerDiv (0 - 1) 3
+let div_1_m3 = integerDiv 1 (0 - 3)
+
+let mod_m7_2 = integerMod (0 - 7) 2
+let mod_7_m2 = integerMod 7 (0 - 2)
+let mod_m7_m2 = integerMod (0 - 7) (0 - 2)
+let mod_7_2 = integerMod 7 2
+let mod_m1_3 = integerMod (0 - 1) 3
+let mod_1_m3 = integerMod 1 (0 - 3)
+
+assert div_m7_2_ok : (div_m7_2 = 0 - 4)
+assert div_7_m2_ok : (div_7_m2 = 0 - 3)
+assert div_m7_m2_ok : (div_m7_m2 = 4)
+assert div_7_2_ok : (div_7_2 = 3)
+assert div_m1_3_ok : (div_m1_3 = 0 - 1)
+assert div_1_m3_ok : (div_1_m3 = 0)
+
+assert mod_m7_2_ok : (mod_m7_2 = 1)
+assert mod_7_m2_ok : (mod_7_m2 = 1)
+assert mod_m7_m2_ok : (mod_m7_m2 = 1)
+assert mod_7_2_ok : (mod_7_2 = 1)
+assert mod_m1_3_ok : (mod_m1_3 = 2)
+assert mod_1_m3_ok : (mod_1_m3 = 1)
+
+(* The operator routes must agree with the named functions. *)
+let op_div = ((0 - 7 : integer) / 2)
+let op_mod = ((0 - 7 : integer) mod 2)
+
+assert op_div_ok : (op_div = 0 - 4)
+assert op_mod_ok : (op_mod = 1)

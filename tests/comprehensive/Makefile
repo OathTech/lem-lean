@@ -10,7 +10,23 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-negative
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-div-parity lean-negative
+
+# Integer division/remainder parity pin (2026-08-31 backend quality
+# review M2, verified-no-defect): the compiled binary re-asserts at
+# runtime that Lean's Int //% match the OCaml oracle's Nat_big_num
+# Euclidean semantics (see test_integer_div.lem).
+lean-div-parity:
+	@echo "=== M2 integer division parity pin (compiled) ==="
+	@cd lean-test && lake build test-integer-div-parity > /dev/null
+	@out=$$(cd lean-test && ./.lake/build/bin/test-integer-div-parity 2>&1); st=$$?; \
+	if [ $$st -ne 0 ]; then \
+		echo "  FAIL (exit $$st): $$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "integer division parity: OK"; then \
+		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
+	else \
+		echo "  OK: parity holds (Euclidean, both targets)"; \
+	fi
 
 # m7 single-evaluation pin (2026-08-31 backend quality review): a
 # multi-name destructuring let's RHS must run ONCE in compiled code —
