@@ -1,0 +1,52 @@
+/- Compiled-binary behavioral test for the supply-lifting feature
+   (effect-retirement arc; suite phase lean-supply-draws). The
+   elaborator pins live in TestSupplyCheck.lean; this binary re-asserts
+   the load-bearing draw sequences in COMPILED code — the class of
+   evidence the 2026-08-31 backend quality review found missing
+   (interpreter/compiler divergences are invisible to elaborator
+   asserts). Witnessed here:
+
+   1. draw sequencing: strict left-to-right successor numbering
+      through let chains, argument hoisting, and threaded calls;
+   2. single evaluation: a destructuring RHS's draws happen exactly
+      once per call (destructure_once's third draw is s+2, and the
+      top-level projections' final supply shows two draws, not four);
+   3. fuel × supply: the worker threads the supply through the
+      decremented self-call, and exhaustion returns the supply
+      unconsumed at the exhaustion point;
+   4. multi-supply: independent streams advance independently, in
+      sorted binder order. -/
+
+import Test_supply
+import Test_supply_multi
+
+def check (name : String) (ok : Bool) : IO Bool := do
+  if ok then
+    IO.println s!"  ok: {name}"
+  else
+    IO.println s!"  FAIL: {name}"
+  pure ok
+
+def main : IO UInt32 := do
+  let r1 ← check "draw_two 100 () = ((100, 101), 102)"
+    (draw_two 100 () == ((100, 101), 102))
+  let r2 ← check "destructure_once 30 () = ((30, 31, 32), 33) [RHS draws once]"
+    (destructure_once 30 () == ((30, 31, 32), 33))
+  let r3 ← check "top_a 500 = (500, 502) / top_b 500 = (501, 502) [projections: one RHS call each]"
+    (top_a 500 == (500, 502) && top_b 500 == (501, 502))
+  let r4 ← check "uses_both 9 40 3 = (52, 41) [reader x supply]"
+    (uses_both 9 40 3 == (52, 41))
+  let r5 ← check "uses_seeded 40 3 = (85, 41) [reader_seed x supply]"
+    (uses_seeded 40 3 == (85, 41))
+  let r6 ← check "fuel_draws 60 2 = ([60, 61], 62) [fuel x supply]"
+    (fuel_draws 60 2 == ([60, 61], 62))
+  let r7 ← check "fuel_draws_lemFuel 1 60 2 = ([60], 61) [exhaustion leaves supply at cut]"
+    (fuel_draws_lemFuel 1 60 2 == ([60], 61))
+  let r8 ← check "two_streams 10 100 () = ((10, 100, 11), 12, 101) [independent streams]"
+    (two_streams 10 100 () == ((10, 100, 11), 12, 101))
+  if r1 && r2 && r3 && r4 && r5 && r6 && r7 && r8 then
+    IO.println "supply draws: OK"
+    return 0
+  else
+    IO.println "supply draws: FAILED"
+    return 1

@@ -10,7 +10,63 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-div-parity lean-negative
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-div-parity lean-supply-draws lean-negative lean-invariance
+
+# Supply-lifting compiled behavioral test (effect-retirement L1): the
+# threaded supply's draw sequences — strict-order numbering, single
+# evaluation of destructuring RHSes, fuel/reader/multi-supply
+# composition — re-asserted in a real binary (elaborator pins live in
+# TestSupplyCheck.lean; compiled-code divergence is exactly the class
+# the 2026-08-31 review found untested for effectful).
+lean-supply-draws:
+	@echo "=== Supply draw-sequence pin (compiled) ==="
+	@cd lean-test && lake build test-supply-draws > /dev/null
+	@out=$$(cd lean-test && ./.lake/build/bin/test-supply-draws 2>&1); st=$$?; \
+	if [ $$st -ne 0 ]; then \
+		echo "  FAIL (exit $$st):"; echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "supply draws: OK"; then \
+		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
+	else \
+		echo "  OK: compiled draw sequences hold"; \
+	fi
+
+# Non-Lean invariance (effect-retirement charter §6.1/§6.3): the
+# '{lean}'-scoped declares in invariance/inv_*.lem must be exact
+# no-ops for the semantic emitters — generate each module with and
+# without them and byte-compare. Vacuity-guarded: the strip must
+# actually remove lines and outputs must exist. (The echoing/human
+# targets — lem, ident, tex, html — deliberately re-render declare
+# lines; they are covered by the nonlean-regress golden net.)
+lean-invariance:
+	@echo "=== Non-Lean invariance ({lean} declares are no-ops for ocaml/hol/isa/coq) ==="
+	@fail=0; \
+	for src in invariance/inv_*.lem; do \
+		name=$$(basename $$src); \
+		rm -rf invariance/_out; \
+		mkdir -p invariance/_out/decl invariance/_out/strip; \
+		cp $$src invariance/_out/decl/$$name; \
+		grep -v '^declare {lean}' $$src > invariance/_out/strip/$$name; \
+		if cmp -s invariance/_out/decl/$$name invariance/_out/strip/$$name; then \
+			echo "  FAIL (vacuous): $$name contains no 'declare {lean}' lines"; fail=1; continue; \
+		fi; \
+		for tgt in ocaml hol isa coq; do \
+			(cd invariance/_out/decl && $(CURDIR)/../../lem -wl ign -i $(CURDIR)/../../library/pervasives.lem -$$tgt $$name > /dev/null 2>&1) \
+				|| { echo "  FAIL: $$name -$$tgt (declared variant did not generate)"; fail=1; }; \
+			(cd invariance/_out/strip && $(CURDIR)/../../lem -wl ign -i $(CURDIR)/../../library/pervasives.lem -$$tgt $$name > /dev/null 2>&1) \
+				|| { echo "  FAIL: $$name -$$tgt (stripped variant did not generate)"; fail=1; }; \
+		done; \
+		rm -f invariance/_out/decl/$$name invariance/_out/strip/$$name; \
+		if [ $$(ls invariance/_out/decl | wc -l) -eq 0 ]; then \
+			echo "  FAIL (vacuous): $$name produced no non-Lean outputs"; fail=1; continue; \
+		fi; \
+		if diff -r invariance/_out/decl invariance/_out/strip > /dev/null; then \
+			echo "  OK: $$name ($$(ls invariance/_out/decl | wc -l) artifacts byte-identical across ocaml/hol/isa/coq)"; \
+		else \
+			echo "  FAIL: $$name non-Lean output changed by {lean} declares:"; \
+			diff -r invariance/_out/decl invariance/_out/strip | head -10; fail=1; \
+		fi; \
+	done; \
+	rm -rf invariance/_out; exit $$fail
 
 # Integer division/remainder parity pin (2026-08-31 backend quality
 # review M2, verified-no-defect): the compiled binary re-asserts at

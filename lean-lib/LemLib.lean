@@ -72,6 +72,16 @@ attribute [never_extract] runEffectful
    their own fuel via the worker. -/
 def lemDefaultFuel : Nat := 1000000
 
+/- Supply threading ('declare {lean} supply val', the state-passing
+   analog of the reader lifting): a DRAW splits the current supply into
+   the drawn value and the successor supply. The backend emits
+   `let (v, s') := LemLib.supplySplit s` at every draw site of a lifted
+   definition. A plain def by design — kernel-transparent (proofs
+   unfold it), greppable, no effects anywhere in the mechanism:
+   supply threading is deterministic state-passing and introduces no
+   nondeterminism or IO. -/
+def LemLib.supplySplit (s : Nat) : Nat × Nat := (s, s + 1)
+
 /- Lem uses lowercase 'vector' for its built-in vector type -/
 abbrev vector (α : Type) (n : Nat) := Vector α n
 

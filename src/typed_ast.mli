@@ -285,6 +285,15 @@ and const_descr =
         injection value for reader-lifted callees (and reader-constant
         reads) within its body. Lexically-scoped seeding — NOT dynamic
         rebinding. Lean backend only. *)
+
+    supply : Target.Targetset.t;
+    (** Targets for which this constant is a lifted SUPPLY (declare
+        {targets} supply val): a state-threaded counter. The constant
+        must have type [unit -> nat]; every def that (transitively)
+        draws from it takes the current supply as an extra parameter
+        and returns the successor supply paired with its result
+        (deterministic state-passing — a draw is
+        [LemLib.supplySplit s = (s, s+1)]). Lean backend only. *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -535,6 +544,7 @@ type declare_def =  (** Declarations *)
  | Decl_fuel                  of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
  | Decl_ground_rep            of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
  | Decl_reader_seed           of lskips * targets_opt * lskips * lskips * const_descr_ref id
+ | Decl_supply                of lskips * targets_opt * lskips * lskips * const_descr_ref id
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

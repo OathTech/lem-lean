@@ -817,7 +817,7 @@ declare_def :: 'Decl_' ::=
   | declare targets_opt termination_argument id = termination_setting                              :: :: termination_argument_decl
   | declare targets_opt pattern_match exhaustivity_setting id tnvars = [ id1 ; ... ; idn semi_opt ] elim_opt :: :: pattern_match_decl
 % ----- Lean-backend fork declare forms (arc-14 S2 B2, be:G2 repair) -----
-% The seven productions below cover the declare forms the Lean-backend
+% The productions below cover the declare forms the Lean-backend
 % fork added directly to src/ast.ml (Decl_skip_instances_decl ..
 % Decl_reader_seed_decl) without updating this grammar — restoring the
 % .ott file as the normative definition. Concrete syntax matches
@@ -838,6 +838,7 @@ declare_def :: 'Decl_' ::=
   | declare targets_opt fuel val id = backtick_string                                              :: :: fuel_decl
   | declare targets_opt ground_rep val id = backtick_string                                        :: :: ground_rep_decl
   | declare targets_opt reader_seed val id                                                         :: :: reader_seed_decl
+  | declare targets_opt supply val id                                                              :: :: supply_decl
 
 val_def :: '' ::= 
   {{ com Value definitions }}

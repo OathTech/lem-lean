@@ -1,0 +1,152 @@
+open import Pervasives
+
+(* ================================================================
+   Supply lifting: 'declare {lean} supply val' (effect-retirement arc,
+   charter §3.2 — the state-passing analog of the reader lifting).
+
+   A supply val is a counter (unit -> nat). Every def that
+   (transitively) draws is LIFTED: it takes the current supply as an
+   extra explicit parameter (after any reader binders) and returns the
+   final supply paired with its result; a draw is
+   `let (v, s') := LemLib.supplySplit s` (supplySplit s = (s, s+1)).
+   The transform sequences draws in left-to-right depth-first order —
+   the evaluation order of the strict Lean code it replaces (charter
+   obligation O1) — and is DETERMINISTIC state-passing only: it never
+   introduces a nondeterminism branch point (charter non-goal O7).
+
+   NOTE on observation: a lifted def cannot be referenced from an
+   assert (there is no supply value at assert scope — the fail-closed
+   net rejects it at generation time), so the behavioral pins for this
+   file live in hand-written Lean:
+   - lean-test/TestSupplyCheck.lean — elaborator/kernel pins of the
+     exact draw sequences and signatures generated from this file;
+   - lean-test/TestSupplyDraws.lean — the COMPILED-binary behavioral
+     test (suite phase lean-supply-draws).
+   Multi-supply ordering is covered by test_supply_multi.lem (supply
+   parameters are global per file, like readers, so the two-stream
+   case gets its own file).
+   ================================================================ *)
+
+val tick : unit -> nat
+(* The Lean target_rep satisfies target-coverage checking but is never
+   emitted at applied call sites: every draw is rewritten to
+   LemLib.supplySplit on the threaded parameter (bare references are a
+   generation-time error, so the rep is unreachable outside dead
+   text). *)
+declare lean target_rep function tick u = 0
+declare {lean} supply val tick
+
+(* === Section 1: draws in a let chain (the dominant shape) === *)
+val draw_two : unit -> nat * nat
+let draw_two u =
+  let a = tick () in
+  let b = tick () in
+  (a, b)
+
+(* === Section 2: draws in argument positions === *)
+
+(* list literal *)
+val draw_list : unit -> list nat
+let draw_list u = [tick (); tick ()]
+
+(* constructor arguments (the Symbol.fresh shape: draw inside a
+   constructor application) *)
+type wrapped = | Wrap of nat * nat
+val mk_wrap : unit -> wrapped
+let mk_wrap u = Wrap (tick ()) (tick ())
+
+(* record fields (the initial_core_run_state shape) *)
+type srec = <| ra : nat; rb : nat |>
+val mk_srec : unit -> srec
+let mk_srec u = <| ra = tick (); rb = tick () |>
+
+(* field access on a threaded value *)
+val read_ra : unit -> nat
+let read_ra u = (mk_srec ()).ra
+
+(* infix operands (hoisted left-to-right) *)
+val sum_two : unit -> nat
+let sum_two u = tick () + tick ()
+
+(* === Section 3: control forms === *)
+
+(* draw under exactly one if arm: the else branch must not consume *)
+val branchy : bool -> nat
+let branchy c = if c then tick () else 0
+
+(* draws in match arms *)
+val matchy : maybe nat -> nat
+let matchy m =
+  match m with
+    | Just v -> v + tick ()
+    | Nothing -> tick ()
+  end
+
+(* multi-clause definitions reach the backend as a single compiled
+   match (lem's pattern compiler) and thread normally; the backend's
+   multi-clause guard remains as a fail-closed backstop for any group
+   that survives compilation with >1 clause *)
+val clausy : maybe nat -> nat
+let rec clausy (Just (x : nat)) : nat = x + tick ()
+and clausy Nothing = tick ()
+
+(* === Section 4: transitive lifting + threaded calls === *)
+val uses_draw_two : nat -> nat
+let uses_draw_two x =
+  let (a, b) = draw_two () in
+  a + b + x
+
+(* === Section 5: destructuring lets (the m7/L0 single-RHS shapes) === *)
+
+(* one opaque drawing call bound by an expression-level tuple let: the
+   RHS must evaluate ONCE (a duplicated RHS would fork the numbering) *)
+val pair_draw : unit -> nat * nat
+let pair_draw u = (tick (), tick ())
+
+val destructure_once : unit -> nat * nat * nat
+let destructure_once u =
+  let (a, b) = pair_draw () in
+  let c = tick () in
+  (a, b, c)
+
+(* top-level multi-name destructuring let over a drawing RHS: rides the
+   L0 single-RHS emitter (one private lemLetRhs_* def; each projection
+   makes ONE threaded call of it — per call the RHS draws exactly
+   once) *)
+let (top_a, top_b) = pair_draw ()
+
+(* === Section 6: composition with reader === *)
+val cfg : unit -> nat
+declare lean target_rep function cfg u = 0
+declare {lean} reader val cfg
+
+(* both reader-lifted and supply-lifted: binder order is
+   [readers] [supply] [original args] *)
+val both : unit -> nat
+let both u = cfg () + tick ()
+
+val uses_both : nat -> nat
+let uses_both x = both () + x
+
+(* reader_seed composes with supply: the seed def is NOT reader-lifted
+   (its first argument seeds the reader injections) but IS
+   supply-lifted (it draws transitively) *)
+val seeded : nat -> nat -> nat
+let seeded cfg_val x = both () + x
+declare {lean} reader_seed val seeded
+
+val uses_seeded : nat -> nat
+let uses_seeded k = seeded 42 k
+
+(* === Section 7: composition with fuel === *)
+
+(* non-structural recursion (fuel) whose body draws each step: the
+   worker threads the supply through the decremented self-call; the
+   zero-fuel arm returns the sentinel with the supply unconsumed *)
+val fuel_draws : nat -> list nat
+let rec fuel_draws n =
+  if n = 0 then [] else tick () :: fuel_draws (n - 1)
+declare {lean} fuel val fuel_draws = `[]`
+
+val uses_fuel_draws : nat -> list nat
+let uses_fuel_draws k = fuel_draws (k + 1)

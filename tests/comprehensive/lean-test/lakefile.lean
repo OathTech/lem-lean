@@ -54,6 +54,9 @@ lean_lib LemComprehensiveTest where
     `Test_target_specific, `Test_target_specific_auxiliary,
     `Test_termination, `Test_termination_auxiliary,
     `Test_stress, `Test_stress_auxiliary,
+    `Test_supply, `Test_supply_auxiliary,
+    `Test_supply_multi, `Test_supply_multi_auxiliary,
+    `TestSupplyCheck,  -- hand-written supply draw-order/signature pins (effect-retirement L1)
     `Test_types_advanced, `Test_types_advanced_auxiliary,
     `Test_tuple_let_once, `Test_tuple_let_once_auxiliary,
     `TupleLetTick,  -- hand-written m7 single-evaluation counter
@@ -73,3 +76,9 @@ lean_exe «test-tuple-let-once» where
 
 lean_exe «test-integer-div-parity» where
   root := `TestIntegerDivParity
+
+-- Effect-retirement L1: compiled-binary behavioral test of the supply
+-- transform (draw sequencing, single evaluation, fuel/reader/multi
+-- composition; suite phase lean-supply-draws).
+lean_exe «test-supply-draws» where
+  root := `TestSupplyDraws

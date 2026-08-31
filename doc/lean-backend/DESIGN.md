@@ -81,6 +81,44 @@ entirely, leaving the `BaseIO` extern as a compiled-side
 implementation detail — the Cerberus consumer plans exactly this
 migration, targeting cones of exactly the three standard Lean axioms.
 
+**Supply lifting: the state analog of the reader, and the axiom's
+scheduled replacement for counters.** `declare {lean} supply val c`
+declares `c : unit -> nat` a lifted SUPPLY: every definition that
+(transitively) draws from it takes the current supply as an extra
+explicit parameter — after any reader binders — and returns the final
+supply paired with its result; a draw compiles to
+`let (v, s') := LemLib.supplySplit s` with `supplySplit s = (s, s+1)`
+(a plain def — kernel-transparent, greppable, no axiom, no IO). The
+transform A-normalizes draw sites in left-to-right depth-first order —
+exactly the evaluation order of the strict code it replaces, so the
+threaded sequence reproduces the effectful counter's dynamic draw
+order — and it is DETERMINISTIC state-passing only: it emits
+let-bindings, tuples, and `supplySplit`, never a nondeterminism
+constructor (the effect-retirement charter's obligation O7 is
+structural, not asserted). Where the reader lifting survives
+higher-order code by type-preserving partial application, a supply
+cannot: its result type grows a `× Nat`, so lambdas that draw, bare
+references to lifted definitions, partial or over-saturated
+applications, infix uses, instance methods, indreln rules, and
+monadic positions are all fail-closed generation-time errors with
+named messages (guards G-λ, G-bare, G-arity, G-infix, G-inst, G-rel
+in `src/lean_backend.ml`; the honest boundary is that state-lifting a
+monadic region is a model change, not a backend transform). Entry
+points seed the supply explicitly and receive the final value in the
+returned pair; with several declared supplies every lifted def
+threads all of them, binders and result states in sorted-name order.
+Fuel composes (the worker threads the supply through the decremented
+self-call; exhaustion returns the sentinel with the supply unconsumed
+at the cut), readers and `reader_seed` compose (binder order is
+`[Inhabited]`, readers, supply), and multi-name destructuring lets
+ride the single-RHS emitter so a drawing RHS is evaluated exactly
+once per projection call. Tests: `tests/comprehensive/test_supply.lem`
+/ `test_supply_multi.lem`, the hand-written pins
+`lean-test/TestSupplyCheck.lean`, the compiled draw-sequence binary
+`lean-test/TestSupplyDraws.lean` (suite phase `lean-supply-draws`),
+the `neg_supply_*` probe family, and the non-Lean invariance phase
+(`lean-invariance`, `invariance/inv_supply.lem`).
+
 **`Inhabited` is derived fail-closed; the unsound fallback is gone.**
 Lem programs have failure sites (incomplete matches, `failwith`) whose
 Lean emission needs an inhabitant of the result type. The backend
@@ -157,6 +195,7 @@ unaffected:
 | `declare {lean} effectful val f` | wrap `f`'s call sites in `runEffectful` thunks so the optimizer cannot merge them; `f`'s target rep must return `BaseIO α` |
 | `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
 | `declare {lean} reader_seed val f` | do not lift `f`; its first argument supplies the reader value to lifted callees in its body |
+| `declare {lean} supply val c` | supply-lift the counter `c : unit -> nat`: every function that (transitively) draws takes the current supply as an extra parameter and returns the successor supply paired with its result (deterministic state-passing; draws are `LemLib.supplySplit`) |
 
 ## Why this makes generated code provable
 

@@ -289,6 +289,36 @@ module St = struct
   (* [invocation] Cache of the (cref, param name) reader list computed
      from the whole constant environment (stable within an invocation). *)
   let reader_params_cache : (Types.const_descr_ref * string) list option ref = ref None
+  (* [invocation] Supply lifting (declare {lean} supply val): crefs of
+     supply-lifted defs — a def is lifted if it (transitively) draws
+     from a supply constant or calls a lifted def. Grows monotonically
+     (dependency order), the reader_lifted precedent. *)
+  let supply_lifted : Types.Cdset.t ref = ref Types.Cdset.empty
+  (* [invocation] Threading arity per supply-liftable cref: the number
+     of clause parameters AFTER which the threaded result pair appears.
+     Call sites must apply exactly this many arguments — linear supply
+     threading has no partial-application repair (guards G-bare /
+     G-arity), so under- and over-application are generation-time
+     errors, never silent shape drift. *)
+  let supply_arity : int Types.Cdmap.t ref = ref Types.Cdmap.empty
+  (* [invocation] Cache of the (cref, binder name) supply list (sorted
+     by binder name, the reader_params_cache discipline). *)
+  let supply_params_cache : (Types.const_descr_ref * string) list option ref = ref None
+  (* [render] Set while rendering a supply-lifted def: the def-assembly
+     sites emit the supply binder(s), transform the result type to the
+     value×supply pair, and thread the body (supply_block). *)
+  let supply_binder : bool ref = ref false
+  (* [render] Counter for names synthesized by the supply transform
+     (_lemSupplyV<n> values / _lemSupplyS<n> states — deliberately NOT
+     '_lemSupply_<x>', which is the binder namespace keyed by supply
+     constant names; the reserved-binder prefix '_lemSupply' covers
+     both). Reset at each supply_block entry. *)
+  let supply_name_counter = ref 0
+  (* [render] Set while the supply transform renders the HEAD constant
+     of a threaded call: suppresses the fail-closed net in exp (which
+     otherwise rejects any supply / supply-lifted constant reached by
+     ordinary, non-threaded emission). *)
+  let supply_head_ok : bool ref = ref false
   (* [render] True while rendering a definition emitted only as a BLOCK
      COMMENT (a def whose Lean target uses an inline/target_rep — the
      `Comment` def form). Fail-closed generation-time errors (e.g. the
@@ -335,6 +365,12 @@ module St = struct
     fuel_workers := [];
     reader_seed_param := None;
     reader_params_cache := None;
+    supply_lifted := Types.Cdset.empty;
+    supply_arity := Types.Cdmap.empty;
+    supply_params_cache := None;
+    supply_binder := false;
+    supply_name_counter := 0;
+    supply_head_ok := false;
     rendering_comment := false;
     failwith_threaded := Types.Cdmap.empty;
     fresh_name_counter := 0
@@ -458,6 +494,79 @@ let lean_reader_prepass env (ds : def list) =
           end) infos
     done
   end
+
+(* ===== Supply lifting (declare {lean} supply val) =====
+
+   Classic mechanism name: a state-passing (supply-threading)
+   transform — the state analog of the reader lifting above. A supply
+   constant is a counter of type [unit -> nat]; every def that
+   (transitively) draws from it takes the current supply as an extra
+   explicit parameter (after the reader binders) and returns the final
+   supply paired with its result; a draw is
+   [let (v, s') := LemLib.supplySplit s] with [supplySplit s = (s, s+1)].
+   The transform is DETERMINISTIC state-passing only: it introduces
+   let-bindings, tuples, and supplySplit applications — no
+   nondeterminism constructor exists anywhere in its emission
+   (effect-retirement charter obligation O7), and every position it
+   cannot thread is a fail-closed generation-time error, never a
+   fallback (guards G-λ, G-bare, G-inst, G-rel, G-arity, G-infix in
+   the emission code below). *)
+
+let lean_supply_is_supply env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  Targetset.mem Target_lean cd.supply
+
+let lean_supply_param_name env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  String.concat "" ["_lemSupply_"; Name.to_string (Path.get_name cd.const_binding)]
+
+(* The supply list, with the per-constant generation-time guards:
+   G-type (a supply val must be [unit -> nat] — the v1 surface; a
+   general element type can be added compatibly later) and the
+   annotation-mix guard (supply × effectful/reader/reader_seed on one
+   val is contradictory: a constant cannot be both threaded state and
+   an ambient/effectful representation). *)
+let lean_supply_get_params env =
+  match !St.supply_params_cache with
+  | Some l -> l
+  | None ->
+    let l =
+      List.filter_map (fun cref ->
+          if not (lean_supply_is_supply env cref) then None
+          else begin
+            let cd = c_env_lookup Ast.Unknown env.c_env cref in
+            let cname = Name.to_string (Path.get_name cd.const_binding) in
+            let type_ok =
+              match cd.const_type.Types.t with
+              | Types.Tfn (dom, cod) ->
+                (match dom.Types.t, cod.Types.t with
+                 | Types.Tapp ([], pd), Types.Tapp ([], pc) ->
+                   Name.to_string (Path.get_name pd) = "unit"
+                   && (let n = Name.to_string (Path.get_name pc) in
+                       n = "nat" || n = "natural")
+                 | _ -> false)
+              | _ -> false in
+            if not type_ok then
+              raise (Reporting_basic.err_general true cd.spec_l
+                (Printf.sprintf
+                  "Lean backend: 'declare {lean} supply val %s' — a supply val must have type unit -> nat (the v1 supply is a counter; generalize the element type in the feature before annotating other shapes)" cname));
+            if Targetset.mem Target_lean cd.effectful then
+              raise (Reporting_basic.err_general true cd.spec_l
+                (Printf.sprintf
+                  "Lean backend: val %s is declared both {lean} supply and {lean} effectful (unsupported: pick one mechanism per val — the transitional effectful representation cannot also be threaded state)" cname));
+            if Targetset.mem Target_lean cd.reader then
+              raise (Reporting_basic.err_general true cd.spec_l
+                (Printf.sprintf
+                  "Lean backend: val %s is declared both {lean} supply and {lean} reader (unsupported: a constant is either threaded state or an ambient reader, not both)" cname));
+            if Targetset.mem Target_lean cd.reader_seed then
+              raise (Reporting_basic.err_general true cd.spec_l
+                (Printf.sprintf
+                  "Lean backend: val %s is declared both {lean} supply and {lean} reader_seed (unsupported)" cname));
+            Some (cref, lean_supply_param_name env cref)
+          end)
+        (c_env_all_consts env.c_env) in
+    let l = List.sort (fun (_, a) (_, b) -> String.compare a b) l in
+    St.supply_params_cache := Some l; l
 
 (* Collect import for a qualified identifier from a target_rep.
    If the identifier has a module prefix (e.g., CerberusImpl.sizeof_ity),
@@ -1169,6 +1278,70 @@ let lean_check_reserved_def_name l n =
     raise (Reporting_basic.err_general true l
       (Printf.sprintf "Lean backend: definition name '%s' uses the reserved 'lemLetRhs_' prefix (synthesized destructuring-let RHS definitions; the reserved-name contract) — rename it" n))
 
+(* Supply pre-pass: grow St.supply_lifted to a fixpoint over this
+   module's Val_defs (the lean_reader_prepass pattern: Val_def
+   granularity, nested modules recursed, instances skipped fail-closed
+   at emission, set persists across modules in dependency order), and
+   record each liftable def's THREADING ARITY (clause parameter count —
+   the position of the result pair; consumed by the exact-application
+   guard at threaded call sites). Two deliberate differences from the
+   reader pre-pass:
+   - reader_seed defs ARE liftable: a seed def may draw (its supply
+     binder is independent of its reader-seed first argument);
+   - defs carrying a Lean target_rep are EXCLUDED from lifting: their
+     bodies render as block comments (dead text) and their call sites
+     emit the hand-written rep, which cannot take a supply — threading
+     their callers would inject state into a representation that
+     ignores it. Their (dead) bodies render un-threaded inside the
+     comment. *)
+let lean_supply_prepass env (ds : def list) =
+  if lean_supply_get_params env <> [] then begin
+    let target = Target.Target_no_ident Target.Target_lean in
+    let has_lean_rep cref =
+      let cd = c_env_lookup Ast.Unknown env.c_env cref in
+      Target.Targetmap.apply_target cd.target_rep target <> None in
+    let rec def_infos acc (((d_aux, _), _, _) as d : def) =
+      match d_aux with
+      | Instance _ -> acc
+      | Module (_, _, _, _, _, inner_ds, _) -> List.fold_left def_infos acc inner_ds
+      | Val_def vd ->
+        let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
+        if Types.Cdset.exists has_lean_rep defined then acc
+        else
+          let used = (add_def_entities target false empty_used_entities d).used_consts_set in
+          let arities = (match vd with
+            | Fun_def (_, _, _, funcls) ->
+              List.map (fun (c, fcls) ->
+                  (c, match fcls with
+                      | ((_, _, pats, _, _, _) : funcl_aux) :: _ -> List.length pats
+                      | [] -> 0))
+                (lean_group_funcls (Seplist.to_list funcls))
+            | Let_def (_, _, (_, name_map, _, _, _)) ->
+              List.map (fun (_, c) -> (c, 0)) name_map
+            | Let_inline _ -> []) in
+          (defined, used, arities) :: acc
+      | _ -> acc in
+    let infos = List.rev (List.fold_left def_infos [] ds) in
+    let changed = ref true in
+    while !changed do
+      changed := false;
+      List.iter (fun (defined, used, arities) ->
+          if not (Types.Cdset.subset defined !St.supply_lifted) then begin
+            let needs =
+              Types.Cdset.exists (lean_supply_is_supply env) used
+              || not (Types.Cdset.is_empty
+                        (Types.Cdset.inter used !St.supply_lifted)) in
+            if needs then begin
+              St.supply_lifted := Types.Cdset.union defined !St.supply_lifted;
+              List.iter (fun (c, a) ->
+                  St.supply_arity := Types.Cdmap.insert !St.supply_arity (c, a))
+                arities;
+              changed := true
+            end
+          end) infos
+    done
+  end
+
 (* Pre-pass (runs after lean_inhabited_prepass, which populates the
    instance census this analysis reads): compute the threaded-def map to
    a fixpoint over this module's Val_defs, then guard-sweep Instance
@@ -1289,6 +1462,7 @@ let lean_analysis_prepass_all env (mods : checked_module list) =
       St.current_module_name := module_name;
       let (ds, _) = m.typed_ast in
       lean_reader_prepass env ds;
+      lean_supply_prepass env ds;
       lean_inhabited_prepass env ds;
       lean_failwith_thread_prepass env ds)
     mods;
@@ -1644,6 +1818,52 @@ type pat_style = FunParam | MatchArm
       Output.flat (List.map (fun (_, pname) ->
           Output.flat [from_string " "; from_string (reader_inject_name pname)])
         (get_reader_params ()))
+
+    (* --- Supply lifting helpers (declare {lean} supply val) ---
+       thin wrappers over the top-level env-parameterized versions; the
+       pre-pass lives at module-emission level (lean_supply_prepass).
+       See the mechanism comment at lean_supply_is_supply. *)
+    let is_supply_cref = lean_supply_is_supply A.env
+    let get_supply_params () = lean_supply_get_params A.env
+    let supply_arity_of cref =
+      match Types.Cdmap.apply !St.supply_arity cref with
+      | Some n -> n
+      | None ->
+        raise (Reporting_basic.err_general true Ast.Unknown
+          "Lean backend: internal error — supply-lifted constant has no recorded threading arity")
+
+    (* Does this expression force supply lifting of its enclosing def:
+       a draw, or a call of an already-lifted def (transitive draws). *)
+    let exp_needs_supply (e : exp) : bool =
+      let ue = add_exp_entities empty_used_entities e in
+      List.exists (fun cref ->
+          is_supply_cref cref || Types.Cdset.mem cref !St.supply_lifted)
+        ue.used_consts
+
+    (* THE FAIL-CLOSED SUPPLY NET: ordinary (non-threaded) emission must
+       never render a supply constant or a supply-lifted definition —
+       there is no supply value in scope, and (unlike the reader's
+       type-preserving partial application) no repair exists. Any such
+       reach is a generation-time error naming the context: this is what
+       makes guards G-bare / G-rel (indreln, lemma/assert) and the
+       unliftable-context class structurally closed rather than
+       Lean-build-time surprises. Suppressed only (a) while the supply
+       transform itself renders a threaded call HEAD (St.supply_head_ok)
+       and (b) inside block-comment renderings of dead text
+       (St.rendering_comment — the arc-10 comment-inertness rule). *)
+    let supply_net_check (l : Ast.l) (cref : Types.const_descr_ref) (ctx : string) : unit =
+      if not (!St.supply_head_ok || !St.rendering_comment) then begin
+        if is_supply_cref cref then
+          raise (Reporting_basic.err_general true l
+            (Printf.sprintf
+              "Lean backend: supply constant used outside supply-threaded code (unsupported: a draw is only legal inside a definition body, which the pre-pass supply-lifts; in this context — %s — there is no supply to thread)"
+              ctx))
+        else if Types.Cdset.mem cref !St.supply_lifted then
+          raise (Reporting_basic.err_general true l
+            (Printf.sprintf
+              "Lean backend: supply-lifted definition used outside supply-threaded code (unsupported: linear supply threading has no partial-application repair; context — %s)"
+              ctx))
+      end
 
     (* Fuel sentinel for the Lean target, if declared for this constant. *)
     let fuel_sentinel_for cref =
@@ -2137,7 +2357,6 @@ type pat_style = FunParam | MatchArm
                 (* Lean doesn't support destructuring in 'def' bindings.
                    Emit one def per bound name: def x : T := let PAT := EXPR; x *)
                 let pat_out = def_pattern p in
-                let exp_out = exp inside_instance e in
                 let type_out = match topt with
                   | None -> emp
                   | Some (_, t) -> Output.flat [from_string " :"; pat_typ t]
@@ -2152,9 +2371,30 @@ type pat_style = FunParam | MatchArm
                     raise (Reporting_basic.err_general true Ast.Unknown
                       "Lean backend: reader-lifted call inside an instance method (unsupported: instance fields cannot take extra parameters)");
                   lifted && not inside_instance in
+                (* Supply lifting on a Let_def-bound constant: the bound
+                   name becomes a function of the supply (state-passing
+                   semantics of a drawing value binding — each use
+                   threads; documented in the feature doc). G-inst as
+                   for Fun_defs; inert for block comments. *)
+                let supply_let_lifted =
+                  let lifted =
+                    (not !St.rendering_comment)
+                    && List.exists (fun (_, cref) ->
+                           Types.Cdset.mem cref !St.supply_lifted) name_map in
+                  if (not !St.rendering_comment) && exp_needs_supply e && inside_instance then
+                    raise (Reporting_basic.err_general true Ast.Unknown
+                      "Lean backend: supply draw (or supply-lifted call) inside an instance method (unsupported: instance fields cannot take extra parameters or change their result type)");
+                  lifted && not inside_instance in
                 let saved_reader_binder = !St.reader_binder in
+                let saved_supply_binder = !St.supply_binder in
                 St.reader_binder := let_lifted;
-                Fun.protect ~finally:(fun () -> St.reader_binder := saved_reader_binder) @@ fun () ->
+                St.supply_binder := supply_let_lifted;
+                Fun.protect ~finally:(fun () ->
+                    St.reader_binder := saved_reader_binder;
+                    St.supply_binder := saved_supply_binder) @@ fun () ->
+                let exp_out =
+                  if supply_let_lifted then supply_block inside_instance e
+                  else exp inside_instance e in
                 let lean_name_of cref =
                   let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
                   let (_, renamed, _) = Typed_ast_syntax.constant_descr_to_name
@@ -2191,27 +2431,59 @@ type pat_style = FunParam | MatchArm
                     let rhs_thread = (match name_map with
                       | (_, cref0) :: _ -> thread_out_of cref0
                       | [] -> emp) in
-                    let rhs_typ = pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e)) in
+                    let rhs_typ =
+                      let base = pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e)) in
+                      if supply_let_lifted then
+                        Output.flat [from_string "(("; base; from_string ")";
+                                     supply_pair_suffix (); from_string ")"]
+                      else base in
                     Some (rhs_def_name, Output.flat [
                       from_string "\n"; effectful_attr;
                       from_string "private def "; from_string rhs_def_name;
-                      reader_binder_output (); constraints; rhs_thread;
+                      reader_binder_output (); supply_binder_output (); constraints; rhs_thread;
                       from_string "  : "; rhs_typ;
                       from_string " :="; exp_out
                     ]) in
                 let body_out = match rhs_binding with
                   | None -> exp_out
                   | Some (rhs_def_name, _) ->
-                    (* re-inject the reader parameters when lifted: the
-                       projections carry the same binders as the RHS def *)
+                    (* re-inject the reader parameters when lifted, and
+                       thread the supply binders when supply-lifted: the
+                       projections carry the same binders as the RHS def
+                       (ONE call of the single-RHS def per projection —
+                       the L0/m7 single-evaluation emitter; a duplicated
+                       RHS would fork the draw numbering) *)
                     Output.flat [from_string " "; from_string rhs_def_name;
-                                 (if let_lifted then reader_args_output () else emp)] in
+                                 (if let_lifted then reader_args_output () else emp);
+                                 (if supply_let_lifted then
+                                    Output.flat (List.map (fun (_, pname) ->
+                                        Output.flat [from_string " "; from_string pname])
+                                      (get_supply_params ()))
+                                  else emp)] in
                 let defs = List.map (fun (_orig_name, cref) ->
                   let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
                   let name_str = lean_name_of cref in
                   let var_type = pat_typ (C.t_to_src_t cd.const_type) in
                   let defn = if inside_instance then emp else from_string "def " in
                   let thread_out = thread_out_of cref in
+                  if supply_let_lifted then begin
+                    (* threaded shape: bind the RHS pair, return the
+                       bound name paired with the final supply *)
+                    let states = List.map (fun _ -> supply_fresh_name "S")
+                        (get_supply_params ()) in
+                    let states_out = Output.flat (List.concat_map (fun s ->
+                        [from_string ", "; from_string s]) states) in
+                    Output.flat [
+                      from_string "\n"; effectful_attr; defn; from_string name_str;
+                      reader_binder_output (); supply_binder_output (); constraints; thread_out;
+                      from_string "  : (("; var_type; from_string ")";
+                      supply_pair_suffix (); from_string ")";
+                      from_string " :=\n  let (("; pat_out; type_out; from_string ")";
+                      states_out; from_string ")"; ws sk; from_string " := (";
+                      body_out; from_string ")";
+                      from_string "\n  ("; from_string name_str; states_out; from_string ")"
+                    ]
+                  end else
                   Output.flat [
                     from_string "\n"; effectful_attr; defn; from_string name_str;
                     reader_binder_output (); constraints; thread_out;
@@ -2484,14 +2756,41 @@ type pat_style = FunParam | MatchArm
                               (Pattern_syntax.pat_vars_src p)) pats
                           @ exp_bound_names e) g in
                       List.iter (fun n ->
-                        if n = "lemFuel" || String.length n >= 11 && String.sub n 0 11 = "_lemReader_" then
+                        if n = "lemFuel"
+                           || (String.length n >= 11 && String.sub n 0 11 = "_lemReader_")
+                           || (String.length n >= 10 && String.sub n 0 10 = "_lemSupply") then
                           raise (Reporting_basic.err_general true (locn_of_clause_group g)
                             (Printf.sprintf
-                              "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel' and the '_lemReader_' prefix are the backend's, in parameters AND clause bodies; a shadowed fuel/reader binder is silently wrong) — rename the variable" n)))
+                              "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel' and the '_lemReader_'/'_lemSupply' prefixes are the backend's, in parameters AND clause bodies; a shadowed fuel/reader/supply binder is silently wrong) — rename the variable" n)))
                         bound in
+                    (* --- Supply lifting: group classification + the
+                       fail-closed guards (G-inst; the v1 restrictions
+                       on truly-mutual blocks and multi-clause groups —
+                       named errors, the fuel machinery's precedent;
+                       everything else the supply net + transform guard).
+                       All inert while rendering block comments (the
+                       arc-10 dead-text rule). --- *)
+                    let supply_lifted_g =
+                      (not !St.rendering_comment)
+                      && List.exists (fun (_, c, _, _, _, _) ->
+                             Types.Cdset.mem c !St.supply_lifted) g in
+                    let supply_needs_g =
+                      (not !St.rendering_comment)
+                      && List.exists (fun (_, _, _, _, _, e) -> exp_needs_supply e) g in
+                    if supply_needs_g && inside_instance then
+                      (* G-inst *)
+                      raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                        "Lean backend: supply draw (or supply-lifted call) inside an instance method (unsupported: instance fields cannot take extra parameters or change their result type)");
+                    if supply_lifted_g && is_truly_mutual then
+                      raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                        "Lean backend: supply lifting in a (truly) mutual block (unsupported; extend when needed — acyclic rec-and blocks de-mutualize and thread fine)");
+                    if supply_lifted_g && List.length g > 1 then
+                      raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                        "Lean backend: supply lifting on a multi-clause definition (unsupported; write the clauses as a single match)");
                     (if fuel_info <> None || seed_info <> None then reserved_binder_check ()
                      else if List.exists (fun (_, cr, _, _, _, _) ->
-                              Types.Cdset.mem cr !St.reader_lifted) g then reserved_binder_check ());
+                              Types.Cdset.mem cr !St.reader_lifted
+                              || Types.Cdset.mem cr !St.supply_lifted) g then reserved_binder_check ());
                     let lifted = register_group g in
                     (match seed_info with
                      | Some _ when lifted ->
@@ -2530,8 +2829,12 @@ type pat_style = FunParam | MatchArm
                     match fuel_info with
                     | None ->
                       let saved = !St.reader_binder in
+                      let saved_sb = !St.supply_binder in
                       St.reader_binder := lifted;
-                      Fun.protect ~finally:(fun () -> St.reader_binder := saved)
+                      St.supply_binder := supply_lifted_g && not inside_instance;
+                      Fun.protect ~finally:(fun () ->
+                          St.reader_binder := saved;
+                          St.supply_binder := saved_sb)
                         (fun () -> (attr_for g, def_keyword_for g, render_group g, emp))
                     | Some (n, c, s) ->
                       let base_name = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
@@ -2543,8 +2846,10 @@ type pat_style = FunParam | MatchArm
                         else Output.flat [from_string " "; let_type_variables true tv] in
                       let saved_e = !St.fuel_emit in
                       let saved_rb = !St.reader_binder in
+                      let saved_sb = !St.supply_binder in
                       St.fuel_emit := Some s;
                       St.reader_binder := lifted;
+                      St.supply_binder := supply_lifted_g && not inside_instance;
                       (* worker name must agree with the block-level plan —
                          a real error, not a bare assert (arc-14 S2 B6,
                          be:N1: `assert` is compiled out under -noassert;
@@ -2555,7 +2860,8 @@ type pat_style = FunParam | MatchArm
                           "Lean backend: internal error — fuel worker name disagrees with the block-level fuel plan");
                       Fun.protect ~finally:(fun () ->
                           St.fuel_emit := saved_e;
-                          St.reader_binder := saved_rb)
+                          St.reader_binder := saved_rb;
+                          St.supply_binder := saved_sb)
                         (fun () ->
                           let body = render_group g in
                           (* Point-free wrapper at the default fuel: call sites
@@ -2584,12 +2890,29 @@ type pat_style = FunParam | MatchArm
                           let cons_out =
                             if constraints = emp then emp
                             else Output.flat [from_string " "; constraints] in
+                          (* A supply-lifted worker's wrapper: the supply
+                             binders sit after the readers (fixed order:
+                             fuel, [Inhabited], readers, supply, original
+                             arguments), and the result is the
+                             value×supply pair — 'worker lemDefaultFuel'
+                             stays point-free. *)
+                          let supply_arrows =
+                            if not !St.supply_binder then emp else
+                            Output.flat (List.map (fun _ -> from_string "Nat -> ")
+                              (get_supply_params ())) in
+                          let result_typ_out =
+                            if !St.supply_binder then
+                              supply_transformed_typ_output cd
+                                (match g with
+                                 | (_, _, pats, _, _, _) :: _ -> List.length pats
+                                 | [] -> 0)
+                            else pat_typ (C.t_to_src_t cd.const_type) in
                           let wrapper = Output.flat [
                             from_string "\n\n"; attr_for g;
                             from_string "def "; from_string base_name; tv_out; cons_out;
                             inhabited_binder_output ();
-                            from_string " : "; reader_arrows;
-                            pat_typ (C.t_to_src_t cd.const_type);
+                            from_string " : "; reader_arrows; supply_arrows;
+                            result_typ_out;
                             from_string " := "; from_string worker;
                             from_string " lemDefaultFuel\n"] in
                           (* Wrapper is returned separately: in a mutual
@@ -2869,11 +3192,22 @@ type pat_style = FunParam | MatchArm
         match typ_opt with
           | None -> emp
           | Some (s, t) ->
-              Output.flat [
-                ws s; from_string " : "; pat_typ t
-              ]
+              (* a supply-lifted def's result type becomes the
+                 value×supply pair (linear threading — the one place
+                 supply lifting departs from the reader shape) *)
+              if !St.supply_binder then
+                Output.flat [
+                  ws s; from_string " : (("; pat_typ t; from_string ")";
+                  supply_pair_suffix (); from_string ")"
+                ]
+              else
+                Output.flat [
+                  ws s; from_string " : "; pat_typ t
+                ]
       in
-        let body = exp inside_instance e in
+        let body =
+          if !St.supply_binder then supply_block inside_instance e
+          else exp inside_instance e in
         (* Inside instance definitions, flatten newlines in the body expression.
            Without this, multiline bodies (e.g., sorry-based opaque type instances)
            can have arguments on a new line at field-name indentation, which Lean
@@ -2881,25 +3215,37 @@ type pat_style = FunParam | MatchArm
         let body = if inside_instance then flatten_newlines body else body in
         (match !St.fuel_emit with
          | Some sentinel ->
+           (* under supply lifting the zero-fuel arm returns the sentinel
+              paired with the UNCONSUMED supply binders — fuel exhaustion
+              draws nothing *)
+           let sentinel_out =
+             if !St.supply_binder then
+               Output.flat
+                 ([from_string "(("; from_string sentinel; from_string ")"]
+                  @ List.concat_map (fun (_, pname) ->
+                        [from_string ", "; from_string pname])
+                      (get_supply_params ())
+                  @ [from_string ")"])
+             else Output.flat [from_string "("; from_string sentinel; from_string ")"] in
            Output.flat [
              ws name_skips; from_string " "; name; from_string "_lemFuel";
              tv_set_sep; tv_set; constraints_sep; constraints; inhabited_binder_output ();
-             from_string " (lemFuel : Nat)"; reader_binder_output (); pat_skips;
+             from_string " (lemFuel : Nat)"; reader_binder_output (); supply_binder_output (); pat_skips;
              fun_pattern_list inside_instance pats; ws skips; typ_opt;
-             from_string " := match lemFuel with\n  | 0 => (";
-             from_string sentinel;
+             from_string " := match lemFuel with\n  | 0 => ";
+             sentinel_out;
              (* the succ-arm body is parenthesized like the sentinel: a
                 hoisted infix head (e.g. a bind rendered prefix) followed by
                 argument lines at low indentation would otherwise escape the
                 match arm (arc-3 batch E: full_eval_pexpr) *)
-             from_string ")\n  | Nat.succ lemFuel => (";
+             from_string "\n  | Nat.succ lemFuel => (";
              body;
              from_string ")"
            ]
          | None ->
            Output.flat [
              ws name_skips; from_string " "; name; tv_set_sep; tv_set; constraints_sep; constraints;
-             inhabited_binder_output (); reader_binder_output (); pat_skips;
+             inhabited_binder_output (); reader_binder_output (); supply_binder_output (); pat_skips;
              fun_pattern_list inside_instance pats; ws skips; typ_opt; from_string " := "; body
            ])
     and reader_binder_output () =
@@ -2916,6 +3262,341 @@ type pat_style = FunParam | MatchArm
       Output.flat (List.map (fun n ->
           Output.flat [from_string " [Inhabited "; from_string n; from_string "]"])
         !St.inhabited_binder)
+
+    (* ===== The supply-threading body transform =====
+
+       [supply_thread senv e] emits e with every draw and every lifted
+       call A-normalized into let-bindings, sequenced in LEFT-TO-RIGHT
+       DEPTH-FIRST order — exactly the evaluation order of the strict
+       Lean code being replaced (charter obligation O1). It returns
+       (bindings, value, senv'): the bindings to emit before the value,
+       the (pure) value output, and the updated supply environment
+       (supply cref -> current state variable name). Supply-free
+       subexpressions delegate to the ordinary [exp] emitter verbatim.
+
+       DETERMINISM (charter non-goal O7): the transform emits only
+       let-bindings, tuples, LemLib.supplySplit applications, and the
+       control forms already present in the source — it contains no
+       nondeterminism constructor and cannot introduce a branch point
+       that was not in the input.
+
+       Every position that cannot be threaded is a fail-closed
+       generation-time error (G-λ lambdas, monadic do, comprehensions,
+       bare references, arity mismatches, infix heads). *)
+    and supply_fresh_name (kind : string) : string =
+      let n = !St.supply_name_counter in
+      St.supply_name_counter := n + 1;
+      Printf.sprintf "_lemSupply%s%d" kind n
+    (* Final-state tuple components, in the sorted supply-param order
+       (the one canonical order, used by binders, call sites, and
+       result tuples alike). *)
+    and supply_state_names senv =
+      List.map (fun (cref, _) ->
+          match List.assoc_opt cref senv with
+          | Some s -> s
+          | None ->
+            raise (Reporting_basic.err_general true Ast.Unknown
+              "Lean backend: internal error — supply environment lost a declared supply"))
+        (get_supply_params ())
+    (* Bind the value×states tuple of a threaded control expression
+       (if/match in pair form) to fresh names; returns the binding, the
+       value output, and the refreshed environment. *)
+    and supply_join senv (rhs : Output.t) =
+      let v = supply_fresh_name "V" in
+      let updates = List.map (fun (cref, _) -> (cref, supply_fresh_name "S")) (get_supply_params ()) in
+      let bind = Output.flat
+        ([from_string "let ("; from_string v]
+         @ List.concat_map (fun (_, s) -> [from_string ", "; from_string s]) updates
+         @ [from_string ") := ("; rhs; from_string ")"]) in
+      (bind, from_string v, updates)
+    (* An if/match ARM (or a def body) rendered to the pair form:
+       (bindings; (value, final states)). *)
+    and supply_arm inside_instance senv e =
+      let (bs, v, senv') = supply_thread inside_instance senv e in
+      let tup = Output.flat
+        ([from_string "("; v]
+         @ List.concat_map (fun s -> [from_string ", "; from_string s]) (supply_state_names senv')
+         @ [from_string ")"]) in
+      Output.flat
+        ([from_string "("]
+         @ List.concat_map (fun b -> [b; from_string ";\n      "]) bs
+         @ [tup; from_string ")"])
+    and supply_thread_list inside_instance senv es =
+      let (bs_rev, vs_rev, senv') =
+        List.fold_left (fun (bs, vs, senv) e ->
+            let (b, v, senv') = supply_thread inside_instance senv e in
+            (List.rev_append b bs, v :: vs, senv'))
+          ([], [], senv) es in
+      (List.rev bs_rev, List.rev vs_rev, senv')
+    and supply_thread inside_instance senv (e : exp) =
+      let l = Typed_ast.exp_to_locn e in
+      let err msg = raise (Reporting_basic.err_general true l msg) in
+      let pure_out e' =
+        if needs_parens (C.exp_to_term e') then
+          Output.flat [from_string "("; exp inside_instance e'; from_string ")"]
+        else exp inside_instance e' in
+      if not (exp_needs_supply e) then ([], pure_out e, senv)
+      else match C.exp_to_term e with
+      | Paren (_, e1, _) -> supply_thread inside_instance senv e1
+      | Begin (_, e1, _) -> supply_thread inside_instance senv e1
+      | Typed (_, e1, _, t, _) ->
+        let (bs, v, senv') = supply_thread inside_instance senv e1 in
+        (bs, Output.flat [from_string "("; v; from_string " :"; pat_typ t; from_string ")"], senv')
+      | App _ -> supply_thread_app inside_instance senv e
+      | Let (_, (lb, _), _, e2) ->
+        (match lb with
+         | Let_val (p, topt, _, e1) ->
+           let (bs1, v1, senv1) = supply_thread inside_instance senv e1 in
+           let p_out, topt_out = (match p.term with
+             (* the P_typ unwrap of let_body: `let (x : T) := v` would
+                pattern-match, not bind *)
+             | P_typ (_, inner_p, _, t, _) ->
+               def_pattern inner_p, Output.flat [from_string " :"; pat_typ t]
+             | _ ->
+               def_pattern p,
+               (match topt with
+                | None -> emp
+                | Some (_, t) -> Output.flat [from_string " :"; pat_typ t])) in
+           let bind = Output.flat [from_string "let "; p_out; topt_out; from_string " := "; v1] in
+           let (bs2, v2, senv2) = supply_thread inside_instance senv1 e2 in
+           (bs1 @ (bind :: bs2), v2, senv2)
+         | Let_fun _ ->
+           err "Lean backend: unexpected Let_fun under supply threading (should have been compiled away)")
+      | If (_, tst, _, et, _, ef) ->
+        let (bs0, v0, senv0) = supply_thread inside_instance senv tst in
+        if not (exp_needs_supply et || exp_needs_supply ef) then
+          (bs0,
+           Output.flat [from_string "(if "; v0; from_string " then "; pure_out et;
+                        from_string " else "; pure_out ef; from_string ")"],
+           senv0)
+        else begin
+          let armT = supply_arm inside_instance senv0 et in
+          let armF = supply_arm inside_instance senv0 ef in
+          let (bind, v, senv') = supply_join senv0
+            (Output.flat [from_string "if "; v0; from_string " then "; armT;
+                          from_string " else "; armF]) in
+          (bs0 @ [bind], v, senv')
+        end
+      | Case (_, _, e0, _, cases, _) ->
+        let (bs0, v0, senv0) = supply_thread inside_instance senv e0 in
+        let arm_list = Seplist.to_list cases in
+        if not (List.exists (fun (_, _, ea, _) -> exp_needs_supply ea) arm_list) then
+          let arms = List.map (fun (p, _, ea, _) ->
+              flatten_newlines (Output.flat
+                [from_string "\n      | "; def_pattern p; from_string " => "; pure_out ea]))
+            arm_list in
+          (bs0,
+           Output.flat ([from_string "(match "; v0; from_string " with"]
+                        @ arms @ [from_string ")"]),
+           senv0)
+        else begin
+          let arms = List.map (fun (p, _, ea, _) ->
+              Output.flat [from_string "\n      | "; def_pattern p; from_string " => ";
+                           supply_arm inside_instance senv0 ea])
+            arm_list in
+          let (bind, v, senv') = supply_join senv0
+            (Output.flat ([from_string "match "; v0; from_string " with"] @ arms)) in
+          (bs0 @ [bind], v, senv')
+        end
+      | Tup (_, es, _) ->
+        let (bs, vs, senv') = supply_thread_list inside_instance senv (Seplist.to_list es) in
+        (bs, Output.flat [from_string "("; Output.concat (from_string ", ") vs; from_string ")"], senv')
+      | List (_, es, _) ->
+        let (bs, vs, senv') = supply_thread_list inside_instance senv (Seplist.to_list es) in
+        (bs, Output.flat [from_string "["; Output.concat (from_string ", ") vs; from_string "]"], senv')
+      | Record (_, fields, _) ->
+        let typ = Typed_ast.exp_to_typ e in
+        (match mutual_record_path typ with
+         | Some _ ->
+           err "Lean backend: supply draw in a mutual-record construction (unsupported; bind the drawn values in lets before the construction)"
+         | None ->
+           let fl = Seplist.to_list fields in
+           let (bs, vs, senv') =
+             supply_thread_list inside_instance senv (List.map (fun (_, _, ef, _) -> ef) fl) in
+           let fields_out = List.map2 (fun (fd, _, _, _) v ->
+               Output.flat [field_ident_to_output fd (use_ascii_rep_for_const fd.descr);
+                            from_string " := "; v])
+             fl vs in
+           let src_t = C.t_to_src_t typ in
+           (bs,
+            Output.flat [from_string "(({ "; Output.concat (from_string ", ") fields_out;
+                         from_string " } : "; pat_typ src_t; from_string "))"],
+            senv'))
+      | Field (e0, sk, fd) ->
+        let (bs, v0, senv') = supply_thread inside_instance senv e0 in
+        let name = field_ident_to_output fd (use_ascii_rep_for_const fd.descr) in
+        (bs, Output.flat [v0; from_string "."; ws sk; name], senv')
+      | Infix (le, ce, re) ->
+        (match C.exp_to_term ce with
+         | Constant cd when is_supply_cref cd.descr
+                            || Types.Cdset.mem cd.descr !St.supply_lifted ->
+           (* G-infix *)
+           err "Lean backend: supply constant or supply-lifted definition used in infix position (unsupported; use prefix application so the call can be threaded)"
+         | Constant cd ->
+           let (bs1, vl, senv1) = supply_thread inside_instance senv le in
+           let (bs2, vr, senv2) = supply_thread inside_instance senv1 re in
+           (* render via the pure Infix machinery with the operands
+              substituted by their threaded values (physical-identity
+              memo; a miss falls back to ordinary emission, where the
+              supply net fails closed) *)
+           let memo_trans a =
+             if a == le then vl else if a == re then vr else pure_out a in
+           let pieces = B.function_application_to_output (exp_to_locn e) memo_trans true e cd [le; re] (use_ascii_rep_for_const cd.descr) in
+           (bs1 @ bs2,
+            Output.flat [from_string "("; Output.concat (from_string " ") pieces; from_string ")"],
+            senv2)
+         | _ ->
+           let (bs1, vl, senv1) = supply_thread inside_instance senv le in
+           let (bs2, vr, senv2) = supply_thread inside_instance senv1 re in
+           (bs1 @ bs2,
+            Output.flat [from_string "("; vl; from_string " "; pure_out ce;
+                         from_string " "; vr; from_string ")"],
+            senv2))
+      | Fun _ | Function _ ->
+        (* G-λ: the honest boundary of the feature — a linear supply
+           cannot be captured by a closure, and there is no
+           partial-application repair (contrast the reader lifting). *)
+        err "Lean backend: supply draw (or supply-lifted call) under a lambda (unsupported: a linear supply cannot be captured by a closure — restructure so the draw happens outside the lambda, or thread the state explicitly in the model)"
+      | Do _ ->
+        err "Lean backend: supply draw (or supply-lifted call) inside a do-block / monadic bind (unsupported: supply threading is first-order state-passing; a monadic region needs an explicit state component in the model)"
+      | Quant _ | Setcomp _ | Comp_binding _ | Set _ ->
+        err "Lean backend: supply draw in a set/comprehension/quantifier context (unsupported)"
+      | Recup _ ->
+        err "Lean backend: supply draw in a record-update expression (unsupported; bind the drawn values in lets before the update)"
+      | Vector _ | VectorSub _ | VectorAcc _ ->
+        err "Lean backend: supply draw in a vector expression (unsupported)"
+      | Constant cd when is_supply_cref cd.descr ->
+        err "Lean backend: bare (unapplied) reference to a supply constant (unsupported: apply it to () so the draw can be threaded)"
+      | Constant cd when Types.Cdset.mem cd.descr !St.supply_lifted ->
+        (* G-bare *)
+        err "Lean backend: bare (unapplied) reference to a supply-lifted definition (unsupported: linear supply threading has no partial-application repair — apply it fully inside a lifted definition instead of passing it as a value)"
+      | Var _ | Constant _ | Lit _ | Backend _ | Nvar_e _ ->
+        ([], pure_out e, senv)
+    and supply_thread_app inside_instance senv e =
+      let l = Typed_ast.exp_to_locn e in
+      let err msg = raise (Reporting_basic.err_general true l msg) in
+      let pure_out e' =
+        if needs_parens (C.exp_to_term e') then
+          Output.flat [from_string "("; exp inside_instance e'; from_string ")"]
+        else exp inside_instance e' in
+      let (e0, args) = strip_app_exp e in
+      match C.exp_to_term e0 with
+      | Constant cd when is_supply_cref cd.descr ->
+        (* THE DRAW: let (v, s') := LemLib.supplySplit s *)
+        if List.length args <> 1 then
+          (* G-arity *)
+          err "Lean backend: a supply constant must be applied to exactly one (unit) argument (the draw rewrite replaces the whole application spine)";
+        if exp_needs_supply (List.hd args) then
+          err "Lean backend: the unit argument of a supply draw itself uses the supply (unsupported; sequence the draws in lets)";
+        let scur = (match List.assoc_opt cd.descr senv with
+          | Some s -> s
+          | None ->
+            err "Lean backend: internal error — supply constant missing from the threading environment") in
+        let v = supply_fresh_name "V" in
+        let s' = supply_fresh_name "S" in
+        let bind = Output.flat
+          [from_string "let ("; from_string v; from_string ", "; from_string s';
+           from_string ") := LemLib.supplySplit "; from_string scur] in
+        let senv' = List.map (fun (c, s) ->
+            if c = cd.descr then (c, s') else (c, s)) senv in
+        ([bind], from_string v, senv')
+      | Constant cd when Types.Cdset.mem cd.descr !St.supply_lifted ->
+        (* THREADED CALL of a lifted def: bind the value×states pair. *)
+        let arity = supply_arity_of cd.descr in
+        if List.length args <> arity then
+          err (Printf.sprintf
+            "Lean backend: supply-lifted definition applied to %d argument(s) where its threading arity is %d (unsupported: linear supply threading requires exact full application — no partial application, no extra arguments on the returned value)"
+            (List.length args) arity);
+        let (bs, argvs, senv1) = supply_thread_list inside_instance senv args in
+        (* head render: the existing bare-Constant machinery (fuel-worker
+           rewrite, reader partial application, renaming) with the
+           supply net suppressed for exactly this render *)
+        let head =
+          let saved = !St.supply_head_ok in
+          St.supply_head_ok := true;
+          Fun.protect ~finally:(fun () -> St.supply_head_ok := saved)
+            (fun () -> pure_out e0) in
+        let scurs = supply_state_names senv1 in
+        let call = Output.flat
+          ([head]
+           @ List.concat_map (fun s -> [from_string " "; from_string s]) scurs
+           @ List.concat_map (fun a -> [from_string " "; a]) argvs) in
+        let (bind, v, senv2) = supply_join senv1 call in
+        (bs @ [bind], v, senv2)
+      | Constant cd ->
+        (* pure head with supply-using arguments: hoist the arguments in
+           order, then render the application through the ordinary
+           machinery (target reps, ascii reps, renaming) with the
+           argument nodes substituted by their threaded values. The
+           special head classes cannot take hoisted arguments soundly
+           and fail closed. *)
+        let c_descr = c_env_lookup Ast.Unknown A.env.c_env cd.descr in
+        if Target.Targetset.mem Target.Target_lean c_descr.effectful then
+          err "Lean backend: an effectful call with supply-drawing arguments (unsupported: the transitional effectful mechanism does not compose with supply threading inside one application — bind the drawn values in lets first)";
+        if is_lean_failwith_rep cd.descr then
+          err "Lean backend: a failwith-mapped call with supply-drawing arguments (unsupported; bind the drawn values in lets first)";
+        if ground_rep_for cd.descr <> None then
+          err "Lean backend: a ground_rep-mapped call with supply-drawing arguments (unsupported; bind the drawn values in lets first)";
+        if is_reader_cref cd.descr then
+          err "Lean backend: internal error — a reader constant's unit argument cannot use the supply";
+        let (bs, argvs, senv1) = supply_thread_list inside_instance senv args in
+        let memo = List.combine args argvs in
+        let memo_trans a =
+          match List.find_opt (fun (k, _) -> k == a) memo with
+          | Some (_, o) -> o
+          | None -> pure_out a in
+        let pieces = B.function_application_to_output (exp_to_locn e) memo_trans false e cd args (use_ascii_rep_for_const cd.descr) in
+        (bs,
+         Output.flat [from_string "("; Output.concat (from_string " ") pieces; from_string ")"],
+         senv1)
+      | _ ->
+        (* general head (variable, threaded subexpression, ...) *)
+        let (bs0, v0, senv0) = supply_thread inside_instance senv e0 in
+        let (bs, argvs, senv1) = supply_thread_list inside_instance senv0 args in
+        (bs0 @ bs,
+         Output.flat ([from_string "("; v0]
+                      @ List.concat_map (fun a -> [from_string " "; a]) argvs
+                      @ [from_string ")"]),
+         senv1)
+    (* A supply-lifted def BODY: bindings then the value×states tuple,
+       threading from the binder names. *)
+    and supply_block inside_instance (e : exp) : Output.t =
+      St.supply_name_counter := 0;
+      let senv0 = List.map (fun (cref, pname) -> (cref, pname)) (get_supply_params ()) in
+      let (bs, v, senv') = supply_thread inside_instance senv0 e in
+      let tup = Output.flat
+        ([from_string "("; v]
+         @ List.concat_map (fun s -> [from_string ", "; from_string s]) (supply_state_names senv')
+         @ [from_string ")"]) in
+      Output.flat
+        ([from_string "\n  "]
+         @ List.concat_map (fun b -> [b; from_string ";\n  "]) bs
+         @ [tup])
+    and supply_binder_output () =
+      if not !St.supply_binder then emp else
+      Output.flat (List.map (fun (_, pname) ->
+          Output.flat [from_string " ("; from_string pname; from_string " : Nat)"])
+        (get_supply_params ()))
+    (* The threaded result-type suffix: × Nat per supply, in param order. *)
+    and supply_pair_suffix () =
+      Output.flat (List.map (fun _ -> from_string " × Nat") (get_supply_params ()))
+    (* The full threaded arrow type of a lifted def (used by the fuel
+       wrapper): its parameter types, then the result wrapped into the
+       value×supply pair. *)
+    and supply_transformed_typ_output (cd : const_descr) (npats : int) =
+      let rec split n t =
+        if n = 0 then ([], t)
+        else match t.Types.t with
+          | Types.Tfn (a, b) -> let (rest, r) = split (n - 1) b in (a :: rest, r)
+          | _ ->
+            raise (Reporting_basic.err_general true Ast.Unknown
+              "Lean backend: internal error — supply-lifted def has more parameters than its type has arrows") in
+      let (arg_ts, r) = split npats cd.const_type in
+      Output.flat
+        (List.concat_map (fun a ->
+             [from_string "("; pat_typ (C.t_to_src_t a); from_string ") -> "]) arg_ts
+         @ [from_string "(("; pat_typ (C.t_to_src_t r); from_string ")";
+            supply_pair_suffix (); from_string ")"])
 
     and funcl inside_instance i_ref_opt constraints tv_set ({term = n}, c, pats, typ_opt, skips, e) =
       let n =
@@ -2992,6 +3673,11 @@ type pat_style = FunParam | MatchArm
                 match C.exp_to_term e0 with
                   | Constant cd ->
                     let c_descr = c_env_lookup Ast.Unknown A.env.c_env cd.descr in
+                    (* supply net: threaded constants only render inside
+                       the supply transform (guards G-rel and the
+                       unliftable-context class) *)
+                    supply_net_check (Typed_ast.exp_to_locn e) cd.descr
+                      "an application outside a supply-lifted definition body (instance method, indreln rule, lemma/assert, or another context the pre-pass cannot lift)";
                     (* Check if this function is marked effectful for Lean *)
                     let is_effectful = Target.Targetset.mem Target.Target_lean c_descr.effectful in
                     (* In indreln antecedents (Prop context), == and != applied via
@@ -3117,6 +3803,11 @@ type pat_style = FunParam | MatchArm
                 ]
           | Constant const ->
               let c_descr = c_env_lookup Ast.Unknown A.env.c_env const.descr in
+              (* supply net: a bare threaded constant outside the supply
+                 transform is guard G-bare (no partial-application
+                 repair exists for a linear supply) *)
+              supply_net_check (Typed_ast.exp_to_locn e) const.descr
+                "a bare (unapplied) reference outside a supply-lifted definition body";
               let default_const_output () =
                 Output.concat emp (B.function_application_to_output (exp_to_locn e) (exp inside_instance) false e const [] (use_ascii_rep_for_const const.descr))
               in
@@ -3360,6 +4051,10 @@ type pat_style = FunParam | MatchArm
                 match C.exp_to_term c with
                   | Constant cd ->
                     begin
+                      (* supply net (G-infix leg): a threaded constant in
+                         infix position cannot be threaded *)
+                      supply_net_check (Typed_ast.exp_to_locn e) cd.descr
+                        "infix position";
                       (* In indreln antecedents (Prop context), == and != must use
                          propositional =/≠. This handles the Infix AST case;
                          the App case above handles decomposed forms like not(isEqual x y). *)
@@ -5356,6 +6051,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
       if is_library then
         St.namespace_stack := [ns_name];
       lean_reader_prepass A.env ds;
+      lean_supply_prepass A.env ds;
       (* Arc-8 S1: compute the Inhabited census + tier-2 plans in
          declaration order before emission (defs is fold_right). *)
       lean_inhabited_prepass A.env ds;
