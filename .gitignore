@@ -67,3 +67,4 @@ TODO.md
 .claude/
 _opam/
 .tmp/
+tests/nonlean-regress/.scratch/

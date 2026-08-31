@@ -40,6 +40,15 @@ build-doc:
 do-tests:
 	$(MAKE) -C tests
 
+# Non-Lean output regression net (2026-08-31 backend quality review, m2):
+# regenerates the library + tests/backends corpora for the 9 non-Lean
+# emitters and compares sha256 manifests against the committed goldens.
+# Any drift fails loudly naming the target and file. See
+# tests/nonlean-regress/run.sh for the rebaseline protocol.
+.PHONY: nonlean-regress
+nonlean-regress:
+	tests/nonlean-regress/run.sh
+
 lem_dep.tex: lem_dep.ott
 	ott -o lem_dep.tex -picky_multiple_parses true lem_dep.ott
 
