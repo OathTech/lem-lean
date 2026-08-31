@@ -54,6 +54,8 @@ lean_lib LemComprehensiveTest where
     `Test_termination, `Test_termination_auxiliary,
     `Test_stress, `Test_stress_auxiliary,
     `Test_types_advanced, `Test_types_advanced_auxiliary,
+    `Test_tuple_let_once, `Test_tuple_let_once_auxiliary,
+    `TupleLetTick,  -- hand-written m7 single-evaluation counter
     `Test_types_basic, `Test_types_basic_auxiliary,
     `Test_vectors, `Test_vectors_auxiliary,
     `TestExtraImportHelper  -- hand-written helper for extra_import test
@@ -64,3 +66,6 @@ lean_lib LemComprehensiveTest where
 -- LEAN_ABORT_ON_PANIC=1; must abort with the Incomplete Pattern message).
 lean_exe «test-failwith-panic» where
   root := `TestFailwithThreadingPanic
+
+lean_exe «test-tuple-let-once» where
+  root := `TestTupleLetOnce

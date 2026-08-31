@@ -10,7 +10,24 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-negative
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-negative
+
+# m7 single-evaluation pin (2026-08-31 backend quality review): a
+# multi-name destructuring let's RHS must run ONCE in compiled code —
+# the historical per-binding RHS duplication ran effects once per bound
+# name (and would silently fork a threaded supply). Compiled-binary
+# check: the two counter draws bound by one tuple let must be {1, 2}.
+lean-tuple-once:
+	@echo "=== m7 single-evaluation pin (tuple-let RHS runs once) ==="
+	@cd lean-test && lake build test-tuple-let-once > /dev/null
+	@out=$$(cd lean-test && ./.lake/build/bin/test-tuple-let-once 2>&1); st=$$?; \
+	if [ $$st -ne 0 ]; then \
+		echo "  FAIL (exit $$st): $$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "single-evaluation: OK"; then \
+		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
+	else \
+		echo "  OK: $$out"; \
+	fi
 
 # Panic-path pin (arc-8 audit fix, auditor A F1): head_undef's
 # incomplete-match arm must be a failwithI RAISE carrying the

@@ -2111,31 +2111,74 @@ type pat_style = FunParam | MatchArm
                 let saved_reader_binder = !St.reader_binder in
                 St.reader_binder := let_lifted;
                 Fun.protect ~finally:(fun () -> St.reader_binder := saved_reader_binder) @@ fun () ->
-                let defs = List.map (fun (_orig_name, cref) ->
+                let lean_name_of cref =
                   let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
                   let (_, renamed, _) = Typed_ast_syntax.constant_descr_to_name
                     (Target.Target_no_ident Target.Target_lean) cd in
-                  let name_str = Name.to_string renamed in
+                  Name.to_string renamed in
+                (* Arc-8 S2: [Inhabited tv] binders for a threaded
+                   Let_def-bound constant. *)
+                let thread_out_of cref =
+                  if inside_instance then emp
+                  else match lean_thread_lookup cref with
+                    | Some (_, ns) ->
+                      Output.flat (List.map (fun n ->
+                          Output.flat [from_string " [Inhabited "; from_string n; from_string "]"]) ns)
+                    | None -> emp in
+                (* m7 (2026-08-31 backend quality review): a multi-name
+                   destructuring let must NOT duplicate its RHS per bound
+                   name — OCaml evaluates the RHS once, so a duplicated
+                   effectful (or, next arc, supply-drawing) RHS is a
+                   silent divergence. Multi-name lets emit ONE private
+                   RHS def plus per-name projections; single-name lets
+                   keep the historical shape byte-for-byte. A user val
+                   colliding with the synthesized 'lemLetRhs_*' name
+                   fails loudly at Lean compile time (duplicate def). *)
+                let rhs_binding = match name_map with
+                  | [] | [_] -> None
+                  | _ ->
+                    let rhs_def_name =
+                      String.concat "" ["lemLetRhs_"; String.concat "_"
+                        (List.map (fun (_, cref) -> lean_name_of cref) name_map)] in
+                    (* the pre-pass records ONE demand for the whole
+                       Let_def, so every cref carries the same
+                       [Inhabited] set — take the first *)
+                    let rhs_thread = (match name_map with
+                      | (_, cref0) :: _ -> thread_out_of cref0
+                      | [] -> emp) in
+                    let rhs_typ = pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e)) in
+                    Some (rhs_def_name, Output.flat [
+                      from_string "\n"; effectful_attr;
+                      from_string "private def "; from_string rhs_def_name;
+                      reader_binder_output (); constraints; rhs_thread;
+                      from_string "  : "; rhs_typ;
+                      from_string " :="; exp_out
+                    ]) in
+                let body_out = match rhs_binding with
+                  | None -> exp_out
+                  | Some (rhs_def_name, _) ->
+                    (* re-inject the reader parameters when lifted: the
+                       projections carry the same binders as the RHS def *)
+                    Output.flat [from_string " "; from_string rhs_def_name;
+                                 (if let_lifted then reader_args_output () else emp)] in
+                let defs = List.map (fun (_orig_name, cref) ->
+                  let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
+                  let name_str = lean_name_of cref in
                   let var_type = pat_typ (C.t_to_src_t cd.const_type) in
                   let defn = if inside_instance then emp else from_string "def " in
-                  (* Arc-8 S2: [Inhabited tv] binders for a threaded
-                     Let_def-bound constant. *)
-                  let thread_out =
-                    if inside_instance then emp
-                    else match lean_thread_lookup cref with
-                      | Some (_, ns) ->
-                        Output.flat (List.map (fun n ->
-                            Output.flat [from_string " [Inhabited "; from_string n; from_string "]"]) ns)
-                      | None -> emp in
+                  let thread_out = thread_out_of cref in
                   Output.flat [
                     from_string "\n"; effectful_attr; defn; from_string name_str;
                     reader_binder_output (); constraints; thread_out;
                     from_string "  : "; var_type;
                     from_string " :=\n  let "; pat_out; type_out;
-                    ws sk; from_string " :="; exp_out;
+                    ws sk; from_string " :="; body_out;
                     from_string "\n  "; from_string name_str
                   ]
                 ) name_map in
+                let defs = match rhs_binding with
+                  | None -> defs
+                  | Some (_, rhs_def) -> rhs_def :: defs in
                 Output.flat (ws skips :: defs)
               else
                 ws skips ^ from_string "/- removed value definition intended for another target -/"
