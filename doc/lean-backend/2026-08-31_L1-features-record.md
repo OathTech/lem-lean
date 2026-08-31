@@ -46,8 +46,14 @@ threading ARITY recorded per liftable cref) → threaded emission.
   tuples, `supplySplit`, and the source's own control forms; no
   nondeterminism constructor exists anywhere in its emission (stated
   in the code header, DESIGN.md, and checkable by reading
-  `supply_thread` — there is no ND builder to grep). [derived check:
-  `grep -c 'ND\.' src/lean_backend.ml` = 0.]
+  `supply_thread` — there is no ND builder to grep). [derived check
+  CORRECTED by the audit (minor-5): the originally quoted
+  `grep -c 'ND\.' = 0` does not reproduce — the pattern has one FALSE
+  POSITIVE, a comment substring ("LEAN_BACKEND.ML" at :191). The
+  check as actually needed, re-run and quoted verbatim in the
+  audit-response addendum below:
+  `grep -nE '\bND\.[a-z]|msum' src/lean_backend.ml` → no matches
+  (exit 1).]
 - **Seeding**: entry points pass the initial value explicitly and
   receive the final value in the returned pair (no baked seed — the
   shape (b) the charter's entry decision consumes).
@@ -233,9 +239,12 @@ TestReaderConsumerCheck.lean) all elaborate in the suite build.
       FULL SUITE EXIT: 0
 
   incl. both panic-pin legs, the m7 and M2 pins, the three new
-  compiled phases, and 32/32 negative probes (15 pre-slice + 11
+  compiled phases, and 32/32 negative probes (15 pre-slice + 10
   supply + 5 reader_consumer + 2 fuel-budget; every row
-  `OK (rejected as declared)`).
+  `OK (rejected as declared)`). [Breakdown arithmetic CORRECTED by
+  the audit (minor-4): the original text said "11 supply", which
+  sums to 33 — the true supply count at this record's commit is 10
+  (incl. the late G-infix probe) and the stated total 32 was right.]
 - New `lean-invariance` phase (charter §6.3's non-Lean invariance
   test, built this slice): each `invariance/inv_*.lem` generated for
   ocaml/hol/isa/coq with and without its `declare {lean}` lines,
@@ -297,3 +306,126 @@ TestReaderConsumerCheck.lean) all elaborate in the suite build.
 6. Scratch hygiene: `.l1-scratch/` (probes + the 4fd4d50 comparison
    build) is ephemeral and deleted at slice end; every load-bearing
    probe output is quoted verbatim here or committed as a test.
+
+## Audit-response addendum (2026-08-31, post-a51615e)
+
+The L1 fresh audit returned MERGE-SAFE-WITH-NOTES with one MAJOR;
+ruling [AGENT, orchestrator-relayed]: fix properly (defect against
+charter O1), one audit-response pass. All items below land in this
+addendum's commit.
+
+**MAJOR-1 — short-circuit operands were threaded strictly: FIXED.**
+`supply_thread`'s Infix path hoisted right-operand draws above `&&`/
+`||`, consuming supply on the short-circuit path where the
+pre-transform Lean (macro_inline and/or) and the OCaml oracle draw
+nothing — an O1 violation. Fix: a `lean_shortcircuit_kind` classifier
+(head constants whose Lean rep is `CR_infix` `&&`/`||`) routes a
+drawing RIGHT operand to `supply_shortcircuit`, which emits the
+branch structure (`a && b ≡ if a then b else false`;
+`a || b ≡ if a then true else b`) with the right operand as a supply
+arm — draws fire only when the operand evaluates; the LEFT operand
+stays strict (both references evaluate it); a pure right operand
+keeps the old (correct) path byte-for-byte. The application-spine
+leg gets the same treatment when fully applied and a fail-closed
+error for partial/over-application. `-->` (lem `imp`, inlined to
+`(not x) || y`) rides the same path — verified.
+
+Kernel-pinned results (TestSupplyCheck.lean, all `rfl`; the auditor's
+shapes and duals, verbatim from the test file):
+
+    example : sc_and 10 false = (false, 10) := rfl   -- short-circuit: no draw
+    example : sc_and 7 true = (true, 8) := rfl       -- right draws 7 (= 7)
+    example : sc_and 10 true = (false, 11) := rfl    -- right draws 10 (≠ 7)
+    example : sc_or 10 true = (true, 10) := rfl      -- short-circuit: no draw
+    example : sc_or 7 false = (true, 8) := rfl       -- right draws 7 (= 7)
+    example : sc_or 10 false = (false, 11) := rfl    -- right draws 10 (≠ 7)
+    example : sc_both 1 () = (false, 3) := rfl       -- left draws 1 (=1), right draws 2
+    example : sc_both 5 () = (false, 6) := rfl       -- left draws 5 (≠1): ONE draw only
+    example : sc_nested 10 true false = (true, 10) := rfl   -- outer || short-circuits
+    example : sc_nested 10 false false = (false, 10) := rfl -- inner && short-circuits
+    example : sc_nested 10 false true = (false, 11) := rfl  -- inner right draws 10
+    example : sc_nested 5 false true = (true, 6) := rfl     -- inner right draws 5 (= 5)
+    example : sc_imp 10 false = (true, 10) := rfl    -- vacuous antecedent: no draw
+    example : sc_imp 7 true = (true, 8) := rfl       -- consequent draws 7 (= 7)
+    example : sc_imp 10 true = (false, 11) := rfl    -- consequent draws 10 (≠ 7)
+
+Compiled witnesses added to the draw-sequence binary (verbatim):
+
+      ok: sc_and 10 false = (false, 10) / sc_or 10 true = (true, 10) [short-circuit: no draw]
+      ok: sc_and 10 true = (false, 11) / sc_or 10 false = (false, 11) [evaluating branch draws]
+      ok: sc_both 5 () = (false, 6) [left strict, right short-circuited]
+      ok: sc_nested 10 false true = (false, 11) / sc_nested 10 false false = (false, 10) [nested]
+    supply draws: OK
+
+**minor-1 FIXED**: `lean_param_dup_check` on BOTH sorted param lists —
+two reader (or supply) constants sharing an unqualified name is now a
+generation-time error naming both full paths. Probes
+`neg_supply_dupname.lem` / `neg_reader_dupname.lem` (two-module
+reproducers).
+
+**minor-2 FIXED**: a supply val DEFINED by a live lem definition with
+no Lean target_rep (ordinary referenceable def + supplySplit'd call
+sites = one constant, two semantics) is rejected in the supply
+pre-pass; with a Lean rep the body renders as dead comment text and
+stays legal (the invariance witness's shape). Probe
+`neg_supply_defbody.lem`.
+
+**minor-3 FIXED**: `lean_fuel_budget_check` gains the rep leg (budget
+on a target_rep'd val — no wrapper is ever emitted, incl.
+reader_consumer implementations), and a new invocation-wide
+completeness leg (`lean_fuel_budget_completeness_check`, run once
+from `lean_analysis_prepass_all`, which sees every module before any
+emission) rejects budgets on constants no Fun_def defines. Probes
+`neg_fuel_budget_rep.lem` (auditor shape p8) /
+`neg_fuel_budget_speconly.lem` (p3).
+
+**minor-4 FIXED** in place above (probe-breakdown arithmetic: 10
+supply probes at a51615e, not 11; total 32 was correct).
+
+**minor-5 FIXED** in place above; the check as actually needed,
+re-run at this tree, verbatim:
+
+    $ grep -nE '\bND\.[a-z]|msum' src/lean_backend.ml
+    $ echo $?
+    1
+
+(no matches; the original pattern's single hit was the comment
+substring "LEAN_BACKEND.ML" at :191 — a false positive, corrected.)
+
+**notes (a) — unprobed guard legs, probes added**:
+`neg_supply_mix_reader.lem` / `neg_supply_mix_seed.lem` (the supply
+mix guard's reader / reader_seed legs), `neg_rc_mix_supply.lem`
+(RC-mix supply leg), `neg_rc_infixrep.lem` (RC-rep's
+unsupported-form leg — an infix rep).
+
+**C1-brief obligation (audit deviation-4 outcome), recorded for the
+orchestrator**: the C1 brief must carry a named item — an explicit
+cone check that NO supply-lifted Let_def-bound top-level VALUE sits
+in the adopted lifted cone (a drawing value binding has per-use
+state-passing semantics under the transform, vs the effectful
+mechanism's once-at-init; the census expects only function defs, and
+the check makes that expectation load-bearing).
+
+### Invariants re-verified at this addendum's tree (verbatim)
+
+    FULL SUITE EXIT: 0
+    === Generation: 47 passed, 0 failed, 0 skipped ===
+    Build completed successfully (134 jobs).
+
+41/41 negative probes (`OK (rejected as declared)` × 41: 15 pre-slice
++ 14 supply + 1 reader + 7 reader_consumer + 4 fuel-budget — derived
+breakdown); all compiled pins green (supply-draws now 12 checks);
+
+    nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+
+Pre-existing corpus emission diff vs a51615e: the FULL a51615e test
+corpus (47 sources = 94 generated files, including the supply tests
+at their a51615e state) regenerated with the a51615e-scratch lem and
+this tree's lem — `diff -r` exit 0, zero rows. NO file's emission
+changes from the short-circuit fix: the base corpus contains no draw
+under a short-circuit operand (the fix's only trigger); the sc_*
+shapes enter the corpus as NEW source in this same commit.
+lean-lib: `Build completed successfully (35 jobs).` (untouched this
+pass). ocamlyacc, verbatim: `5 rules never reduced` /
+`2 shift/reduce conflicts, 2 reduce/reduce conflicts.` (grammar
+untouched this pass).

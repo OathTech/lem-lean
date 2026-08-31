@@ -1,0 +1,9 @@
+(* EXPECT: silently inert *)
+(* audit minor-3 (spec-only leg, auditor shape p3): a fuel budget on a
+   val that no function definition defines never gets a wrapper — the
+   budget would be silently inert. *)
+open import Pervasives
+val spin : nat -> nat
+declare {lean} fuel val spin = `999`
+declare {lean} fuel val spin = 5
+let uses u = (0:nat)

@@ -44,7 +44,15 @@ def main : IO UInt32 := do
     (fuel_draws_lemFuel 1 60 2 == ([60], 61))
   let r8 ← check "two_streams 10 100 () = ((10, 100, 11), 12, 101) [independent streams]"
     (two_streams 10 100 () == ((10, 100, 11), 12, 101))
-  if r1 && r2 && r3 && r4 && r5 && r6 && r7 && r8 then
+  let r9 ← check "sc_and 10 false = (false, 10) / sc_or 10 true = (true, 10) [short-circuit: no draw]"
+    (sc_and 10 false == (false, 10) && sc_or 10 true == (true, 10))
+  let r10 ← check "sc_and 10 true = (false, 11) / sc_or 10 false = (false, 11) [evaluating branch draws]"
+    (sc_and 10 true == (false, 11) && sc_or 10 false == (false, 11))
+  let r11 ← check "sc_both 5 () = (false, 6) [left strict, right short-circuited]"
+    (sc_both 5 () == (false, 6))
+  let r12 ← check "sc_nested 10 false true = (false, 11) / sc_nested 10 false false = (false, 10) [nested]"
+    (sc_nested 10 false true == (false, 11) && sc_nested 10 false false == (false, 10))
+  if r1 && r2 && r3 && r4 && r5 && r6 && r7 && r8 && r9 && r10 && r11 && r12 then
     IO.println "supply draws: OK"
     return 0
   else

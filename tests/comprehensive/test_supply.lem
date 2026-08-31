@@ -90,6 +90,29 @@ val clausy : maybe nat -> nat
 let rec clausy (Just (x : nat)) : nat = x + tick ()
 and clausy Nothing = tick ()
 
+(* short-circuit && / || (audit MAJOR-1, charter O1): the RIGHT
+   operand is a BRANCH — its draws fire only when it evaluates
+   (a && b ≡ if a then b else false; a || b ≡ if a then true else b);
+   the LEFT operand stays strict. Pins in TestSupplyCheck.lean;
+   compiled witnesses in TestSupplyDraws.lean. *)
+val sc_and : bool -> bool
+let sc_and b = b && (tick () = 7)
+
+val sc_or : bool -> bool
+let sc_or b = b || (tick () = 7)
+
+(* draw in BOTH operands: left strict, right conditional *)
+val sc_both : unit -> bool
+let sc_both u = (tick () = 1) && (tick () = 7)
+
+(* nested: a draw under && under || *)
+val sc_nested : bool -> bool -> bool
+let sc_nested a b = a || (b && (tick () = 5))
+
+(* implication inlines to (not b) || _ and rides the same arm path *)
+val sc_imp : bool -> bool
+let sc_imp b = b --> (tick () = 7)
+
 (* === Section 4: transitive lifting + threaded calls === *)
 val uses_draw_two : nat -> nat
 let uses_draw_two x =

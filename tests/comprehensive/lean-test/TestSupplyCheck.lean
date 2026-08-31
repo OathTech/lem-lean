@@ -35,6 +35,25 @@ example : branchy 50 false = (0, 50) := rfl
 example : matchy 20 (some 5) = (25, 21) := rfl
 example : matchy 20 none = (20, 21) := rfl
 
+/- short-circuit && / || (audit MAJOR-1, charter O1): right-operand
+   draws fire ONLY on the evaluating branch — the short-circuit path
+   leaves the supply untouched; the left operand is strict -/
+example : sc_and 10 false = (false, 10) := rfl   -- short-circuit: no draw
+example : sc_and 7 true = (true, 8) := rfl       -- right draws 7 (= 7)
+example : sc_and 10 true = (false, 11) := rfl    -- right draws 10 (≠ 7)
+example : sc_or 10 true = (true, 10) := rfl      -- short-circuit: no draw
+example : sc_or 7 false = (true, 8) := rfl       -- right draws 7 (= 7)
+example : sc_or 10 false = (false, 11) := rfl    -- right draws 10 (≠ 7)
+example : sc_both 1 () = (false, 3) := rfl       -- left draws 1 (=1), right draws 2
+example : sc_both 5 () = (false, 6) := rfl       -- left draws 5 (≠1): ONE draw only
+example : sc_nested 10 true false = (true, 10) := rfl   -- outer || short-circuits
+example : sc_nested 10 false false = (false, 10) := rfl -- inner && short-circuits
+example : sc_nested 10 false true = (false, 11) := rfl  -- inner right draws 10
+example : sc_nested 5 false true = (true, 6) := rfl     -- inner right draws 5 (= 5)
+example : sc_imp 10 false = (true, 10) := rfl    -- vacuous antecedent: no draw
+example : sc_imp 7 true = (true, 8) := rfl       -- consequent draws 7 (= 7)
+example : sc_imp 10 true = (false, 11) := rfl    -- consequent draws 10 (≠ 7)
+
 /- multi-clause source (pattern-compiled to one match) threads -/
 example : clausy 20 (some 5) = (25, 21) := rfl
 example : clausy 20 none = (20, 21) := rfl

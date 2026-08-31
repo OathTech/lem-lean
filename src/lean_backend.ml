@@ -485,6 +485,24 @@ let lean_reader_consumer_check env =
       end)
     (c_env_all_consts env.c_env)
 
+(* Binder names key on the constant's UNQUALIFIED name: two reader (or
+   supply) constants with the same name in different modules would emit
+   the same binder and silently conflate (audit minor-1) — fail closed,
+   naming both. *)
+let lean_param_dup_check env (mechanism : string) (l : (Types.const_descr_ref * string) list) =
+  let rec go = function
+    | (c1, n1) :: (((c2, n2) :: _) as rest) ->
+      if n1 = n2 then begin
+        let path c =
+          Path.to_string ((c_env_lookup Ast.Unknown env.c_env c).const_binding) in
+        raise (Reporting_basic.err_general true Ast.Unknown
+          (Printf.sprintf
+            "Lean backend: two %s constants share the unqualified name behind binder '%s' (%s and %s) — their injected binders would silently conflate; rename one of them"
+            mechanism n1 (path c1) (path c2)))
+      end else go rest
+    | _ -> () in
+  go l
+
 let lean_reader_get_params env =
   match !St.reader_params_cache with
   | Some l -> l
@@ -496,6 +514,7 @@ let lean_reader_get_params env =
           else None)
         (c_env_all_consts env.c_env) in
     let l = List.sort (fun (_, a) (_, b) -> String.compare a b) l in
+    lean_param_dup_check env "reader" l;
     St.reader_params_cache := Some l; l
 
 (* Pre-pass over one module's defs: grow St.reader_lifted to a fixpoint —
@@ -532,7 +551,32 @@ let lean_fuel_budget_check env =
           raise (Reporting_basic.err_general true cd.spec_l
             (Printf.sprintf
               "Lean backend: fuel budget on val %s must be a positive integer literal (got '%s'; a zero budget would make the wrapper return the sentinel unconditionally)"
-              cname budget)))
+              cname budget));
+        (* audit minor-3 (rep leg): a target_rep'd val (incl.
+           reader_consumer implementations) renders its lem definition
+           as a block comment — no fuel wrapper is ever emitted, so
+           the budget would be silently inert. *)
+        if Target.Targetmap.apply_target cd.target_rep target <> None then
+          raise (Reporting_basic.err_general true cd.spec_l
+            (Printf.sprintf
+              "Lean backend: fuel budget on val %s, which carries a Lean target_rep (its lem definition renders as a comment and no fuel wrapper is emitted — the budget would be silently inert; budget the hand-written implementation instead)"
+              cname)))
+    (c_env_all_consts env.c_env)
+
+(* audit minor-3 (spec-only leg), run ONCE over the whole invocation
+   (lean_analysis_prepass_all sees every module before any emission):
+   a budget-marked constant that no Fun_def defines anywhere never
+   gets a fuel wrapper — the budget would be silently inert. *)
+let lean_fuel_budget_completeness_check env (fun_defined : Types.Cdset.t) =
+  let target = Target.Target_no_ident Target.Target_lean in
+  List.iter (fun cref ->
+      let cd = c_env_lookup Ast.Unknown env.c_env cref in
+      if Target.Targetmap.apply_target cd.fuel_budget target <> None
+         && not (Types.Cdset.mem cref fun_defined) then
+        raise (Reporting_basic.err_general true cd.spec_l
+          (Printf.sprintf
+            "Lean backend: fuel budget on val %s, which no let/let rec function definition defines in this invocation (no fuel wrapper is emitted for a spec-only or non-function constant — the budget would be silently inert)"
+            (Name.to_string (Path.get_name cd.const_binding)))))
     (c_env_all_consts env.c_env)
 
 let lean_reader_prepass env (ds : def list) =
@@ -653,6 +697,7 @@ let lean_supply_get_params env =
           end)
         (c_env_all_consts env.c_env) in
     let l = List.sort (fun (_, a) (_, b) -> String.compare a b) l in
+    lean_param_dup_check env "supply" l;
     St.supply_params_cache := Some l; l
 
 (* Collect import for a qualified identifier from a target_rep.
@@ -1394,7 +1439,22 @@ let lean_supply_prepass env (ds : def list) =
       | Val_def vd ->
         let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
         if Types.Cdset.exists has_lean_rep defined then acc
-        else
+        else begin
+          (* audit minor-2: a supply constant DEFINED by a live lem
+             definition (no Lean target_rep, so the def would emit as
+             an ordinary referenceable def) while its draw sites
+             rewrite to LemLib.supplySplit is one constant with two
+             semantics — fail closed. With a Lean rep the body renders
+             as a block comment (dead text) and is excluded above. *)
+          (match Types.Cdset.choose_opt
+                   (Types.Cdset.filter (lean_supply_is_supply env) defined) with
+           | Some c ->
+             let cd = c_env_lookup Ast.Unknown env.c_env c in
+             raise (Reporting_basic.err_general true cd.spec_l
+               (Printf.sprintf
+                 "Lean backend: supply val %s has a live lem definition and no Lean target_rep (the definition would emit as an ordinary def while draw sites rewrite to LemLib.supplySplit — one constant, two semantics; give it a Lean target_rep or keep it spec-only)"
+                 (Name.to_string (Path.get_name cd.const_binding))))
+           | None -> ());
           let used = (add_def_entities target false empty_used_entities d).used_consts_set in
           let arities = (match vd with
             | Fun_def (_, _, _, funcls) ->
@@ -1407,6 +1467,7 @@ let lean_supply_prepass env (ds : def list) =
               List.map (fun (_, c) -> (c, 0)) name_map
             | Let_inline _ -> []) in
           (defined, used, arities) :: acc
+        end
       | _ -> acc in
     let infos = List.rev (List.fold_left def_infos [] ds) in
     let changed = ref true in
@@ -1553,6 +1614,22 @@ let lean_analysis_prepass_all env (mods : checked_module list) =
       lean_inhabited_prepass env ds;
       lean_failwith_thread_prepass env ds)
     mods;
+  (* audit minor-3 (spec-only leg): collect every Fun_def-defined cref
+     of the whole invocation, then require each fuel-budgeted constant
+     to be among them (see lean_fuel_budget_completeness_check). *)
+  let target = Target.Target_no_ident Target.Target_lean in
+  let rec fun_defined_of acc (((d_aux, _), _, _) as d : def) =
+    match d_aux with
+    | Module (_, _, _, _, _, inner_ds, _) -> List.fold_left fun_defined_of acc inner_ds
+    | Val_def (Fun_def _) ->
+      Types.Cdset.union acc (add_def_entities target true empty_used_entities d).used_consts_set
+    | _ -> acc in
+  let fun_defined =
+    List.fold_left (fun acc m ->
+        let (ds, _) = m.typed_ast in
+        List.fold_left fun_defined_of acc ds)
+      Types.Cdset.empty mods in
+  lean_fuel_budget_completeness_check env fun_defined;
   St.current_module_name := saved
 
 let wrap_lean_comment x = Ulib.Text.(^^^) (Ulib.Text.(^^^) (r"/- ") x) (r" -/")
@@ -1942,6 +2019,26 @@ type pat_style = FunParam | MatchArm
       List.exists (fun cref ->
           is_supply_cref cref || Types.Cdset.mem cref !St.supply_lifted)
         ue.used_consts
+
+    (* Short-circuit heads (audit MAJOR-1, charter O1): lem constants
+       whose Lean rep is the infix Bool operator && / ||. Lean's
+       macro_inline and/or evaluate their RIGHT operand only on the
+       non-short-circuit path, so the supply transform must thread a
+       drawing right operand as a BRANCH ARM (a && b ≡ if a then b
+       else false; a || b ≡ if a then true else b) — hoisting its
+       draws above the test would consume supply the pre-transform
+       code (and the OCaml oracle) does not. The LEFT operand stays
+       strict (both references evaluate it). *)
+    let lean_shortcircuit_kind (cref : Types.const_descr_ref) : string option =
+      let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
+      match Target.Targetmap.apply_target cd.target_rep
+              (Target.Target_no_ident Target.Target_lean) with
+      | Some (CR_infix (_, _, _, i)) ->
+        (match Ident.to_string i with
+         | "&&" -> Some "&&"
+         | "||" -> Some "||"
+         | _ -> None)
+      | _ -> None
 
     (* THE FAIL-CLOSED SUPPLY NET: ordinary (non-threaded) emission must
        never render a supply constant or a supply-lifted definition —
@@ -3439,6 +3536,27 @@ type pat_style = FunParam | MatchArm
         ([from_string "("]
          @ List.concat_map (fun b -> [b; from_string ";\n      "]) bs
          @ [tup; from_string ")"])
+    (* Short-circuit threading (audit MAJOR-1 fix): left operand
+       strict, right operand as a branch arm of the equivalent if —
+       draws in the right operand fire only when it evaluates. *)
+    and supply_shortcircuit inside_instance senv (kind : string) le re =
+      let (bs1, vl, senv1) = supply_thread inside_instance senv le in
+      let arm_r = supply_arm inside_instance senv1 re in
+      let const_arm b =
+        Output.flat
+          ([from_string "("; from_string b]
+           @ List.concat_map (fun s -> [from_string ", "; from_string s])
+               (supply_state_names senv1)
+           @ [from_string ")"]) in
+      let rhs =
+        if kind = "&&" then
+          Output.flat [from_string "if "; vl; from_string " then "; arm_r;
+                       from_string " else "; const_arm "false"]
+        else
+          Output.flat [from_string "if "; vl; from_string " then "; const_arm "true";
+                       from_string " else "; arm_r] in
+      let (bind, v, senv') = supply_join senv1 rhs in
+      (bs1 @ [bind], v, senv')
     and supply_thread_list inside_instance senv es =
       let (bs_rev, vs_rev, senv') =
         List.fold_left (fun (bs, vs, senv) e ->
@@ -3552,6 +3670,15 @@ type pat_style = FunParam | MatchArm
            err "Lean backend: supply constant or supply-lifted definition used in infix position (unsupported; use prefix application so the call can be threaded)"
          | Constant cd when is_consumer_cref cd.descr ->
            err "Lean backend: reader_consumer used in infix position (unsupported: the leading reader arguments cannot be injected around an infix operator — use prefix application)"
+         | Constant cd when lean_shortcircuit_kind cd.descr <> None
+                            && exp_needs_supply re ->
+           (* audit MAJOR-1 / charter O1: never hoist right-operand
+              draws above a short-circuit test *)
+           let kind = (match lean_shortcircuit_kind cd.descr with
+             | Some k -> k
+             | None ->
+               err "Lean backend: internal error — short-circuit head lost its classification") in
+           supply_shortcircuit inside_instance senv kind le re
          | Constant cd ->
            let (bs1, vl, senv1) = supply_thread inside_instance senv le in
            let (bs2, vr, senv2) = supply_thread inside_instance senv1 re in
@@ -3643,6 +3770,22 @@ type pat_style = FunParam | MatchArm
            @ List.concat_map (fun a -> [from_string " "; a]) argvs) in
         let (bind, v, senv2) = supply_join senv1 call in
         (bs @ [bind], v, senv2)
+      | Constant cd when (match lean_shortcircuit_kind cd.descr, args with
+                          | Some _, [_; b] -> exp_needs_supply b
+                          | Some _, _ -> List.exists exp_needs_supply args
+                          | None, _ -> false) ->
+        (* short-circuit operator reached as an application spine
+           (audit MAJOR-1): same arm-threading as the Infix leg when
+           fully applied; anything else fails closed *)
+        (match args with
+         | [a; b] ->
+           let kind = (match lean_shortcircuit_kind cd.descr with
+             | Some k -> k
+             | None ->
+               err "Lean backend: internal error — short-circuit head lost its classification") in
+           supply_shortcircuit inside_instance senv kind a b
+         | _ ->
+           err "Lean backend: supply draw in an argument of a partially or over-applied short-circuit operator (&& / ||) (unsupported; apply the operator to exactly two operands)")
       | Constant cd when is_consumer_cref cd.descr ->
         (* reader_consumer head with supply-using arguments: hoist the
            arguments, render the head through the bare-Constant
