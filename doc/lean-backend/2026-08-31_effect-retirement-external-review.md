@@ -162,3 +162,95 @@ Review responses: file against this document (this repo, branch
 `arc/effect-retirement`) or relay via the operator; the cerberus-side
 note is the authoritative technical record and will absorb any resulting
 amendments through its established review process.
+
+---
+
+# Consumer review: refined-cerberus / cerberus-heaplang
+
+2026-08-31, [AGENT: refined-cerberus orchestrator], written in-place
+per [USER 2026-08-31] instruction ("you can write into the same note
+as a suffix"). Left uncommitted — your repo, your commit discipline.
+Consumer context: cerberus-heaplang holds machine-checked theorems
+whose statements quantify over your engine's production entry
+(`initial_driver_state`, Driver.lean:435) and whose certification
+proofs UNFOLD engine internals (`step_ctx`, the driver round
+functions at Driver.lean:273-351, `loadM`/`storeM`/`allocateObject`,
+`finalize`/`Driver.hack`). `runEffectful` appears in our cones today
+in exactly one way: through the statement, via
+`initial_core_run_state`'s `sym_supply` seam (Core_run_aux.lean:395)
+— never through a proof step; the fragment provably never reads the
+seam. Our audit holds it in a module-scoped boundary (only 2 of 12
+modules may carry it), plant-tested both directions.
+
+## A1 — contract sufficiency: YES, and it is exactly our gate
+
+The universal form (every constant's cone ⊆ the classical trio) is
+precisely our in-build sweep's allowlist; stronger than we strictly
+need and exactly what we want. At the adoption pin our cleanup is
+mechanical: boundary deletion + pin re-baselines. One shape question
+whose answer we consume STATEMENT-VISIBLY: does the retired entry
+land as (a) a pure closed constructor with a seeded supply value, or
+(b) a supply-PARAMETERIZED constructor? Both are fine — under (b)
+our theorems gain a ∀-supply quantifier, which is free for us
+(never-reads-the-seam is already proved) and arguably strengthens
+the exported statements. Please state which in the design record so
+our re-export is a planned edit, not a discovery.
+
+## A2 — survivors: no re-prioritization needed; one pattern note
+
+None of the four sits inside definitions our proofs unfold in a way
+that blocks us. `digest`-as-kernel-checked-opaque (the with_tagDefs
+pattern) is a house-proven shape — no objection. The enum registry:
+our current fragment and the planned while-arc (authored Core,
+scalar ints) never consume impl enum choices — do not move it up on
+our account. Note on the no-op/config refs (CerbUtils, CerbGlobal):
+these sit ON or NEAR paths we unfold (`current_execution_mode` is
+handled in our proofs by opaque case-split today; debug refs adjoin
+the stepping path). Their retirement/parameterization likely
+SIMPLIFIES our collapse proofs — welcome — but is re-prove work
+either way (see A3).
+
+## A3 — timing: no interim guarantee needed; one deliverable requested
+
+We consume at the pin dance like any pin bump; our content-based
+priming guard will trip on C1/C2's real semantics changes, which is
+it working as designed — we then re-pin deliberately and re-certify.
+The request: at the adoption pin, ship (or point us at) the LEAN-SIDE
+analog of your OCaml-text manifest — the list of changed/renamed
+definitions in the exec cone, specifically anything in: the entry
+constructors (`initial_driver_state`/`initial_core_run_state`), the
+driver round path (Driver.lean:273-351 today), `step_ctx`'s cone,
+the memory ops, and `finalize`/`hack`. Our re-certification is then
+scoped, not discovered. Two adjacent flags:
+1. **Fuel budgets**: our exported statements carry fuel side
+   conditions against `lemDefaultFuel`, and our size accounting
+   tracks the current fuel plumbing. If per-declaration budgets
+   change the default-fuel semantics of already-generated functions
+   (rather than being opt-in annotation only), that is
+   statement-visible for us — please classify.
+2. **tagDefs plumbing**: our production theorems pin `drive`'s
+   tagDefs argument (`fmapEmpty`, a registered seam with an rfl
+   discharge). If reader_consumer/table-deletion changes the
+   signature of `drive` or the entry, we re-export once — again,
+   just tell us the final signature.
+
+## A4 — consumer assumptions worth making explicit non-goals
+
+1. **Entry purity**: the production entry must remain a pure,
+   termination-checked, CLOSED constructor (modulo the supply
+   parameter under shape (b)) — we quantify over it verbatim; any
+   IO-flavored wrapper reintroduces the class of thing this arc
+   deletes.
+2. **Sequential-path determinism**: our production equation rests on
+   proved singleton step lists + `runND` collapse on the positive
+   sequential path. Supply threading is deterministic state and
+   should not add ND branch points — please record that as an
+   explicit non-goal so a future reviewer can check it cheaply.
+3. **Symbol-numbering shifts** (your Q2 and the one order-moved
+   site): no objection from us — our theorems are over authored
+   Core with directly-constructed symbols; elaboration-side
+   numbering is invisible to them today.
+
+Net: RATIFY from the consumer seat, with the A1 shape question and
+the A3 deliverable as the two asks. Filed also in our repo's records
+at the next slice commit.
