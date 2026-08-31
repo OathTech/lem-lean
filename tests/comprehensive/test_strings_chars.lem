@@ -58,3 +58,21 @@ assert esc_newline_len : stringLength esc_newline = (11:nat)
 assert esc_tab_len     : stringLength esc_tab = (11:nat)
 assert esc_quote_len   : stringLength esc_quote = (12:nat)
 assert esc_bs_len      : stringLength esc_backslash = (10:nat)
+
+(* === Char escape sequences (M3, 2026-08-31 backend quality review) === *)
+(* Char.escaped's decimal escapes were invalid Lean; the backend now
+   emits \xHH for non-printable/non-ASCII chars. The review's
+   reproducer #'\200' plus corners; the decimal-vs-hex cross-notation
+   equalities catch any renderer that mishandles one of the routes. *)
+let ch_200  = #'\200'
+let ch_hex  = #'\xC8'
+let ch_nul  = #'\000'
+let ch_soh  = #'\001'
+let ch_127  = #'\127'
+let ch_255  = #'\255'
+let ch_ff   = #'\xFF'
+
+assert ch_200_hex_ok : (ch_200 = ch_hex)
+assert ch_255_hex_ok : (ch_255 = ch_ff)
+assert ch_nul_ne_soh : (not (ch_nul = ch_soh))
+assert ch_200_ne_127 : (not (ch_200 = ch_127))

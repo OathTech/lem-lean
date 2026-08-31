@@ -98,6 +98,14 @@ let print_and_fail l s =
   raise (Reporting_basic.err_general true l s)
 ;;
 
+(* String-literal escaping for Lean output. Bytes 0x80-0xFF pass
+   through RAW, deliberately: lem's lexer only admits UTF-8 source, so
+   such bytes arrive here exclusively as parts of multi-byte UTF-8
+   sequences, and Lean source is UTF-8 — escaping the bytes
+   individually as \xHH would DECODE-SHIFT the text (Lean's \xHH is a
+   Unicode scalar, not a byte). Control bytes below 0x20, which Lean
+   literals cannot carry raw reliably, are hex-escaped. Paired with
+   lean_char_escape below (M3, 2026-08-31 backend quality review). *)
 let lean_string_escape s =
   let buf = Buffer.create (String.length s) in
   String.iter (fun c -> match c with
@@ -105,11 +113,30 @@ let lean_string_escape s =
     | '"' -> Buffer.add_string buf "\\\""
     | '\n' -> Buffer.add_string buf "\\n"
     | '\t' -> Buffer.add_string buf "\\t"
-    | '\000' -> Buffer.add_string buf "\\x00"
     | '\r' -> Buffer.add_string buf "\\r"
+    | c when Char.code c < 0x20 -> Buffer.add_string buf (Printf.sprintf "\\x%02x" (Char.code c))
     | c -> Buffer.add_char buf c
   ) s;
   Buffer.contents buf
+;;
+
+(* Char-literal escaping for Lean output (M3): OCaml's Char.escaped
+   emits DECIMAL escapes ('\200'), which are invalid Lean. Mirror
+   Char.escaped for the cases it got right (ASCII printables +
+   named controls) and emit Lean hex escapes for the rest. A lem char
+   is a byte; bytes 0x80-0xFF map to the corresponding Unicode scalar
+   (the latin1 embedding, '\xc8' = U+00C8) — the same convention as
+   Ulib.Text.of_latin1 on the OCaml side of this backend. *)
+let lean_char_escape c =
+  match c with
+  | '\\' -> "\\\\"
+  | '\'' -> "\\'"
+  | '"' -> "\\\""
+  | '\n' -> "\\n"
+  | '\t' -> "\\t"
+  | '\r' -> "\\r"
+  | c when Char.code c >= 0x20 && Char.code c < 0x7f -> String.make 1 c
+  | c -> Printf.sprintf "\\x%02x" (Char.code c)
 ;;
 
 (* Lean 4 syntax keywords that cannot be used as bare identifiers.
@@ -3530,7 +3557,9 @@ type pat_style = FunParam | MatchArm
             ws s; from_string "true"
           ]
         | L_char (s, c, _) ->
-          let c = from_string (Printf.sprintf "'%s'" (Char.escaped c)) in
+          (* M3: Char.escaped emits decimal escapes — invalid Lean.
+             lean_char_escape emits \xHH for non-printable/non-ASCII. *)
+          let c = from_string (Printf.sprintf "'%s'" (lean_char_escape c)) in
           Output.flat [
             ws s; c
           ]
