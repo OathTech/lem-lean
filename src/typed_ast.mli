@@ -304,6 +304,15 @@ and const_descr =
         the ordinary fixpoint, and the hand-written target
         representation declares the matching leading parameters
         explicitly. Lean backend only. *)
+
+    fuel_budget : string Target.Targetmap.t;
+    (** Per-declaration fuel BUDGET (declare {targets} fuel val f = N,
+        numeric form): the fuel-wrapper's budget literal, replacing
+        the library default (lemDefaultFuel) for exactly this
+        declaration. OPT-IN ONLY: declarations without a budget keep
+        lemDefaultFuel semantics byte-for-byte. Requires the fuel
+        SENTINEL declare (the backtick form) on the same val. Lean
+        backend only. *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -556,6 +565,7 @@ type declare_def =  (** Declarations *)
  | Decl_reader_seed           of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_supply                of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_reader_consumer       of lskips * targets_opt * lskips * lskips * const_descr_ref id
+ | Decl_fuel_budget           of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

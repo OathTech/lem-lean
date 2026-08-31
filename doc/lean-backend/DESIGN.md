@@ -42,6 +42,8 @@ the emission is a total, kernel-transparent pair:
 def fuel_countdown_lemFuel (lemFuel : Nat) (n : Nat) : Nat :=
   match lemFuel with ...     -- structural recursion on the fuel
 def fuel_countdown : Nat → Nat := fuel_countdown_lemFuel lemDefaultFuel
+-- with 'declare {lean} fuel val fuel_countdown = 500' (numeric form):
+-- def fuel_countdown : Nat → Nat := fuel_countdown_lemFuel 500
 ```
 
 ## Load-bearing design choices
@@ -57,7 +59,17 @@ fuel (`lemDefaultFuel = 10^6` — a bound on recursion *depth* at the
 declared points, never on value size). At zero fuel the worker
 returns the declared sentinel expression; the convention is
 `fuelExhausted <witness>`, a loud panic, so an inadequate budget is
-a visible failure rather than a silent wrong answer. Cerberus
+a visible failure rather than a silent wrong answer. A
+PER-DECLARATION BUDGET (the numeric declare form,
+`declare {lean} fuel val f = N`, alongside the sentinel form)
+replaces `lemDefaultFuel` in `f`'s wrapper with the literal `N` —
+strictly OPT-IN: declarations without a budget keep `lemDefaultFuel`
+semantics byte-for-byte (the effect-retirement charter's
+consumer-ratified constraint, §8.3), and the compiled suite pins both
+the budgeted cut and the exact 10^6 default boundary of an
+unannotated sibling (`tests/comprehensive/test_fuel_budget.lem`,
+phase `lean-fuel-budget`). A budget without a sentinel, and a
+non-positive budget, are fail-closed generation-time errors. Cerberus
 applies fuel declares across its entire execution path and checks
 that slice's totality in its own build.
 
@@ -219,6 +231,7 @@ unaffected:
 | `declare {lean} skip_instances type t` | suppress all instance generation for `t` (pair with hand-written instances) |
 | `declare {lean} rename module = Name` | rename the generated module |
 | ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total fuel-indexed worker (returning `sentinel` at zero fuel) + a wrapper at the library default fuel |
+| `declare {lean} fuel val f = N` | per-declaration fuel BUDGET: `f`'s wrapper uses the literal `N` instead of `lemDefaultFuel` (opt-in; requires the sentinel declare on the same val) |
 | `declare {lean} effectful val f` | wrap `f`'s call sites in `runEffectful` thunks so the optimizer cannot merge them; `f`'s target rep must return `BaseIO α` |
 | `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
 | `declare {lean} reader_seed val f` | do not lift `f`; its first argument supplies the reader value to lifted callees in its body |

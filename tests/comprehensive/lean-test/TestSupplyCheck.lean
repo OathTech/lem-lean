@@ -72,6 +72,13 @@ example : uses_fuel_draws 60 2 = ([60, 61, 62], 63) := rfl
    the exhaustion point (one draw happened before fuel ran out) -/
 example : fuel_draws_lemFuel 1 60 2 = ([60], 61) := rfl
 
+/- fuel BUDGET × supply: wrapper at budget 3 — within budget identical
+   to the default-fuel sibling; beyond it the cut returns the partial
+   draw list with the supply at the cut point -/
+example : Nat → Nat → List Nat × Nat := fuel_draws_b
+example : fuel_draws_b 60 2 = ([60, 61], 62) := rfl
+example : fuel_draws_b 60 5 = ([60, 61, 62], 63) := rfl
+
 /- === multi-supply ordering (test_supply_multi.lem): binders sorted
    by name (tick before tock); each draw advances only its own
    stream; result states in the same order === -/

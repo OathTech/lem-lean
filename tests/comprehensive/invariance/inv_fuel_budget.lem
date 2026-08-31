@@ -1,0 +1,14 @@
+open import Pervasives
+
+(* Non-Lean invariance witness for fuel sentinels and per-declaration
+   fuel budgets (effect-retirement charter §6.1, §8.3): both fuel
+   declare forms must be exact no-ops for the other backends (see
+   inv_supply.lem for the harness contract). *)
+
+val bspin : nat -> nat
+let rec bspin n = if n = 0 then 0 else bspin (n - 1)
+declare {lean} fuel val bspin = `999`
+declare {lean} fuel val bspin = 5
+
+val uses_bspin : nat -> nat
+let uses_bspin k = bspin k + 1

@@ -10,7 +10,24 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-div-parity lean-supply-draws lean-reader-consumer lean-negative lean-invariance
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-div-parity lean-supply-draws lean-reader-consumer lean-fuel-budget lean-negative lean-invariance
+
+# Per-declaration fuel-budget compiled behavioral test
+# (effect-retirement L1, charter §8.3): the budgeted declaration cuts
+# at exactly its budget while the UNANNOTATED sibling runs to the
+# exact lemDefaultFuel (10^6) boundary — the opt-in constraint
+# witnessed in a real binary.
+lean-fuel-budget:
+	@echo "=== Per-declaration fuel budget pin (compiled) ==="
+	@cd lean-test && lake build test-fuel-budget > /dev/null
+	@out=$$(cd lean-test && ./.lake/build/bin/test-fuel-budget 2>&1); st=$$?; \
+	if [ $$st -ne 0 ]; then \
+		echo "  FAIL (exit $$st):"; echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "fuel budget: OK"; then \
+		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
+	else \
+		echo "  OK: budgeted cut at 5; unannotated at the exact lemDefaultFuel boundary"; \
+	fi
 
 # reader_consumer compiled behavioral test (effect-retirement L1,
 # charter §4.2): consumer call sites must receive the reader value in

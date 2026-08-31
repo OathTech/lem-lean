@@ -1,0 +1,8 @@
+(* EXPECT: must be a positive integer literal *)
+(* Fuel-budget guard (charter §8.3): a zero budget makes the wrapper
+   the constant sentinel — rejected fail-closed. *)
+open import Pervasives
+val spin : nat -> nat
+let rec spin n = if n = 0 then 0 else spin (n - 1)
+declare {lean} fuel val spin = `999`
+declare {lean} fuel val spin = 0

@@ -1,0 +1,8 @@
+(* EXPECT: without a fuel sentinel *)
+(* Fuel-budget guard (charter §8.3): the numeric budget form requires
+   the backtick sentinel declare on the same val — without it the
+   budget would silently do nothing. *)
+open import Pervasives
+val spin : nat -> nat
+let rec spin n = if n = 0 then 0 else spin (n - 1)
+declare {lean} fuel val spin = 5

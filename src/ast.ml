@@ -513,6 +513,7 @@ declare_def =  (* declarations *)
  | Decl_reader_seed_decl of terminal * targets option * terminal * terminal * id
  | Decl_supply_decl of terminal * targets option * terminal * terminal * id
  | Decl_reader_consumer_decl of terminal * targets option * terminal * terminal * id
+ | Decl_fuel_budget_decl of terminal * targets option * terminal * terminal * id * terminal * (Z.t * string)
 
 
 type

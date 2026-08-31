@@ -507,8 +507,37 @@ let lean_reader_get_params env =
    emission. Nested modules collect at Val_def granularity (the arc-2
    audit fix; this comment previously still claimed the pre-fix coarse
    all-defs-together lifting — corrected arc-14 S2 B6, be:N3). *)
+(* Per-declaration fuel-budget guards (effect-retirement L1, charter
+   §8.3): a numeric 'declare {lean} fuel val f = N' replaces
+   lemDefaultFuel in f's WRAPPER only — strictly opt-in (unannotated
+   declarations keep lemDefaultFuel byte-for-byte). Fail-closed sweep,
+   run at every pre-pass entry for every budget-marked constant even if
+   unused: a budget requires the fuel SENTINEL declare (without it the
+   budget would silently do nothing), and must be a positive literal
+   (a zero budget makes the wrapper the constant sentinel). *)
+let lean_fuel_budget_check env =
+  let target = Target.Target_no_ident Target.Target_lean in
+  List.iter (fun cref ->
+      let cd = c_env_lookup Ast.Unknown env.c_env cref in
+      match Target.Targetmap.apply_target cd.fuel_budget target with
+      | None -> ()
+      | Some budget ->
+        let cname = Name.to_string (Path.get_name cd.const_binding) in
+        if Target.Targetmap.apply_target cd.fuel_sentinel target = None then
+          raise (Reporting_basic.err_general true cd.spec_l
+            (Printf.sprintf
+              "Lean backend: fuel budget on val %s without a fuel sentinel (a numeric 'declare {lean} fuel val %s = N' sets the wrapper's budget and requires the backtick sentinel declare on the same val — the sentinel defines the exhaustion value)"
+              cname cname));
+        if (try int_of_string budget <= 0 with _ -> true) then
+          raise (Reporting_basic.err_general true cd.spec_l
+            (Printf.sprintf
+              "Lean backend: fuel budget on val %s must be a positive integer literal (got '%s'; a zero budget would make the wrapper return the sentinel unconditionally)"
+              cname budget)))
+    (c_env_all_consts env.c_env)
+
 let lean_reader_prepass env (ds : def list) =
   lean_reader_consumer_check env;
+  lean_fuel_budget_check env;
   if lean_reader_get_params env <> [] then begin
     let target = Target.Target_no_ident Target.Target_lean in
     (* Collect (defined, used) pairs at Val_def granularity, recursing into
@@ -1944,6 +1973,13 @@ type pat_style = FunParam | MatchArm
       let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
       Target.Targetmap.apply_target cd.fuel_sentinel (Target.Target_no_ident Target.Target_lean)
 
+    (* Per-declaration fuel budget (numeric declare form): the wrapper's
+       budget literal, replacing lemDefaultFuel for exactly this
+       declaration. OPT-IN: None = lemDefaultFuel, byte-for-byte. *)
+    let fuel_budget_for cref =
+      let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
+      Target.Targetmap.apply_target cd.fuel_budget (Target.Target_no_ident Target.Target_lean)
+
     (* Ground-site alternative head (declare {lean} ground_rep val f =
        `Ident`): emitted instead of the constant at applications whose
        result type is syntactically ground. See the failwith special case
@@ -2981,6 +3017,14 @@ type pat_style = FunParam | MatchArm
                                  | (_, _, pats, _, _, _) :: _ -> List.length pats
                                  | [] -> 0)
                             else pat_typ (C.t_to_src_t cd.const_type) in
+                          (* Per-declaration budget (opt-in): an
+                             unannotated declaration emits the literal
+                             ' lemDefaultFuel' unchanged, byte-for-byte
+                             — the consumer-ratified charter constraint
+                             (§8.3). *)
+                          let budget_out = match fuel_budget_for c with
+                            | Some b -> from_string (String.concat "" [" "; b])
+                            | None -> from_string " lemDefaultFuel" in
                           let wrapper = Output.flat [
                             from_string "\n\n"; attr_for g;
                             from_string "def "; from_string base_name; tv_out; cons_out;
@@ -2988,7 +3032,7 @@ type pat_style = FunParam | MatchArm
                             from_string " : "; reader_arrows; supply_arrows;
                             result_typ_out;
                             from_string " := "; from_string worker;
-                            from_string " lemDefaultFuel\n"] in
+                            budget_out; from_string "\n"] in
                           (* Wrapper is returned separately: in a mutual
                              block it must be emitted AFTER 'end', or it
                              would join the recursion set (arc 3, B2). *)

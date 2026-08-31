@@ -1052,6 +1052,8 @@ declaration :
     { Decl_reader_decl($1, $2, $3, $4, $5) }
   | Declare targets_opt Fuel Val id Eq BacktickString
     { Decl_fuel_decl($1, $2, $3, $4, $5, fst $6, $7) }
+  | Declare targets_opt Fuel Val id Eq Num
+    { Decl_fuel_budget_decl($1, $2, $3, $4, $5, fst $6, snd $7) }
   | Declare targets_opt GroundRep Val id Eq BacktickString
     { Decl_ground_rep_decl($1, $2, $3, $4, $5, fst $6, $7) }
   | Declare targets_opt ReaderSeed Val id

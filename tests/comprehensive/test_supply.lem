@@ -150,3 +150,12 @@ declare {lean} fuel val fuel_draws = `[]`
 
 val uses_fuel_draws : nat -> list nat
 let uses_fuel_draws k = fuel_draws (k + 1)
+
+(* fuel BUDGET × supply (charter §8.3 composition): the wrapper's
+   budget literal changes; threading is untouched — exhaustion
+   mid-stream returns the partial result with the supply at the cut *)
+val fuel_draws_b : nat -> list nat
+let rec fuel_draws_b n =
+  if n = 0 then [] else tick () :: fuel_draws_b (n - 1)
+declare {lean} fuel val fuel_draws_b = `[]`
+declare {lean} fuel val fuel_draws_b = 3
