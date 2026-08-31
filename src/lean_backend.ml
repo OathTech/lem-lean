@@ -1105,6 +1105,26 @@ let lean_thread_demand env (where_ : string) (sc : thread_scan) : string list =
     sc.th_refs;
   !dem
 
+(* Clause grouping, SHARED between the failwith-thread pre-pass and the
+   Fun_def emission path (and any future pre-pass that walks def
+   groups — the supply pre-pass will be its third consumer): group a
+   Fun_def's clauses by their defined constant (cref), preserving
+   first-appearance order. Lem allows interleaved clauses of a rec-and
+   block; Lean's equation compiler requires all clauses of one function
+   in sequence. Keyed by cref, never by name string — two traversals
+   grouping under different keys are a drift trap (2026-08-31 backend
+   quality review, notes). *)
+let lean_group_funcls (funcls : funcl_aux list)
+    : (const_descr_ref * funcl_aux list) list =
+  let order = ref [] in
+  let tbl = Hashtbl.create 8 in
+  List.iter (fun (((_, c, _, _, _, _) as fcl) : funcl_aux) ->
+      (if not (Hashtbl.mem tbl c) then order := c :: !order);
+      let existing = match Hashtbl.find_opt tbl c with Some v -> v | None -> [] in
+      Hashtbl.replace tbl c (existing @ [fcl]))
+    funcls;
+  List.map (fun c -> (c, Hashtbl.find tbl c)) (List.rev !order)
+
 (* Pre-pass (runs after lean_inhabited_prepass, which populates the
    instance census this analysis reads): compute the threaded-def map to
    a fixpoint over this module's Val_defs, then guard-sweep Instance
@@ -1124,18 +1144,11 @@ let lean_failwith_thread_prepass env (ds : def list) =
       else []
     | Fun_def (_, _, targets, funcls) ->
       if in_lean targets then begin
-        (* group clauses by constant, preserving order (the emission's
-           grouping rule) *)
-        let order = ref [] in
-        let tbl = Hashtbl.create 8 in
-        List.iter (fun ((_, c, _, _, _, e) : funcl_aux) ->
-            (if not (Hashtbl.mem tbl c) then order := c :: !order);
-            let existing = match Hashtbl.find_opt tbl c with Some v -> v | None -> [] in
-            Hashtbl.replace tbl c (existing @ [e]))
-          (Seplist.to_list funcls);
-        List.map (fun c ->
-            { tu_crefs = [c]; tu_scan = scan_of_exps (Hashtbl.find tbl c); tu_loc = l })
-          (List.rev !order)
+        (* shared cref-keyed clause grouping (the emission's rule) *)
+        List.map (fun (c, fcls) ->
+            let es = List.map (fun ((_, _, _, _, _, e) : funcl_aux) -> e) fcls in
+            { tu_crefs = [c]; tu_scan = scan_of_exps es; tu_loc = l })
+          (lean_group_funcls (Seplist.to_list funcls))
       end else []
     | Let_inline _ -> []  (* expanded at call sites by the inline macro *)
   in
@@ -2130,23 +2143,12 @@ type pat_style = FunParam | MatchArm
               if in_target targets then
                 let skips' = match rec_flag with FR_non_rec -> None | FR_rec sk -> sk in
                 let funcls = Seplist.to_list funcl_skips_seplist in
-                (* Group clauses by function name, preserving definition order.
-                   Lem allows interleaving, but Lean's equation compiler requires
-                   all clauses for a function in sequence. Multi-clause groups
-                   render as Lean 4 pattern-matching equations. *)
-                let get_name ({term = n}, _, _, _, _, _) = Name.to_string (Name.strip_lskip n) in
-                let groups =
-                  let order = ref [] in
-                  let tbl = Hashtbl.create 8 in
-                  List.iter (fun fcl ->
-                    let key = get_name fcl in
-                    (if not (Hashtbl.mem tbl key) then
-                      order := key :: !order);
-                    let existing = match Hashtbl.find_opt tbl key with Some v -> v | None -> [] in
-                    Hashtbl.replace tbl key (existing @ [fcl])
-                  ) funcls;
-                  List.map (fun key -> Hashtbl.find tbl key) (List.rev !order)
-                in
+                (* Group clauses by their defined constant, preserving
+                   definition order — the shared cref-keyed grouping
+                   (lean_group_funcls), same traversal as the
+                   failwith-thread pre-pass. Multi-clause groups render
+                   as Lean 4 pattern-matching equations. *)
+                let groups = List.map snd (lean_group_funcls funcls) in
                 let num_functions = List.length groups in
                 (* Acyclic de-mutualization (arc 3): a 'let rec ... and ...'
                    block whose call graph is a DAG (ignoring self-loops) is
