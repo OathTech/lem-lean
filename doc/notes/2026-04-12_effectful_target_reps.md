@@ -1,5 +1,7 @@
 > **HISTORIC (superseded).** This note diagnoses the CSE problem with effectful target reps and surveys the design space. The shipped design refines its Option 3: `declare {lean} effectful val` marks the rep (whose implementation returns `BaseIO α`), and call sites cross back to pure types through the single library axiom `LemLib.runEffectful` rather than per-site `unsafeBaseIO` — see doc/lean-backend/DESIGN.md. Preserved verbatim below.
 
+> **SUPERSEDED AGAIN (2026-09-01, effect-retirement arc L2).** The "shipped design" named above was itself retired: the `runEffectful` axiom and the `declare {lean} effectful` call-site wrap were DELETED from LemLib and the backend; the Lean backend now refuses `{lean} effectful` fail-closed, and effectful counters are threaded as explicit state by the supply lifting (`declare {lean} supply val`, `LemLib.supplySplit`). Record: `doc/lean-backend/2026-09-01_L2-deletion-record.md`; current design: `doc/lean-backend/DESIGN.md`.
+
 # Effectful target_rep functions
 
 ## Problem

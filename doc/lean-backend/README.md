@@ -57,7 +57,8 @@ the negative/panic test legs — is `tests/comprehensive/`:
   the cerberus-lean project runs its generated-Lean
   semantics differentially against the OCaml implementation across
   thousands-of-programs corpora — see that repository's
-  `lean_frontend/PROOF.md` and `DESIGN.md`.)
+  `lean_frontend/VALIDATION.md` for what is compared, against what,
+  and what its gates guarantee, and its `lean_frontend/DESIGN.md`.)
 - **No `sorry`, no `unsafe`, fail-closed generation.** The backend
   never emits `sorry` or unsafe casts. Where it cannot do something
   soundly — derive an `Inhabited` instance, derive a comparison for a
