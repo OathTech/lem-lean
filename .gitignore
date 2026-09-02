@@ -62,6 +62,8 @@ coverage-report/
 
 # Local files
 TODO.md
+# ...but the Lean backend's committed backlog register is NOT a local file
+!doc/lean-backend/TODO.md
 
 # Tool directories
 .claude/

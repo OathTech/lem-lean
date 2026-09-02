@@ -120,8 +120,8 @@ the negative/panic test legs — is `tests/comprehensive/`:
 ## Status
 
 The backend compiles the full Cerberus C semantics (its flagship
-consumer) plus the comprehensive suite. Known residual work, tracked
-in the dated notes: emission uses a single module-scoped mutable
+consumer) plus the comprehensive suite. Known residual work, registered
+in [TODO.md](TODO.md): emission uses a single module-scoped mutable
 state (`St` in `src/lean_backend.ml`) with per-lifetime reset hooks —
 effect-free emission is a planned refactor; the Ott grammar
 in `language/lem.ott` carries the new declare forms, with
@@ -130,6 +130,9 @@ extension is written to be plausibly acceptable to rems-project/lem
 (no fork-only hacks in the core).
 
 Pointers: [DESIGN.md](DESIGN.md) for how it works;
+[TODO.md](TODO.md) for the backlog register (registered follow-ups
+with sources and prices); the upstream-facing manual chapter
+[`doc/manual/backend_lean.md`](../manual/backend_lean.md);
 [`doc/notes/`](../notes/) for dated design records;
 `src/lean_backend.ml` for the backend itself; `lean-lib/` for the
 runtime; bug reports with reproducers live downstream in
