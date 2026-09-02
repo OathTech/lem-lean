@@ -26,7 +26,10 @@ comparator. Functions without `By` use Lean's `BEq` or `Ord` type classes.
    `[Inhabited tv]` signature threading (arc-8 S2), so nothing generated
    references them. DO NOT REINTRODUCE any axiom-valued or unsafeCast
    inhabitant: consumers enforce absence in-build (cerberus-lean
-   relsem/RelSem/Audit.lean absence gate). -/
+   `scripts/check_theorem_axioms.sh`: a zero-axiom census over its
+   hand-written and generated Lean trees plus `#print axioms` probes
+   on exemplar cones, where DAEMON and sorryAx are unconditionally
+   fatal). -/
 
 /- HISTORY (effect-retirement arc L2, 2026-09-01): the axiom
    `runEffectful {α : Type} : (Unit → BaseIO α) → α` (with its unsafe
