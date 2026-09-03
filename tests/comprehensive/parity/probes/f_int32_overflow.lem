@@ -1,0 +1,10 @@
+(* Failure probe (census N3, the checked conversions): Nat_big_num.to_int32
+   (int32FromInteger / int32FromNatural / int32 numerals) raises
+   Z.Overflow outside [-2^31, 2^31-1]; Lean's lemInt32OfIntegerExact fails
+   loudly. The in-range conversions and the WRAPPING ones (Int32.of_int)
+   are pinned by the success probe p_int_wrap.lem. *)
+open import Pervasives_extra
+
+let steps : list (nat -> string) =
+  [ (fun n -> "before: in range: " ^ show (integerFromInt32 (int32FromInteger (2147483647 - integerFromNat n))));
+    (fun n -> "at overflow: " ^ show (integerFromInt32 (int32FromInteger (2147483648 + integerFromNat n)))) ]

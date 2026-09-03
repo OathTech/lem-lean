@@ -4,13 +4,26 @@ LEMFLAGS = -wl ign -i $(LEMLIB)/pervasives.lem
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-generate lean-compile lean-negative lean-panic clean
+.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity clean
 
 all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-div-parity lean-supply-draws lean-reader-consumer lean-fuel-budget lean-negative lean-invariance
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-fuel-budget lean-negative lean-invariance lean-parity
+
+# Two-target parity (parity-fix slice 2026-09-03; [USER] ruling: the OCaml
+# target is the reference semantics of a lem program, the Lean target
+# must compute the same thing, zero discrepancies). parity/run.sh builds
+# an OCaml binary AND a Lean binary from each parity/probes/*.lem, runs
+# both, diffs stdout byte-for-byte, and checks the OCaml output against
+# its committed pin (parity/expected/). Failure probes (f_*) must fail on
+# both targets. Needs the opam switch in PATH (scripts/ce) — the OCaml
+# leg is what makes this a parity test rather than a self-consistency
+# check (the retired M2 scaffold compared hand-measured values).
+lean-parity:
+	@echo "=== Two-target parity (OCaml reference vs Lean, compiled) ==="
+	@./parity/run.sh
 
 # Per-declaration fuel-budget compiled behavioral test
 # (effect-retirement L1, charter §8.3): the budgeted declaration cuts
@@ -102,22 +115,6 @@ lean-invariance:
 	done; \
 	rm -rf invariance/_out; exit $$fail
 
-# Integer division/remainder parity pin (2026-08-31 backend quality
-# review M2, verified-no-defect): the compiled binary re-asserts at
-# runtime that Lean's Int //% match the OCaml oracle's Nat_big_num
-# Euclidean semantics (see test_integer_div.lem).
-lean-div-parity:
-	@echo "=== M2 integer division parity pin (compiled) ==="
-	@cd lean-test && lake build test-integer-div-parity > /dev/null
-	@out=$$(cd lean-test && ./.lake/build/bin/test-integer-div-parity 2>&1); st=$$?; \
-	if [ $$st -ne 0 ]; then \
-		echo "  FAIL (exit $$st): $$out"; exit 1; \
-	elif ! echo "$$out" | grep -q "integer division parity: OK"; then \
-		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
-	else \
-		echo "  OK: parity holds (Euclidean, both targets)"; \
-	fi
-
 # m7 single-evaluation pin (2026-08-31 backend quality review): a
 # multi-name destructuring let's RHS must run ONCE in compiled code —
 # the historical per-binding RHS duplication ran effects once per bound
@@ -144,10 +141,13 @@ lean-tuple-once:
 #     default (`survived:` line). Pre-fix this run printed NOTHING —
 #     the message line is the pin of the fix.
 #  2. harness discipline (LEAN_ABORT_ON_PANIC=1, cerberus
-#     scripts/common.sh): the run must fail-stop (nonzero exit). On
-#     this 4.28 toolchain the abort fires at module INIT (LemLib's own
-#     eager closed-term failwithI lifts, messages disabled there), so
-#     the message is asserted on leg 1, not this leg.
+#     scripts/common.sh): the run must fail-stop (nonzero exit). The
+#     abort used to fire at module INIT (closed-term extraction lifted
+#     LemLib's failwithI applications to initialisation constants,
+#     messages disabled there); the parity-fix slice (2026-09-03) made
+#     failwithI/fuelExhaustedWith and their implementations
+#     `never_extract`, so the abort now fires at the program point —
+#     the message is still asserted on leg 1.
 lean-panic:
 	@echo "=== Panic-path pin (failwithI raise at the L_undefined arm) ==="
 	@cd lean-test && lake build test-failwith-panic > /dev/null

@@ -1,0 +1,6 @@
+# Parity probes whose divergence is KNOWN and has a registered fix in flight
+# (format: <probe>,<reason>). run.sh requires each listed probe to FAIL; a
+# listed probe that passes fails the suite (stale entry). Never a home for
+# "documented divergences": every entry names the fix that will delete it.
+p_str_bytes,F2 strings-are-bytes — design note doc/lean-backend/2026-09-03_string-representation-design.md; implementation is the last slice of the arc (L)
+p_str_escapes,F2 strings-are-bytes (unicode literal row) — same fix as p_str_bytes

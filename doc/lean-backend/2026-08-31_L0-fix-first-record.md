@@ -280,3 +280,20 @@ fail-closed name-collision guard).
 Scratch hygiene: the slice scratch (`.l0-scratch/`, incl. the
 e591865 comparison build) is ephemeral and deleted at slice end; all
 evidence worth keeping is quoted above or committed as tests.
+
+**Honesty note (appended 2026-09-03, parity-fix slice).** The
+"compiled-binary TestIntegerDivParity" leg described above compared
+Lean's runtime values against values that were MEASURED BY HAND from a
+separate OCaml probe and then written into the Lean test as literals;
+it never built or ran an OCaml binary itself, so it was a
+self-consistency check against a transcription, not a two-target
+test. The values were correct (the parity-fix slice's real runner
+confirms the `integer` row byte-for-byte), but the mechanism was not
+what the name suggested. The scaffold is retired; the compiled leg now
+runs through `tests/comprehensive/parity/run.sh` (suite phase
+`lean-parity`), which builds the OCaml reference binary and the Lean
+binary from the same `.lem` on every run and diffs their outputs
+(`parity/probes/p_num_div.lem`, pin `parity/expected/p_num_div.out`).
+That same runner exposed the neighbouring defect this record did not
+see: lem `int`/`int32`/`int64` division is NOT Euclidean on the OCaml
+target (F1 of the parity-fix record).

@@ -78,9 +78,6 @@ lean_exe «test-failwith-panic» where
 lean_exe «test-tuple-let-once» where
   root := `TestTupleLetOnce
 
-lean_exe «test-integer-div-parity» where
-  root := `TestIntegerDivParity
-
 -- Effect-retirement L1: compiled-binary behavioral test of the supply
 -- transform (draw sequencing, single evaluation, fuel/reader/multi
 -- composition; suite phase lean-supply-draws).
