@@ -565,7 +565,7 @@ instance    : WordAsr Int where
 
 /- removed value specification -/
 
-def  intFromBitSeq  (bs : bitSequence)  : Int :=    (integerFromBitSeq  (resizeBitSeq  (some (  31))  bs))
+def  intFromBitSeq  (bs : bitSequence)  : Int :=  lemIntFromInteger  (integerFromBitSeq  (resizeBitSeq  (some (  31))  bs))
 /- removed value specification -/
  
 def  bitSeqFromInt  (i : Int)  : bitSequence :=  bitSeqFromInteger  (some (  31))  (  i)
@@ -670,7 +670,7 @@ instance    : WordAsr Nat where
 
 /- removed value specification -/
 
-def  natFromBitSeq  (bs : bitSequence)  : Nat :=  id  (naturalFromBitSeq  (resizeBitSeq  (some (  31))  bs))
+def  natFromBitSeq  (bs : bitSequence)  : Nat :=  lemNatFromNatural  (naturalFromBitSeq  (resizeBitSeq  (some (  31))  bs))
 /- removed value specification -/
  
 def  bitSeqFromNat  (i : Nat)  : bitSequence :=  bitSeqFromNatural  (some (  31))  (id  i)

@@ -48,7 +48,7 @@ def  stringFromNat  (n : Nat)  : String :=
   if  n  =  0 then 
     acc
    else 
-    lemStringFromNaturalHelper  (/  n  10)  (Char.ofNat  (id  (mod  n  10  +  48))  ::  acc) -/
+    lemStringFromNaturalHelper  (/  n  10)  (Char.ofNat  (lemNatFromNatural  (mod  n  10  +  48))  ::  acc) -/
 /- removed value specification -/
 
 def  stringFromNatural  (n : Nat)  : String :=  

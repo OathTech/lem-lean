@@ -243,6 +243,30 @@ Lean): `doc/lean-backend/2026-09-03_string-representation-design.md`,
 scheduled as the arc's last slice; its two parity probes are registered
 expected failures until then.
 
+**Unsupported constructs are refused at generation time, by a
+library-side marker.** A lem constant or type whose Lean target_rep
+identifier lives in the reserved `LemUnsupported.` namespace has no Lean
+implementation; the backend (`lean_unsupported_check_cref`/`_type`,
+`src/lean_backend.ml`) refuses any reference to it from a non-library
+module with an error naming the constant or type — the [USER
+2026-09-03] class-(c) form. Library modules render the marker names
+(LemLib defines them, so the library's own instance code compiles), and
+user code cannot reach those instances without naming the type or an
+entry point. Adding a construct is a one-line library change, no backend
+table. Today: `Debug.print_string`/`print_endline`, `rational`, `real`,
+`float64`, `float32` and their value entry points. A runtime panic is
+NOT an acceptable substitute: a `Unit`-valued refusal was measured to be
+dead-code-eliminated (parity-fix audit F1).
+
+**Reserved-name avoidance: root constants and constructors, not
+fields.** `library/lean_constants` (Lean tokens + root-namespace
+declarations of both deployed toolchains) is avoided by top-level defs,
+values, types AND variant constructors — constructors are exported to
+the root scope (`export T (C …)`) and a root constant of the same name
+makes every pattern on them ambiguous (`ambiguous pattern … [_root_.One,
+two.One]`, measured) — but not by record fields, which are only ever
+emitted as projections and labels (keyword «»-escaping aside).
+
 **Instance priorities come from one table.** Every generated or
 library instance takes its priority from a single normative lattice
 (model-provided and derived `BEq`/`Ord` at default, the automatic

@@ -1283,6 +1283,68 @@ let lean_is_failwith_rep_env env cref =
      | _ -> false)
   | _ -> false
 
+(* ===== Unsupported-construct hook (parity-fix audit response, 2026-09-03;
+   [USER 2026-09-03] exception class (c): a construct the Lean backend does
+   not support may be REFUSED at generation time with a loud,
+   construct-naming error — never emitted as something that computes a
+   different result or silently drops).
+
+   MECHANISM: a library `.lem` marks a constant or type as having NO Lean
+   implementation by giving it a Lean target_rep whose identifier lives in
+   the reserved `LemUnsupported.` namespace (library/num.lem: rational,
+   real, float64, float32 and their value entry points; library/debug.lem:
+   print_string, print_endline). Any reference to such a constant or type
+   from a NON-library module is a generation-time error here. Library
+   modules render the marker names (LemLib defines them, panicking, so the
+   library's own instance code — `instance (Numeral rational) ...` —
+   compiles); user code can never reach those instances without naming
+   the type or an entry point, both refused. The marker is the whole
+   protocol: adding a construct to the refused set is a one-line library
+   change, no backend table (the m9 direction). *)
+let lean_unsupported_prefix = "LemUnsupported."
+let lean_unsupported_ident_of_cref env cref : string option =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  match Target.Targetmap.apply_target cd.target_rep (Target.Target_no_ident Target.Target_lean) with
+  | Some (CR_simple (_, _, _, e)) | Some (CR_inline (_, _, _, e)) ->
+    (match ExpW.exp_to_term e with
+     | Backend (_, i) ->
+       let s = String.trim (Ident.to_string i) in
+       if String.length s > String.length lean_unsupported_prefix
+          && String.sub s 0 (String.length lean_unsupported_prefix) = lean_unsupported_prefix
+       then Some s else None
+     | _ -> None)
+  | _ -> None
+let lean_unsupported_ident_of_type env (p : Path.t) : string option =
+  match Types.type_defs_lookup_tc env.t_env p with
+  | Some (Types.Tc_type td) ->
+    (match Target.Targetmap.apply_target td.Types.type_target_rep (Target.Target_no_ident Target.Target_lean) with
+     | Some (Types.TYR_simple (_, _, i)) ->
+       let s = String.trim (Ident.to_string i) in
+       if String.length s > String.length lean_unsupported_prefix
+          && String.sub s 0 (String.length lean_unsupported_prefix) = lean_unsupported_prefix
+       then Some s else None
+     | _ -> None)
+  | _ -> None
+let lean_unsupported_check_cref env (l : Ast.l) cref : unit =
+  if not (is_library_module !St.current_module_name) then
+    match lean_unsupported_ident_of_cref env cref with
+    | Some marker ->
+      let cd = c_env_lookup Ast.Unknown env.c_env cref in
+      raise (Reporting_basic.err_general true l
+        (Printf.sprintf
+          "Lean backend: constant '%s' has no implementation on the Lean target (its library rep is the unsupported marker '%s'; the OCaml reference implements it) — this use is REFUSED at generation time: remove it, or give the enclosing definition a Lean target_rep"
+          (Path.to_string cd.const_binding) marker))
+    | None -> ()
+let lean_unsupported_check_type env (l : Ast.l) (p : Path.t) : unit =
+  if not (is_library_module !St.current_module_name) then
+    match lean_unsupported_ident_of_type env p with
+    | Some marker ->
+      raise (Reporting_basic.err_general true l
+        (Printf.sprintf
+          "Lean backend: type '%s' has no implementation on the Lean target (its library rep is the unsupported marker '%s'; the OCaml reference implements it) — this use is REFUSED at generation time"
+          (Path.to_string p) marker))
+    | None -> ()
+
 let lean_typ_to_string (t : Types.t) : string =
   ignore (Format.flush_str_formatter ());
   Types.pp_type Format.str_formatter t;
@@ -3871,6 +3933,7 @@ type pat_style = FunParam | MatchArm
            argument nodes substituted by their threaded values. The
            special head classes cannot take hoisted arguments soundly
            and fail closed. *)
+        lean_unsupported_check_cref A.env l cd.descr;
         if is_lean_failwith_rep cd.descr then
           err "Lean backend: a failwith-mapped call with supply-drawing arguments (unsupported; bind the drawn values in lets first)";
         if ground_rep_for cd.descr <> None then
@@ -4031,6 +4094,7 @@ type pat_style = FunParam | MatchArm
                     (* supply net: threaded constants only render inside
                        the supply transform (guards G-rel and the
                        unliftable-context class) *)
+                    lean_unsupported_check_cref A.env (Typed_ast.exp_to_locn e) cd.descr;
                     supply_net_check (Typed_ast.exp_to_locn e) cd.descr
                       "an application outside a supply-lifted definition body (instance method, indreln rule, lemma/assert, or another context the pre-pass cannot lift)";
                     (* In indreln antecedents (Prop context), == and != applied via
@@ -4164,6 +4228,7 @@ type pat_style = FunParam | MatchArm
               (* supply net: a bare threaded constant outside the supply
                  transform is guard G-bare (no partial-application
                  repair exists for a linear supply) *)
+              lean_unsupported_check_cref A.env (Typed_ast.exp_to_locn e) const.descr;
               supply_net_check (Typed_ast.exp_to_locn e) const.descr
                 "a bare (unapplied) reference outside a supply-lifted definition body";
               let default_const_output () =
@@ -4421,6 +4486,7 @@ type pat_style = FunParam | MatchArm
                     begin
                       (* supply net (G-infix leg): a threaded constant in
                          infix position cannot be threaded *)
+                      lean_unsupported_check_cref A.env (Typed_ast.exp_to_locn e) cd.descr;
                       supply_net_check (Typed_ast.exp_to_locn e) cd.descr
                         "infix position";
                       (* reader_consumer in infix position: the leading
@@ -5077,6 +5143,9 @@ type pat_style = FunParam | MatchArm
                     let mod_name = String.sub target_id_str 0 dot_pos in
                     if String.length mod_name > 0 &&
                        Char.uppercase_ascii mod_name.[0] = mod_name.[0] &&
+                       (* the unsupported-construct markers are a NAMESPACE
+                          inside LemLib, not a module *)
+                       String.concat "" [mod_name; "."] <> lean_unsupported_prefix &&
                        not (List.mem mod_name !St.collected_imports) then
                       St.collected_imports := mod_name :: !St.collected_imports
                   | _ -> ());
@@ -5324,6 +5393,7 @@ type pat_style = FunParam | MatchArm
             let body = flat @@ Seplist.to_sep_list pat_typ (sep @@ from_string " ×") ts in
               from_string "(" ^ body ^ from_string ")"
         | Typ_app (p, ts) ->
+            lean_unsupported_check_type A.env t.locn p.descr;
             if Path.compare p.descr Path.unitpath = 0 then
               let sk = Typed_ast.ident_get_lskip p in
               Output.flat [ ws sk; from_string "Unit" ]

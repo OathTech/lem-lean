@@ -1,10 +1,19 @@
 LEM = ../../lem
 LEMLIB = ../../library
 LEMFLAGS = -wl ign -i $(LEMLIB)/pervasives.lem
+# Every lake invocation runs through the cgroup cap (parity-fix audit
+# response, 2026-09-03: "never run a Lean build uncapped"); the same
+# variables the parity runner honours. Fail-noisy if the cap is absent.
+CAPPED ?= /home/dev/projects/cerberus-lean-proj/cerberus-lean/scripts/capped
+export CERB_MEM_MAX ?= 16G
+LAKE = $(CAPPED) lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity clean
+.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity check-capped clean
+
+check-capped:
+	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
 
 all: lean
 
@@ -32,7 +41,7 @@ lean-parity:
 # witnessed in a real binary.
 lean-fuel-budget:
 	@echo "=== Per-declaration fuel budget pin (compiled) ==="
-	@cd lean-test && lake build test-fuel-budget > /dev/null
+	@cd lean-test && $(LAKE) build test-fuel-budget > /dev/null
 	@out=$$(cd lean-test && ./.lake/build/bin/test-fuel-budget 2>&1); st=$$?; \
 	if [ $$st -ne 0 ]; then \
 		echo "  FAIL (exit $$st):"; echo "$$out"; exit 1; \
@@ -49,7 +58,7 @@ lean-fuel-budget:
 # TestReaderConsumerCheck.lean).
 lean-reader-consumer:
 	@echo "=== reader_consumer injection pin (compiled) ==="
-	@cd lean-test && lake build test-reader-consumer > /dev/null
+	@cd lean-test && $(LAKE) build test-reader-consumer > /dev/null
 	@out=$$(cd lean-test && ./.lake/build/bin/test-reader-consumer 2>&1); st=$$?; \
 	if [ $$st -ne 0 ]; then \
 		echo "  FAIL (exit $$st):"; echo "$$out"; exit 1; \
@@ -67,7 +76,7 @@ lean-reader-consumer:
 # the 2026-08-31 review found untested for effectful).
 lean-supply-draws:
 	@echo "=== Supply draw-sequence pin (compiled) ==="
-	@cd lean-test && lake build test-supply-draws > /dev/null
+	@cd lean-test && $(LAKE) build test-supply-draws > /dev/null
 	@out=$$(cd lean-test && ./.lake/build/bin/test-supply-draws 2>&1); st=$$?; \
 	if [ $$st -ne 0 ]; then \
 		echo "  FAIL (exit $$st):"; echo "$$out"; exit 1; \
@@ -122,7 +131,7 @@ lean-invariance:
 # check: the two counter draws bound by one tuple let must be {1, 2}.
 lean-tuple-once:
 	@echo "=== m7 single-evaluation pin (tuple-let RHS runs once) ==="
-	@cd lean-test && lake build test-tuple-let-once > /dev/null
+	@cd lean-test && $(LAKE) build test-tuple-let-once > /dev/null
 	@out=$$(cd lean-test && ./.lake/build/bin/test-tuple-let-once 2>&1); st=$$?; \
 	if [ $$st -ne 0 ]; then \
 		echo "  FAIL (exit $$st): $$out"; exit 1; \
@@ -150,7 +159,7 @@ lean-tuple-once:
 #     the message is still asserted on leg 1.
 lean-panic:
 	@echo "=== Panic-path pin (failwithI raise at the L_undefined arm) ==="
-	@cd lean-test && lake build test-failwith-panic > /dev/null
+	@cd lean-test && $(LAKE) build test-failwith-panic > /dev/null
 	@out=$$(cd lean-test && ./.lake/build/bin/test-failwith-panic 2>&1); st=$$?; \
 	if [ $$st -ne 0 ]; then \
 		echo "  FAIL (leg 1): nonzero exit $$st without LEAN_ABORT_ON_PANIC"; \
@@ -232,14 +241,14 @@ lean-generate: $(TESTS)
 	fi
 
 # Symlink generated files into lean-test/ and compile with Lake
-lean-compile:
+lean-compile: check-capped
 	@echo "=== Compiling Lean files ==="
 	@for f in Test_*.lean *_auxiliary.lean; do \
 		if [ -f "$$f" ] && [ ! -e "lean-test/$$f" ]; then \
 			ln -sf "../$$f" "lean-test/$$f"; \
 		fi; \
 	done
-	@cd lean-test && lake build
+	@cd lean-test && $(LAKE) build
 
 clean:
 	rm -f *.lean *_ok

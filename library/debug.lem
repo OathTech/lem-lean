@@ -15,9 +15,9 @@ declare {isabelle;ocaml;hol;coq} rename module = lem_debug
 val print_string : string -> unit
 let ~{ocaml;lean} print_string str = ()
 declare ocaml target_rep function print_string = `print_string`
-declare lean  target_rep function print_string = `lemDebugPrintUnsupported`
+declare lean  target_rep function print_string = `LemUnsupported.debugPrintString`
 
 val print_endline : string -> unit
 let ~{ocaml;lean} print_endline str = ()
 declare ocaml target_rep function print_endline = `print_endline`
-declare lean  target_rep function print_endline = `lemDebugPrintUnsupported`
+declare lean  target_rep function print_endline = `LemUnsupported.debugPrintEndline`

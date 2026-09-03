@@ -169,7 +169,7 @@ abbrev  int64 := Int64
 
 /-  unbounded size and precision rational numbers  -/
 
-abbrev  rational := LemRational
+abbrev  rational := LemUnsupported.rational
  -/
 /-  /-  ???: better type for this in HOL?  -/
 
@@ -181,7 +181,7 @@ abbrev  rational := LemRational
 /-  real numbers  -/
 /-  Note that for OCaml, this is mapped to floats with 64 bits.  -/
 
-abbrev  real := LemReal
+abbrev  real := LemUnsupported.real
  -/
 /-  /-  ???: better type for this in HOL?  -/
 
@@ -192,11 +192,11 @@ abbrev  real := LemReal
 
 /-  double precision floating point (64 bits)  -/
 
-abbrev  float64 := LemFloat64
+abbrev  float64 := LemUnsupported.float64
  -/
 /-  /-  ???: better type for this in HOL?  -/
 
-abbrev  float32 := LemFloat32
+abbrev  float32 := LemUnsupported.float32
  -/
 /- removed value specification -/
 
@@ -1010,9 +1010,9 @@ instance   : OrdMaxMin Int where
 
 /- 
 
-instance   : Numeral LemRational where
+instance   : Numeral LemUnsupported.rational where
 
-    fromNumeral   n  :=  unsupportedRationalFromNumeral  n
+    fromNumeral   n  :=  LemUnsupported.rationalFromNumeral  n
  -/
 /- removed value specification -/
 
@@ -1021,7 +1021,7 @@ instance   : Numeral LemRational where
 /- removed value specification -/
 
 
-instance   : Eq0 LemRational where
+instance   : Eq0 LemUnsupported.rational where
 
     isEqual   :=  (fun x y => x == y)
 
@@ -1040,7 +1040,7 @@ instance   : Eq0 LemRational where
 
 
 
-instance   : Ord0 LemRational where
+instance   : Ord0 LemUnsupported.rational where
 
     compare   :=  defaultCompare
 
@@ -1053,21 +1053,21 @@ instance   : Ord0 LemRational where
     isGreaterEqual   :=  unsupportedRationalGreaterEq
 
 
-instance   : SetType LemRational where
+instance   : SetType LemUnsupported.rational where
 
     setElemCompare   :=  defaultCompare
 
 /- removed value specification -/
 
 
-instance   : NumAdd LemRational where
+instance   : NumAdd LemUnsupported.rational where
 
     numAdd   :=  (fun x y => x + y)
 
 /- removed value specification -/
 
 
-instance   : NumMinus LemRational where
+instance   : NumMinus LemUnsupported.rational where
 
     numMinus   :=  (fun x y => x - y)
 
@@ -1075,50 +1075,50 @@ instance   : NumMinus LemRational where
 
 
 
-instance   : NumNegate LemRational where
+instance   : NumNegate LemUnsupported.rational where
 
-    numNegate   :=  (fun  n=> unsupportedRationalFromNumeral  0  -  n)
-
-/- removed value specification -/
-
-
-
-instance   : NumAbs LemRational where
-
-    abs   :=  (fun  n=> (if  unsupportedRationalGreater  n (unsupportedRationalFromNumeral  0) then  n  else unsupportedRationalFromNumeral  0  -  n))
+    numNegate   :=  (fun  n=> LemUnsupported.rationalFromNumeral  0  -  n)
 
 /- removed value specification -/
 
 
-instance   : NumSucc LemRational where
 
-    succ   :=  (fun  n=> n  + unsupportedRationalFromNumeral  1)
+instance   : NumAbs LemUnsupported.rational where
 
-/- removed value specification -/
-
-
-instance   : NumPred LemRational where
-
-    pred   :=  (fun  n=> n  - unsupportedRationalFromNumeral  1)
+    abs   :=  (fun  n=> (if  unsupportedRationalGreater  n (LemUnsupported.rationalFromNumeral  0) then  n  else LemUnsupported.rationalFromNumeral  0  -  n))
 
 /- removed value specification -/
 
 
-instance   : NumMult LemRational where
+instance   : NumSucc LemUnsupported.rational where
+
+    succ   :=  (fun  n=> n  + LemUnsupported.rationalFromNumeral  1)
+
+/- removed value specification -/
+
+
+instance   : NumPred LemUnsupported.rational where
+
+    pred   :=  (fun  n=> n  - LemUnsupported.rationalFromNumeral  1)
+
+/- removed value specification -/
+
+
+instance   : NumMult LemUnsupported.rational where
 
     numMult   :=  (fun x y => x * y)
 
 /- removed value specification -/
 
 
-instance   : NumDivision LemRational where
+instance   : NumDivision LemUnsupported.rational where
 
     numDivision   :=  (fun x y => x / y)
 
 /- removed value specification -/
 
 /- 
-def  rationalFromFrac  (n : Int) (d : Int)  : LemRational :=  (unsupportedRationalFromInt  n)  /  (unsupportedRationalFromInt  d) -/
+def  rationalFromFrac  (n : Int) (d : Int)  : LemUnsupported.rational :=  (LemUnsupported.rationalFromInt  n)  /  (LemUnsupported.rationalFromInt  d) -/
 /- removed value specification -/
 
 /- removed value specification -/
@@ -1126,16 +1126,16 @@ def  rationalFromFrac  (n : Int) (d : Int)  : LemRational :=  (unsupportedRation
 /- removed value specification -/
 
 /- 
- partial def  rationalPowInteger  (b : LemRational) (e : Int)  : LemRational := 
+ partial def  rationalPowInteger  (b : LemUnsupported.rational) (e : Int)  : LemUnsupported.rational := 
   if  e  =  0 then  1  else 
   if  >  e  0 then  b  ^  (e  -  1)  *  b  else 
   b  ^  (e  +  1)  /  b -/
 /- removed value specification -/
 
 /- 
-def  rationalPowNat  (r : LemRational) (e : Nat)  : LemRational :=  r  ^  (Int.ofNat  e) -/
+def  rationalPowNat  (r : LemUnsupported.rational) (e : Nat)  : LemUnsupported.rational :=  r  ^  (Int.ofNat  e) -/
 
-instance   : NumPow LemRational where
+instance   : NumPow LemUnsupported.rational where
 
     numPow   :=  (fun x y => x ^ y)
 
@@ -1146,7 +1146,7 @@ instance   : NumPow LemRational where
 
 
 
-instance   : OrdMaxMin LemRational where
+instance   : OrdMaxMin LemUnsupported.rational where
 
     max   :=  max
 
@@ -1156,16 +1156,16 @@ instance   : OrdMaxMin LemRational where
 
 /- 
 
-instance   : Numeral LemReal where
+instance   : Numeral LemUnsupported.real where
 
-    fromNumeral   n  :=  unsupportedRealFromNumeral  n
+    fromNumeral   n  :=  LemUnsupported.realFromNumeral  n
  -/
 /- removed value specification -/
 
 /- removed value specification -/
 
 
-instance   : Eq0 LemReal where
+instance   : Eq0 LemUnsupported.real where
 
     isEqual   :=  (fun x y => x == y)
 
@@ -1184,7 +1184,7 @@ instance   : Eq0 LemReal where
 
 
 
-instance   : Ord0 LemReal where
+instance   : Ord0 LemUnsupported.real where
 
     compare   :=  defaultCompare
 
@@ -1197,21 +1197,21 @@ instance   : Ord0 LemReal where
     isGreaterEqual   :=  unsupportedRealGreaterEq
 
 
-instance   : SetType LemReal where
+instance   : SetType LemUnsupported.real where
 
     setElemCompare   :=  defaultCompare
 
 /- removed value specification -/
 
 
-instance   : NumAdd LemReal where
+instance   : NumAdd LemUnsupported.real where
 
     numAdd   :=  (fun x y => x + y)
 
 /- removed value specification -/
 
 
-instance   : NumMinus LemReal where
+instance   : NumMinus LemUnsupported.real where
 
     numMinus   :=  (fun x y => x - y)
 
@@ -1219,7 +1219,7 @@ instance   : NumMinus LemReal where
 
 
 
-instance   : NumNegate LemReal where
+instance   : NumNegate LemUnsupported.real where
 
     numNegate   :=  Neg.neg
 
@@ -1227,55 +1227,55 @@ instance   : NumNegate LemReal where
 
 
 
-instance   : NumAbs LemReal where
+instance   : NumAbs LemUnsupported.real where
 
     abs   :=  unsupportedRealAbs
 
 /- removed value specification -/
 
 
-instance   : NumSucc LemReal where
+instance   : NumSucc LemUnsupported.real where
 
-    succ   :=  (fun  n=> n  + unsupportedRealFromNumeral  1)
-
-/- removed value specification -/
-
-
-instance   : NumPred LemReal where
-
-    pred   :=  (fun  n=> n  - unsupportedRealFromNumeral  1)
+    succ   :=  (fun  n=> n  + LemUnsupported.realFromNumeral  1)
 
 /- removed value specification -/
 
 
-instance   : NumMult LemReal where
+instance   : NumPred LemUnsupported.real where
+
+    pred   :=  (fun  n=> n  - LemUnsupported.realFromNumeral  1)
+
+/- removed value specification -/
+
+
+instance   : NumMult LemUnsupported.real where
 
     numMult   :=  (fun x y => x * y)
 
 /- removed value specification -/
 
 
-instance   : NumDivision LemReal where
+instance   : NumDivision LemUnsupported.real where
 
     numDivision   :=  (fun x y => x / y)
 
 /- removed value specification -/
 
 /- 
-def  realFromFrac  (n : Int) (d : Int)  : LemReal :=  (unsupportedRealFromInt  n)  /  (unsupportedRealFromInt  d) -/
+def  realFromFrac  (n : Int) (d : Int)  : LemUnsupported.real :=  (LemUnsupported.realFromInt  n)  /  (LemUnsupported.realFromInt  d) -/
 /- removed value specification -/
 
 /- 
- partial def  realPowInteger  (b : LemReal) (e : Int)  : LemReal := 
+ partial def  realPowInteger  (b : LemUnsupported.real) (e : Int)  : LemUnsupported.real := 
   if  e  =  0 then  1  else 
   if  >  e  0 then  b  ^  (e  -  1)  *  b  else 
   b  ^  (e  +  1)  /  b -/
 /- removed value specification -/
 
 /- 
-def  realPowNat  (r : LemReal) (e : Nat)  : LemReal :=  r  ^  (Int.ofNat  e) -/
+def  realPowNat  (r : LemUnsupported.real) (e : Nat)  : LemUnsupported.real :=  r  ^  (Int.ofNat  e) -/
 
-instance   : NumPow LemReal where
+instance   : NumPow LemUnsupported.real where
 
     numPow   :=  (fun x y => x ^ y)
 
@@ -1288,7 +1288,7 @@ instance   : NumPow LemReal where
 
 
 
-instance   : OrdMaxMin LemReal where
+instance   : OrdMaxMin LemUnsupported.real where
 
     max   :=  max
 
@@ -1301,7 +1301,7 @@ instance   : OrdMaxMin LemReal where
 /- removed value specification -/
 
 /- 
-def  integerSqrt  (i : Int)  : Int :=  realFloor  (realSqrt  (unsupportedRealFromInt  i)) -/
+def  integerSqrt  (i : Int)  : Int :=  realFloor  (realSqrt  (LemUnsupported.realFromInt  i)) -/
 /- removed value specification -/
 
 /- removed value specification -/

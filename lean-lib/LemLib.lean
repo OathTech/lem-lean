@@ -1456,13 +1456,57 @@ def naturalOfString (s : String) : Nat :=
   if i < 0 then failwithI "Assertion failed (Nat_big_num.of_string_nat: negative)"
   else i.toNat
 
-/-- lem Debug.print_string / print_endline: the OCaml reference PRINTS to
-    stdout (ocaml-lib: `print_string`/`print_endline`); pure Lean code
-    cannot. Refused LOUDLY rather than silently absorbed (the previous
-    Lean definition was `()`, a no-op — divergence census X2; a
-    generation-time refusal is the honest end state, registered). -/
-@[never_extract] def lemDebugPrintUnsupported (_s : String) : Unit :=
-  failwithI "Debug.print_string/print_endline: printing from pure code is unsupported on the Lean target (the OCaml reference prints to stdout)"
+/- ============================================================ -/
+/- LemUnsupported — the generation-time refusal markers             -/
+/- ============================================================ -/
+/- A lem constant or type whose Lean target_rep lives in this namespace
+   has NO Lean implementation: the backend REFUSES any reference to it
+   from a non-library module at generation time ([USER 2026-09-03]
+   exception class (c); `lean_unsupported_check_cref/type` in
+   src/lean_backend.ml). The definitions here exist only so the lem
+   LIBRARY's own instance code (`instance (Numeral rational) ...`)
+   compiles; user code can never call them — a Unit-valued "loud runtime
+   refusal" was measured to be DEAD-CODE-ELIMINATED by the compiler
+   (`let u = Debug.print_endline "dbg" in ...` printed nothing and exited
+   0 on Lean), which is why the refusal must be at generation time. -/
+namespace LemUnsupported
+abbrev rational := LemRational
+abbrev real := LemReal
+abbrev float64 := LemFloat64
+abbrev float32 := LemFloat32
+@[never_extract] def rationalFromNumeral (_ : Nat) : LemRational := panic! "rational: not supported in Lean backend"
+@[never_extract] def rationalFromInt (_ : Int) : LemRational := panic! "rational: not supported in Lean backend"
+@[never_extract] def rationalFromFrac (_ _ : Int) : LemRational := panic! "rational: not supported in Lean backend"
+@[never_extract] def realFromNumeral (_ : Nat) : LemReal := panic! "real: not supported in Lean backend"
+@[never_extract] def realFromInt (_ : Int) : LemReal := panic! "real: not supported in Lean backend"
+@[never_extract] def realFromFrac (_ _ : Int) : LemReal := panic! "real: not supported in Lean backend"
+/-- lem Debug.print_string / print_endline: the OCaml reference prints to
+    stdout; pure Lean code cannot (divergence census X2). -/
+@[never_extract] def debugPrintString (_s : String) : Unit :=
+  panic! "Debug.print_string: unsupported on the Lean target"
+@[never_extract] def debugPrintEndline (_s : String) : Unit :=
+  panic! "Debug.print_endline: unsupported on the Lean target"
+end LemUnsupported
+
+/- OCaml `nat`/`int` are 63-bit machine integers; the conversions from
+   the arbitrary-precision types are `Nat_big_num.to_int`, which RAISES
+   `Failure "int_of_big_int"` outside [-2^62, 2^62-1] (measured: 2^62 →
+   EXN, 2^62-1 → 4611686018427387903). Lean's Nat/Int are unbounded; the
+   conversions fail loudly at the same bound so a program that fails on
+   the OCaml reference fails here too (divergence census N4, conversion
+   leg; the arithmetic WRAP is the pending exception-case). -/
+def lemOcamlIntMax : Int := 4611686018427387903
+def lemOcamlIntMin : Int := -4611686018427387904
+def lemIntFromInteger (i : Int) : Int :=
+  if lemOcamlIntMin <= i && i <= lemOcamlIntMax then i
+  else failwithI s!"Failure \"int_of_big_int\" ({i} outside the OCaml 63-bit int range)"
+/- natFromNumeral / intFromNumeral keep their literal-passthrough reps: a
+   lem numeral renders as a Lean literal, as it renders as an OCaml int
+   literal on the reference (a literal >= 2^62 is an OCaml COMPILE error
+   there — part of the N4 exception-case row). -/
+def lemNatFromNatural (n : Nat) : Nat :=
+  if Int.ofNat n <= lemOcamlIntMax then n
+  else failwithI s!"Failure \"int_of_big_int\" ({n} outside the OCaml 63-bit int range)"
 
 
 /- Z.div / Z.rem / mod_big_int (ocaml-lib/nat_big_num.ml integerDiv_t,

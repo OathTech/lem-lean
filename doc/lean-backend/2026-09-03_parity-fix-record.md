@@ -127,13 +127,18 @@ and `choose`; pin rebaselined from the OCaml run. Suite:
 order, field lex, recursive root and depth, structural BEq).
 
 Consumer impact: the read-only scan of `cerberus-lean/lean_frontend/generated`
-finds 35 of 170 single `deriving BEq, Ord` variants mixed-order (derived
-tally; e.g. `Symbol.symbol_description`, `Symbol.prefix0`,
-`Errors.*_cause`, `Cn.cn_base_type`); 4 are self-referential
-(`AilSyntax.constant`, `Cn.cn_base_type`, `Core_typing_aux.inferred`,
-`GenTypes.genIntegerType`) — under list/maybe/tuple heads as far as the
-scan shows, so they derive; a refusal there would be loud at the pin
-bump. `Set.choose` (comparator minimum) and `Core_linking.topo_order`
+— CRITERION: a top-level `inductive … deriving BEq, Ord` (single, not in a
+`mutual` block) with a nullary constructor declared after a
+non-nullary one, matched textually by a regex over the emitted
+constructor lines — finds 35 of 170 (derived tally; the auditor's
+40/188 uses a different criterion, presumably including the
+`Foo_auxiliary`/handwritten-copy files or mutual members; the sets
+overlap on every name checked). E.g. `Symbol.symbol_description`,
+`Symbol.prefix0`, `Errors.*_cause`, `Cn.cn_base_type`. Self-referential
+among them: `AilSyntax.constant`, `Cn.cn_base_type`,
+`Core_typing_aux.inferred`, `GenTypes.genIntegerType`, `GenTypes.genType`
+— under list/maybe/tuple heads as far as the scan shows, so they derive;
+a refusal there would be loud at the pin bump. `Set.choose` (comparator minimum) and `Core_linking.topo_order`
 may move TOWARD the oracle; the cerberus differential battery is the
 gate (not run here).
 
@@ -149,10 +154,12 @@ match: (0, 41) / field: 42 / just: Just ((45, 44)) / just1: Just (46)`.
 Rules established from it: OCaml evaluates the subexpressions of one
 node RIGHT-TO-LEFT — application arguments and then the head
 (`head`), tuple components, constructor arguments, list elements,
-infix operands (`arith`, `cmp`, `str`), record fields in FIELD
-DECLARATION order regardless of source order (`record_rev`: `<| fb =
-fresh (); fa = fresh () |>` gives `(25, 24)`, i.e. `fb` drew first) —
-and `let`/`if`/`match` as written.
+infix operands (`arith`, `cmp`, `str`), record fields: the
+labels are sorted to their DECLARATION order, then evaluated
+right-to-left — the LAST-DECLARED field first, whatever the source order
+(`record_rev`: type `<| fa; fb |>`, construction `<| fb = fresh (); fa =
+fresh () |>` gives `(25, 24)`: `fb`, last declared, drew 24 first) — and
+`let`/`if`/`match` as written.
 
 Fix (`supply_thread`/`supply_thread_app`): `supply_thread_list` folds
 from the right; infix operands right first; record fields sorted by the
@@ -162,9 +169,13 @@ Pure (non-supply) emission is untouched (corpus tree-diff §3).
 DESIGN.md/manual: "left-to-right depth-first … reproduces the effectful
 counter's dynamic draw order" replaced by the true statement.
 
-Red (verbatim): `< tuple: (1, 0) … > tuple: (0, 1)` (8 rows). Green
-(verbatim): `=== p_eval_order === / OK: parity (21 lines byte-identical
-to the OCaml reference; pin matches)`; `=== p_supply_shapes === / OK:
+Red (verbatim): `< tuple: (1, 0) … > tuple: (0, 1)` (8 rows) — the red
+is reproducible only on the probe's pre-F5 rows: the rows added for F5
+(`just`, `just1`) and the F6 extension were REFUSED by the pre-fix
+backend (F5's misdescribed error), so the extended probe does not
+generate on bc1bae7 at all. Green (verbatim): `=== p_eval_order === /
+OK: parity (21 lines byte-identical to the OCaml reference; pin
+matches)`; `=== p_supply_shapes === / OK:
 parity (35 lines …)` — the second probe runs every shape of
 `test_supply.lem` on both targets (OCaml counter reset to the seed per
 shape) and is the source of the kernel pins in
@@ -317,8 +328,14 @@ limits: `lemListZipSameLength_eq` holds on the success domain (equal
 lengths) — on unequal lengths both definitions reach `failwithI` with
 the same message but cannot be equated as values (the spec conses a
 prefix onto the opaque failure); `lemListUnfoldr` replaces a `partial
-def` — no theorem can exist for a partial definition on either side
-(STOP-AND-REPORT class, reported here; its witness is the parity run).
+def` — kernel-opaque on both sides, so no equality theorem is
+expressible. DISPOSITION: a declared kernel-opaque boundary, TEMPORAL;
+mover = a fuelled (or structural, if a bound is found in the model) lem
+`List_extra.unfoldr` that makes a theorem stateable; the two-target
+parity run (p_list_deep `genlist`/`unfoldr`-free rows; the library
+probe sweep) is the witness until then. Cerberus does not use
+`List_extra.unfoldr` (it has its own fuelled `list_unfoldr`,
+`frontend/model/utils.lem:295-359`).
 Red (verbatim): `< zip: 300000 … > Stack overflow detected. Aborting.`
 (23 rows lost). Green (verbatim): `=== p_list_deep === / OK: parity (28
 lines byte-identical to the OCaml reference; pin matches)`.
@@ -410,7 +427,7 @@ reproduced by `awk` over library/*.lem, not committed).
 | D1 | division by zero (all numeric types, mword) | m10 | raises Division_by_zero | 0 | FIX (class-(a) direction: Lean succeeded) | f_div_zero, f_int_div_zero, f_integer_mod_zero |
 | N5 | integerSqrt of a negative | rep census | Z.sqrt raises | root of \|n\| | FIX | f_sqrt_neg |
 | N6 | integerOfString / naturalOfString grammar | rep census | Z.of_string (sign, 0x/0o/0b, `_`, "" = 0; invalid → raise; negative natural → assert) | decimal only / `String.toNat?` | FIX | p_num_parse; f_num_parse_invalid; f_natural_neg |
-| N4 | `nat`/`int` are 63-bit machine ints on OCaml | rep census (`type nat = int`; `to_int` raises Failure "int_of_big_int" at 2^62, `max_int + 1` wraps to -4611686018427387904, `abs min_int` = min_int) | wrap / raise past 2^62 | unbounded Nat/Int | EXCEPTION-CASE (§4, X3) | measured `t.ml` |
+| N4 | `nat`/`int` are 63-bit machine ints on OCaml | rep census (`type nat = int`; `to_int` raises Failure "int_of_big_int" at 2^62, `max_int + 1` wraps to -4611686018427387904, `abs min_int` = min_int) | wrap / raise past 2^62 | unbounded Nat/Int | CONVERSIONS FIXED (class-(a) shape: natFromNatural/natFromNumeral/intFromInteger/intFromNumeral fail loudly outside [-2^62, 2^62-1]); the arithmetic WRAP stays the EXCEPTION-CASE (§4, X3) pending the ruling | f_int_of_big_num; measured `t.ml` |
 | F4 | derived Ord rank, single variants | noodle F4 | nullary below block | declaration index | FIX | p_cmp_order green; test_derived_comparison |
 | F3 | Pmap.add / Pmap.equal semantics | noodle F3 | replace key+value; keys by comparator | bucket coexistence; eq_k | FIX (port) | p_map_beq, p_map_ops green |
 | F10 | map iteration order | noodle F10 | ascending | newest-first | FIX (port) | p_map_ops rows toList/fold |
@@ -429,20 +446,23 @@ reproduced by `awk` over library/*.lem, not committed).
 | F8 | Lean tokens/root names as top-level defs | noodle F8 | valid OCaml | invalid Lean | FIX | p_keywords green |
 | F7 | 15 list/string functions overflow at 300k | noodle F7 + sweep | computes | stack overflow | FIX (b) | p_list_deep green; 12 theorems |
 | R1 | closed-term extraction lifted failure sites to module init | found by f_div_zero | fails at the program point | silent init panic, default value | FIX (`never_extract`) | f_* probes |
-| X2 | Debug.print_string/print_endline | debug.lem `let ~{ocaml} … = ()` | prints to stdout | no-op | FIX → loud runtime refusal; EXCEPTION-CASE (c) for the generation-time form (§4) | manual |
+| X2 | Debug.print_string/print_endline | debug.lem `let ~{ocaml} … = ()` | prints to stdout | no-op | FIXED via class-(c) GENERATION-TIME refusal (the `LemUnsupported.` marker hook; the audit showed the first attempt — a Unit-valued runtime failwithI — was dead-code-eliminated: `let u = Debug.print_endline "dbg" in …` printed nothing, exit 0) | negative/neg_unsupported_debug_print.lem |
 | V1 | Vector.slice out of range | LemLib "PAD-WITH-DEFAULT, deliberately" | Array.sub raises | default padding | FIX (guard) | statically unreachable on both; no probe |
 | F2 | strings/chars are bytes | noodle F2 | bytes | Unicode scalars | FIX scheduled (L; design note) | p_str_bytes, p_str_escapes XFAIL |
 | X1 | polymorphic compare on values containing sets/maps | pset.ml/pmap.ml records carry a comparator closure | `compare` raises `Invalid_argument "compare: functional value"` (unless physically equal closures); `=` raises | structural comparison of the element spines | EXCEPTION-CASE candidate (§4) | reading; not probed |
-| X4 | rational / real / float64 / float32 | LemLib "unsupported" panics | computes (Rational, float) | runtime panic on any use | EXCEPTION-CASE candidate (§4): a generation-time refusal is the (c)-form | cerberus uses none of them in `frontend/model` (grep) |
+| X4 | rational / real / float64 / float32 | LemLib "unsupported" panics | computes (Rational, float) | runtime panic on any use | FIXED via class-(c) GENERATION-TIME refusal (types and value entry points marked `LemUnsupported.`); whether `real`/`float64` should instead be supported on Lean `Float` stays an operator question (§4) | negative/neg_unsupported_rational.lem, neg_unsupported_real_entry.lem; cerberus uses none in `frontend/model` (grep) |
 | X5 | `THE` (Hilbert choice) | function_extra | no OCaml definition (comment only) | runtime panic | unbound/unusable on both — no divergence | — |
 | K2 | panic-then-default vs exception; List_extra.nth/head/last/nth out of range; naturalOfString invalid; `fromJust Nothing`; `failwith` | noodle K2 | raises | failwithI (panic + default; abort under harness) | EXCEPTION-ACCEPTED (a) | f_* probes exercise the both-fail rule |
 | B1 | LemLib fuel sentinels (`fuelExhaustedWith`) in the ported set ops | port | OCaml recursion is unbounded; may loop (`lfp`) | bounded with loud sentinel | EXCEPTION-ACCEPTED (b) (Lean fails only where OCaml would not terminate or exceed the proven height bound) | port header |
 | F9 | genlist quadratic on OCaml | noodle F9 | O(n²) | O(n) | performance — TODO #7 | — |
 
-Derived totals: 31 rows; FIX 22 (incl. 3 refusals of class (c) form
-and 1 scheduled L); EXCEPTION-CASE candidates for the operator 4 (N4,
-X1, X2-generation-time form, X4); EXCEPTION-ACCEPTED under (a)/(b) 2
-(K2, B1); not-a-divergence 3 (L5, L3, X5); performance 1 (F9).
+Derived totals (after the audit response): 31 rows; FIX 25 (incl. 5
+class-(c) generation-time refusals — L4, S6, X2, X4, and the F4 unsupported-
+head refusal — and 1 scheduled L); EXCEPTION-CASE candidates for the
+operator 2 (N4 arithmetic wrap, X1); EXCEPTION-ACCEPTED under (a)/(b) 2
+(K2, B1); not-a-divergence 3 (L5, L3, X5); performance 1 (F9). (Before
+the audit: X2 and X4 were wrongly counted as fixed-at-runtime / candidate;
+see the addendum.)
 
 ## 3. Close-out battery
 
@@ -622,6 +642,56 @@ refusal (with the X2 hook) unless the operator wants the Float support.
 
 ## 5. Consumer-impact summary for the cerberus pin bump (separate slice)
 
+Read-only greps of `cerberus-lean/lean_frontend` (hand-written seams and
+`generated/`), audit-response 2026-09-03:
+
+- **Removed LemLib names** and where cerberus references them:
+  `fmapOfSpine` — `Main.lean` (4 call sites, :696-702; the union of
+  spine lists must become `fmapAddBy` folds or a `Pmap`-typed build) and
+  its `generated/Main.lean` copy. NOT referenced anywhere in cerberus:
+  `fromNat32`, `fromNat64`, `lemCmpToOrd`, `LemInt32`, `lemInt32Abs`,
+  `lemInt32ToNat`, `LemInt64`, `lemInt64Abs`, `set_tc`, `set_tc_go`,
+  `sortedCompareBy`, `toNat32`, `toNat64`.
+- **Pset-typed sites** (`set 'a` is `Pset α`, no longer `List α`):
+  `CerbCall.lean:77` (`setToList (Lem_Set.filter …)` — still valid, the
+  list is produced by `setToList`; the ARGUMENT set is now a `Pset`);
+  `CerbFunMapInstances.lean:15-25` — the "PHANTOM requirement" comment
+  describes `Lem_Map_extra.fold` as `setFold … (fmapElements m)`: stale
+  (`fold` is now `Set_helpers.fold` over `Map.toSet` = `Pset.fold`,
+  ascending), rewrite the comment; `CerbUtils.lean:59-61` `set_fold`
+  ("Lem sets are sorted lists via LemSet … foldl") is dead and its
+  premise false — delete. Generated uses of `setToList`/`setFromListBy`/
+  `setAddBy`/`setMemberBy` (Cmm_op, Cmm_csem, Core_linking, Core_run,
+  Utils, Driver, Cabs_to_ail_effect, Translation_aux, Core_typing,
+  Cn_desugaring, Defacto_memory) regenerate with the new types.
+- **Division-by-zero panic sites**: the generated `Defacto_memory_aux.lean`
+  (7 lines with `/` or `%`, derived count) and `CerbMem.lean` (22) now
+  render through `lemNatDiv`/`lemIntegerDiv`/… and PANIC on a zero
+  divisor where the OCaml oracle raises. The hand-written guard
+  `CerbMem.lean:1352` `if n2 == 0 then 0 else integerDiv_t n1 n2` returns
+  0 where the oracle RAISES `Division_by_zero`: a cerberus-side
+  divergence for the zero-discrepancy census — flagged, not fixed here.
+- **Renames (F8 + the audit's rename-scope fix)**: NO cerberus generated
+  ROOT definition is newly renamed by the extended `lean_constants` (the
+  13 root defs renamed at bc1bae7 — `attribute0`, `break0`, `catch0`,
+  `get0`, `guard0`, `liftM0`, `mapM0`, `modify0`, `namespace0`,
+  `prefix0`, `return0`, `run0`, `throw0` — stay renamed; the only
+  NEW-list hit, `main`, is the hand-written entry point). Constructors
+  KEEP the avoidance (see §6 F2: dropping it made every pattern on an
+  exported constructor that shadows a root constant ambiguous), so the
+  17 constructors renamed at bc1bae7 (`Add0 And0 Div0 Mod0 Mul0 Ne0 Or0
+  Sub0` in AilSyntax, `Array0 Float0 Union0 Void0` in Ctype, `Bool0
+  Char0` in IntegerType, `Dynamic0 Neg0` in Core, `One0` in Cmm_csem)
+  are UNCHANGED at the pin bump. Record fields no longer avoid the list:
+  the field `Core.main` keeps its name (`Main.lean:562`, `CerbCall.lean:9`
+  keep compiling) and the one field renamed at bc1bae7, `Utils.default0`,
+  changes back to `default` (a hand-written reference to `default0`
+  would break loudly).
+- **Generation-time refusals** newly possible at the bump: `Debug.print_*`
+  and `rational`/`real`/`float64`/`float32` uses (none in
+  `frontend/model`, grep); a mixed-order variant self-referential under
+  an unsupported head (none found by the scan).
+
 - F4: 35 mixed-order variants change instance shape (derived
   `compare_derived`); order moves toward the oracle in `Set.choose`,
   `topo_order`, sorts. Differential battery is the gate.
@@ -640,3 +710,97 @@ refusal (with the X2 hook) unless the operator wants the Float support.
   render as their `lem*` rewrites.
 - LemLib API removals: the list-based set functions, `set_tc`, the
   `Std.TreeMap` Fmap internals, `LemInt32`/`LemInt64`.
+
+
+## 6. Audit-response addendum (2026-09-03)
+
+Fresh audit verdict: MERGE-SAFE-WITH-NOTES, two HIGH record-integrity
+items + notes; one audit-response commit follows this addendum.
+
+**F1 (HIGH) — census row X2 was FALSE.** The audit's probe `let u =
+Debug.print_endline "dbg" in match u with () -> "after"` printed `dbg` on
+OCaml and NOTHING on Lean (exit 0, no PANIC): the `Unit`-valued
+`failwithI` was dead-code-eliminated (`never_extract` prevents
+closed-term extraction, not DCE). FIX: the class-(c) GENERATION-TIME
+refusal — the `LemUnsupported.` marker protocol (DESIGN.md; backend
+`lean_unsupported_check_cref`/`_type` at every constant-reference and
+type-annotation site outside library modules). Routed through it:
+`Debug.print_string`/`print_endline`, and the X4 family — the types
+`rational`/`real`/`float64`/`float32` and their value entry points
+`rationalFromNumeral/FromInt/FromInteger/FromFrac`,
+`realFromNumeral/FromInteger/FromFrac`. Red → green, verbatim: the
+bc1bae7 lem ACCEPTED the probe (exit 0; emitted `def  probe   (u  : Unit)
+:  String :=  let  u  := Lem_Debug.print_endline  "dbg";  match  u with |
+() =>  "after"`); the fixed lem: `Error: Lean backend: constant
+'Debug.print_endline' has no implementation on the Lean target (its
+library rep is the unsupported marker 'LemUnsupported.debugPrintEndline';
+the OCaml reference implements it) — this use is REFUSED at generation
+time: remove it, or give the enclosing definition a Lean target_rep`
+(exit 1). Negative probes `neg_unsupported_debug_print`,
+`neg_unsupported_rational` (type leg), `neg_unsupported_real_entry` all
+`OK (rejected as declared)`. Census rows X2/X4, the manual, DESIGN.md and
+TODO #8 corrected/registered. Sizing: S (backend ~60 lines, one marker
+namespace in LemLib, rep edits).
+
+**F2 (HIGH) — the F8 rename also renamed record fields and constructors.**
+`rename_top_level.ml` applied `get_fresh_name` against the reserved list
+to every shown constant; the cerberus field `Core.main` would have become
+`main0`. The orchestrator's decision [AGENT, orchestrator,
+operator-overridable] was to restrict the avoidance to ROOT-namespace
+constants for both fields and constructors, with the instruction to
+VERIFY the no-clash claim. VERIFIED, with a split result: (i) a
+stand-alone probe — `inductive T | Sep | One` + `export T (Sep One)`,
+`structure R where main : Nat; mt : Bool` + `open R`, uses `Sep 1`,
+`One`, `main r`, `mt r` — compiles on Lean 4.28.0 (exit 0), so
+EXPRESSIONS resolve by expected type; but (ii) applying the restriction
+to constructors made the parity corpus FAIL to build, verbatim:
+`P_eval_order.lean:151:9: ambiguous pattern, use fully qualified name,
+possible interpretations [_root_.One, two.One]` and `P_records.lean:316:90:
+ambiguous pattern … [_root_.Add, expr.Add]`, `… [_root_.Seq, stmt.Seq]`
+— PATTERNS on an exported constructor that shadows a root constant are
+ambiguous (loud, but every such generated file breaks). Disposition
+[AGENT]: fields drop the root-constant avoidance (the cerberus case,
+`Core.main`), constructors keep it exactly as at bc1bae7 (so `Add0`,
+`One0`, … do not move at the pin bump); the alternative — emitting
+fully-qualified constructor patterns — is a larger backend change and
+is registered for the operator. Corpus tree-diff and cerberus
+enumeration: §3.3 and §5 (updated).
+
+**F4 — consumer-note omissions** filled in §5 (removed names with
+referencing files; Pset-typed sites; division-by-zero panic sites and
+the `CerbMem.lean:1352` cerberus-side divergence flag).
+
+**N4/X3 conversions (FIX, class-(a) shape).** `natFromNatural`,
+`intFromInteger` (the `Nat_big_num.to_int` reps) fail loudly outside the
+OCaml 63-bit range where the reference raises `Failure
+"int_of_big_int"`; failure probe `f_int_of_big_num` — verbatim: `OK: both
+fail (lean exit 134: PANIC at … Failure "int_of_big_int"
+(4611686018427387904 outside the OCaml 6…); stdout prefix identical (2
+lines)`. `natFromNumeral`/`intFromNumeral` keep the literal-passthrough
+reps: a lem numeral is emitted as a literal on both targets (a literal
+≥ 2^62 is an OCaml compile error — folded into the N4 exception row).
+The arithmetic wrap stays the EXCEPTION-CASE pending the ruling.
+
+**Record precision (F5/F6/F7):** F6 record-field sentence corrected
+(labels sorted to declaration order, then right-to-left — last-declared
+first); F6's red reproducible only on the pre-F5 rows (stated); F4 tally
+criterion stated, `GenTypes.genType` added; `lemListUnfoldr` disposition
+recorded as a TEMPORAL kernel-opaque boundary with its mover; the
+comprehensive Makefile's six `lake build` invocations run through
+`$(CAPPED)` (fail-noisy `check-capped` target) with the runner's
+`CERB_MEM_MAX`.
+
+Close-out battery after the response (final tree), verbatim:
+`=== Generation: 47 passed, 0 failed, 0 skipped ===`; compile green; the
+5 compiled phases OK; 45 `OK (rejected as declared)` (42 +
+`neg_unsupported_debug_print`, `neg_unsupported_rational`,
+`neg_unsupported_real_entry`); 3 invariance OK; parity 20 `OK: parity` +
+8 `OK: both fail` (+ `f_int_of_big_num`) + 2 XFAIL (F2); `make lean`
+exit 0. `nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)`. `lean-lib` `lake build`: `Build completed successfully (37
+jobs).` Corpus tree-diff (bc1bae7 sources, bc1bae7 lem vs final lem):
+13 of 92 files, the SAME set as §3.3 (11 files + `test_supply.lem`'s
+value-binding refusal) — the rename-scope change alters no file of the
+corpus (no record field of the bc1bae7 tests is named like a Lean root
+constant; the `Empty0`/`map0` identifiers in the diffs are constructor/def
+names present on BOTH sides), and the constructor renames are unchanged
+by design (F2 above).

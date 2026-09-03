@@ -1,0 +1,12 @@
+(* Failure probe (census N4, conversion leg): natFromNatural / intFromInteger
+   are Nat_big_num.to_int on the OCaml reference, which raises
+   Failure "int_of_big_int" at 2^62 (the 63-bit OCaml int range);
+   Lean's lemNatFromNatural / lemIntFromInteger fail loudly at the same
+   bound. The arithmetic WRAP of nat/int inside the range is the pending
+   exception-case, not exercised here. *)
+open import Pervasives_extra
+
+let steps : list (nat -> string) =
+  [ (fun n -> "before: 2^62-1 -> " ^ stringFromNat (natFromNatural (naturalPow 2 62 - 1 - naturalFromNat n)));
+    (fun n -> "before int: " ^ stringFromInt (intFromInteger (0 - integerPow 2 62 + integerFromNat n)));
+    (fun n -> "at 2^62: " ^ stringFromNat (natFromNatural (naturalPow 2 62 + naturalFromNat n))) ]

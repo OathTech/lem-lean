@@ -142,7 +142,25 @@ let rename_constant (targ : Target.non_ident_target) (consts : NameSet.t) (const
     let nk = const_descr_to_kind (c, c_d) in
     let n'_opt = compute_target_rename_constant_fun targ nk n in
     let n' = Util.option_default n n'_opt in
-    
+
+    (* Lean (parity-fix audit response, 2026-09-03): the target's
+       reserved-constant list (library/lean_constants: Lean tokens and
+       ROOT-namespace declarations) is avoided by root-namespace constants
+       and by CONSTRUCTORS, but not by RECORD FIELDS. Fields live in their
+       type's namespace (`T.f`) and are only ever emitted as projections /
+       structure-instance labels (probe-verified: `structure R where main :
+       Nat; mt : Bool` with `open R` and uses `r.main`, `main r`, `mt r`
+       compiles on Lean 4.28) — previously the cerberus field `Core.main`
+       became `main0`. Constructors are exported to the root scope by the
+       backend (`export T (C ...)`) and are used in PATTERNS, where Lean
+       reports `ambiguous pattern, use fully qualified name, possible
+       interpretations [_root_.One, two.One]` (measured on the parity
+       corpus for `One`, `Add`, `Seq`) — so they keep the avoidance, as at
+       bc1bae7. Keyword escaping («») is the backend's, unaffected here. *)
+    let consts = (match targ, nk with
+      | Target.Target_lean, Nk_field _ -> NameSet.empty
+      | _ -> consts) in
+
     (* check whether the computed name is fresh and 
        enforce it if necessary *)
     let (is_auto_renamed, n''_opt) = 
