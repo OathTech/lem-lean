@@ -5,10 +5,14 @@
    draw-sequence and signature pins live here.
 
    The `example ... := rfl` rows are KERNEL-checked draw-order pins:
-   they are the charter-O1 evidence that the transform sequences draws
-   in left-to-right depth-first (strict evaluation) order, with exact
-   successor numbering — supplySplit s = (s, s+1), nothing skipped,
-   nothing reordered. -/
+   the transform sequences draws in the OCAML TARGET's evaluation order
+   (parity-fix F6, 2026-09-03: right-to-left within tuples, argument
+   lists, list literals, constructor/record fields, infix operands;
+   let/if/match as written), with exact successor numbering —
+   supplySplit s = (s, s+1), nothing skipped. Every value below is
+   quoted from the compiled OCaml reference run of the same shapes
+   (tests/comprehensive/parity/expected/p_supply_shapes.out, the
+   two-target pin; e.g. "draw_list 5 = [6; 5] @ 7"). -/
 
 import Test_supply
 import Test_supply_multi
@@ -23,10 +27,10 @@ example : Nat → Nat → Unit → (Nat × Nat × Nat) × Nat × Nat := two_stre
 
 /- === draw-sequence pins (kernel-checked, exact numbering) === -/
 example : draw_two 100 () = ((100, 101), 102) := rfl
-example : draw_list 5 () = ([5, 6], 7) := rfl
-example : mk_wrap 3 () = (Wrap 3 4, 5) := rfl
-example : mk_srec 7 () = ({ ra := 7, rb := 8 }, 9) := rfl
-example : read_ra 7 () = (7, 9) := rfl
+example : draw_list 5 () = ([6, 5], 7) := rfl            -- OCaml: draw_list 5 = [6; 5] @ 7
+example : mk_wrap 3 () = (Wrap 4 3, 5) := rfl            -- OCaml: mk_wrap 3 = Wrap 4 3 @ 5
+example : mk_srec 7 () = ({ ra := 8, rb := 7 }, 9) := rfl -- OCaml: mk_srec 7 = (8, 7) @ 9
+example : read_ra 7 () = (8, 9) := rfl                   -- OCaml: read_ra 7 = 8 @ 9
 example : sum_two 10 () = (21, 12) := rfl
 
 /- control forms: only the taken branch consumes -/
@@ -78,15 +82,15 @@ example : uses_draw_two 100 7 = (208, 102) := rfl
 /- destructuring RHS evaluates once: pair_draw's two draws happen
    exactly once, then c draws the next id (a duplicated RHS would give
    c = 34, not 32) -/
-example : pair_draw 30 () = ((30, 31), 32) := rfl
-example : destructure_once 30 () = ((30, 31, 32), 33) := rfl
+example : pair_draw 30 () = ((31, 30), 32) := rfl           -- OCaml: pair_draw 30 = (31, 30) @ 32
+example : destructure_once 30 () = ((31, 30, 32), 33) := rfl -- OCaml: destructure_once 30 = [31; 30; 32] @ 33
 
-/- top-level multi-name destructuring (the L0 single-RHS emitter):
-   each projection makes ONE threaded call of the shared RHS def —
-   within a call the RHS draws exactly once (top_a's final supply
-   is 502, two draws, not four) -/
-example : top_a 500 = (500, 502) := rfl
-example : top_b 500 = (501, 502) := rfl
+/- a draw under a target_rep'd library constructor (F5: `Just` = `some`) -/
+example : mk_just 40 () = (some (41, 40), 42) := rfl        -- OCaml: mk_just 40 = Just ((41, 40)) @ 42
+
+/- top-level VALUE bindings that draw are REFUSED (F6 / deviation-4:
+   OCaml evaluates them once at module initialisation);
+   negative/neg_supply_toplevel_value.lem pins the refusal -/
 
 /- reader × supply composition (reader injected, supply threaded) -/
 example : both 9 40 () = (49, 41) := rfl
@@ -98,9 +102,11 @@ example : seeded 40 42 3 = (85, 41) := rfl
 example : uses_seeded 40 3 = (85, 41) := rfl
 
 /- fuel × supply: the worker threads the supply through the
-   decremented self-call -/
-example : fuel_draws 60 2 = ([60, 61], 62) := rfl
-example : uses_fuel_draws 60 2 = ([60, 61, 62], 63) := rfl
+   decremented self-call; `tick () :: fuel_draws (n - 1)` evaluates the
+   recursive call FIRST (OCaml: cons arguments right-to-left), so the
+   draws come out descending -/
+example : fuel_draws 60 2 = ([61, 60], 62) := rfl              -- OCaml: fuel_draws 60 = [61; 60] @ 62
+example : uses_fuel_draws 60 2 = ([62, 61, 60], 63) := rfl    -- OCaml: uses_fuel_draws 60 = [62; 61; 60] @ 63
 /- fuel exhaustion returns the sentinel with the supply UNCONSUMED at
    the exhaustion point (one draw happened before fuel ran out) -/
 example : fuel_draws_lemFuel 1 60 2 = ([60], 61) := rfl
@@ -109,8 +115,12 @@ example : fuel_draws_lemFuel 1 60 2 = ([60], 61) := rfl
    to the default-fuel sibling; beyond it the cut returns the partial
    draw list with the supply at the cut point -/
 example : Nat → Nat → List Nat × Nat := fuel_draws_b
-example : fuel_draws_b 60 2 = ([60, 61], 62) := rfl
-example : fuel_draws_b 60 5 = ([60, 61, 62], 63) := rfl
+example : fuel_draws_b 60 2 = ([61, 60], 62) := rfl           -- OCaml: fuel_draws_b2 60 = [61; 60] @ 62
+/- the budget cut is a Lean-only construct (no OCaml counterpart): the
+   worker exhausts after descending 3 levels, returns the sentinel []
+   with the supply unconsumed (60), then the 3 pending conses draw on
+   the way back up — 60, 61, 62 — in the OCaml cons order -/
+example : fuel_draws_b 60 5 = ([62, 61, 60], 63) := rfl
 
 /- === multi-supply ordering (test_supply_multi.lem): binders sorted
    by name (tick before tock); each draw advances only its own

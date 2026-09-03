@@ -190,3 +190,27 @@ end
 
 assert eq_lookup_ok : eq_lookup (1:nat) [(1, "a"); (2, "b")] = Just "a"
 assert eq_lookup_miss : eq_lookup (3:nat) [(1, "a"); (2, "b")] = Nothing
+
+(* ================================================================
+   Section F8 (parity-fix slice 2026-09-03; noodle probe p_keywords):
+   top-level definitions whose names are Lean 4 tokens (`from`,
+   `termination_by`, `decreasing_by`, `elab`), the entry-point name
+   `main` (Lean checks its type wherever it is declared), and a
+   root-namespace core declaration (`dite`). Pre-fix each was a Lean
+   build error ("unexpected token 'from'; expected identifier", "`main`
+   function must have type ...", "`dite` has already been declared").
+   The names now ride the library/lean_constants avoid set (renamed
+   `from0`, ...) exactly like `at`/`by`/`ite` before them; the OCaml
+   target emits them verbatim (valid OCaml). Two-target parity:
+   tests/comprehensive/parity/probes/p_keywords.lem.
+   ================================================================ *)
+let from (x : nat) : nat = x + 1
+let termination_by (x : nat) : nat = x + 47
+let decreasing_by (x : nat) : nat = x + 48
+let elab (x : nat) : nat = x + 50
+let main (x : nat) : nat = x + 59
+let dite (x : nat) : nat = x + 83
+let kw_f8_use (y : nat) : nat =
+  from y + termination_by y + decreasing_by y + elab y + main y + dite y
+assert kw_f8_from : (from 0 = 1)
+assert kw_f8_use : (kw_f8_use 0 = 288)

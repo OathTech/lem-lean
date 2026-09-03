@@ -135,3 +135,25 @@ and gnode =
 
 val residual_value : gnode
 let residual_value = GWrap (FN (fun n -> n + 1) (GN 0))
+
+(* ================================================================
+   Parity-fix F4 (2026-09-03; noodle probe p_cmp_order): derived Ord on a
+   SINGLE variant that declares a nullary constructor after a block
+   constructor must rank like OCaml's polymorphic compare (nullary
+   constructors below block constructors, declaration order within each
+   class) — previously only mutual blocks took the ctor_rank_ocaml path
+   and single variants got Lean's declaration-index order. Expected
+   values are the compiled OCaml target's output (parity pin
+   tests/comprehensive/parity/expected/p_cmp_order.out):
+     F vs B 0 = LT, B 5 vs C = GT, TLeaf vs TNode = LT (at depth too).
+   ================================================================ *)
+type f4v = F4A | F4B of nat | F4C | F4D of nat * nat | F4E of string | F4F
+type f4tr = F4Node of f4tr * nat | F4Leaf
+assert f4_nullary_below_block : (setElemCompare F4F (F4B 0) = LT)
+assert f4_block_above_nullary : (setElemCompare (F4B 5) F4C = GT)
+assert f4_nullary_decl_order : (setElemCompare F4A F4C = LT && setElemCompare F4C F4F = LT)
+assert f4_block_decl_order : (setElemCompare (F4B 9) (F4D 0 0) = LT && setElemCompare (F4D 9 9) (F4E "") = LT)
+assert f4_fields_lex : (setElemCompare (F4D 1 2) (F4D 1 3) = LT && setElemCompare (F4D 2 0) (F4D 1 9) = GT)
+assert f4_recursive_root : (setElemCompare F4Leaf (F4Node F4Leaf 0) = LT)
+assert f4_recursive_depth : (setElemCompare (F4Node F4Leaf 1) (F4Node (F4Node F4Leaf 0) 1) = LT)
+assert f4_beq_structural : (F4D 1 2 = F4D 1 2 && not (F4D 1 2 = F4D 2 1) && not (F4A = F4C))

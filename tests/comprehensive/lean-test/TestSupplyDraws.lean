@@ -6,11 +6,13 @@
    (interpreter/compiler divergences are invisible to elaborator
    asserts). Witnessed here:
 
-   1. draw sequencing: strict left-to-right successor numbering
-      through let chains, argument hoisting, and threaded calls;
+   1. draw sequencing: successor numbering in the OCaml target's
+      evaluation order (parity-fix F6: right-to-left within one node,
+      let chains as written) through let chains, argument hoisting,
+      and threaded calls — values quoted from the OCaml reference run
+      (tests/comprehensive/parity/expected/p_supply_shapes.out);
    2. single evaluation: a destructuring RHS's draws happen exactly
-      once per call (destructure_once's third draw is s+2, and the
-      top-level projections' final supply shows two draws, not four);
+      once per call (destructure_once's third draw is s+2);
    3. fuel × supply: the worker threads the supply through the
       decremented self-call, and exhaustion returns the supply
       unconsumed at the exhaustion point;
@@ -30,16 +32,16 @@ def check (name : String) (ok : Bool) : IO Bool := do
 def main : IO UInt32 := do
   let r1 ← check "draw_two 100 () = ((100, 101), 102)"
     (draw_two 100 () == ((100, 101), 102))
-  let r2 ← check "destructure_once 30 () = ((30, 31, 32), 33) [RHS draws once]"
-    (destructure_once 30 () == ((30, 31, 32), 33))
-  let r3 ← check "top_a 500 = (500, 502) / top_b 500 = (501, 502) [projections: one RHS call each]"
-    (top_a 500 == (500, 502) && top_b 500 == (501, 502))
+  let r2 ← check "destructure_once 30 () = ((31, 30, 32), 33) [RHS draws once; OCaml order]"
+    (destructure_once 30 () == ((31, 30, 32), 33))
+  let r3 ← check "mk_just 40 () = (some (41, 40), 42) / draw_list 5 () = ([6, 5], 7) [rep'd ctor arg; right-to-left]"
+    (mk_just 40 () == (some (41, 40), 42) && draw_list 5 () == ([6, 5], 7))
   let r4 ← check "uses_both 9 40 3 = (52, 41) [reader x supply]"
     (uses_both 9 40 3 == (52, 41))
   let r5 ← check "uses_seeded 40 3 = (85, 41) [reader_seed x supply]"
     (uses_seeded 40 3 == (85, 41))
-  let r6 ← check "fuel_draws 60 2 = ([60, 61], 62) [fuel x supply]"
-    (fuel_draws 60 2 == ([60, 61], 62))
+  let r6 ← check "fuel_draws 60 2 = ([61, 60], 62) [fuel x supply; OCaml cons order]"
+    (fuel_draws 60 2 == ([61, 60], 62))
   let r7 ← check "fuel_draws_lemFuel 1 60 2 = ([60], 61) [exhaustion leaves supply at cut]"
     (fuel_draws_lemFuel 1 60 2 == ([60], 61))
   let r8 ← check "two_streams 10 100 () = ((10, 100, 11), 12, 101) [independent streams]"

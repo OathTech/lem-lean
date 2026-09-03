@@ -9,10 +9,15 @@ open import Pervasives
    extra explicit parameter (after any reader binders) and returns the
    final supply paired with its result; a draw is
    `let (v, s') := LemLib.supplySplit s` (supplySplit s = (s, s+1)).
-   The transform sequences draws in left-to-right depth-first order —
-   the evaluation order of the strict Lean code it replaces (charter
-   obligation O1) — and is DETERMINISTIC state-passing only: it never
-   introduces a nondeterminism branch point (charter non-goal O7).
+   The transform sequences draws in the OCaml target's evaluation
+   order (the reference semantics of the lem program; parity-fix F6,
+   2026-09-03): right-to-left within tuples, argument lists, list
+   literals, constructor/record fields (record fields in declaration
+   order) and infix operands; let/if/match as written. It is
+   DETERMINISTIC state-passing only: it never introduces a
+   nondeterminism branch point (charter non-goal O7). The two-target
+   pin of every shape here is tests/comprehensive/parity/probes/
+   p_supply_shapes.lem (OCaml counter vs Lean supply, byte-identical).
 
    NOTE on observation: a lifted def cannot be referenced from an
    assert (there is no supply value at assert scope — the fail-closed
@@ -64,7 +69,7 @@ let mk_srec u = <| ra = tick (); rb = tick () |>
 val read_ra : unit -> nat
 let read_ra u = (mk_srec ()).ra
 
-(* infix operands (hoisted left-to-right) *)
+(* infix operands (hoisted right-to-left, OCaml order) *)
 val sum_two : unit -> nat
 let sum_two u = tick () + tick ()
 
@@ -150,11 +155,17 @@ let destructure_once u =
   let c = tick () in
   (a, b, c)
 
-(* top-level multi-name destructuring let over a drawing RHS: rides the
-   L0 single-RHS emitter (one private lemLetRhs_* def; each projection
-   makes ONE threaded call of it — per call the RHS draws exactly
-   once) *)
-let (top_a, top_b) = pair_draw ()
+(* A drawing TOP-LEVEL VALUE binding (`let (top_a, top_b) = pair_draw ()`)
+   is REFUSED since the parity-fix slice (2026-09-03, F6/deviation-4):
+   the OCaml reference evaluates a value binding once at module
+   initialisation, which per-use state passing cannot mirror; the
+   shape lives in negative/neg_supply_toplevel_value.lem. *)
+
+(* a supply draw under a target_rep'd LIBRARY constructor (`Just` = `some`)
+   — refused before the parity-fix slice (F5), now threaded like any
+   pure head: the drawing arguments become variables *)
+val mk_just : unit -> maybe (nat * nat)
+let mk_just u = Just (tick (), tick ())
 
 (* === Section 6: composition with reader === *)
 val cfg : unit -> nat
