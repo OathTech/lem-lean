@@ -78,14 +78,15 @@ the negative/panic test legs — is `tests/comprehensive/`:
 - **Zero axioms; effects are explicit state.** Neither the library
   nor generated code declares any axiom: everything in a downstream
   proof's axiom set comes from Lean itself. Ambient counters are
-  threaded as explicit state by the supply lifting
-  (`declare {lean} supply val`; draws are `LemLib.supplySplit`, a
-  plain def), ambient configuration by the reader lifting. The
-  historical effect boundary (`declare {lean} effectful`, a library
-  axiom projecting `BaseIO` externs into pure types) was retired by
-  the effect-retirement arc: the Lean backend now refuses the
-  annotation fail-closed, naming supply lifting as the migration
-  path (HISTORY note in `lean-lib/LemLib.lean`).
+  threaded as explicit state ("supply lifting": a definition marked
+  ``declare {lean} supply val`` takes and returns the counter; draws
+  are `LemLib.supplySplit`, a plain def), and ambient configuration
+  is threaded as an explicit parameter ("reader lifting"). An earlier
+  design had a library axiom (`declare {lean} effectful`) projecting
+  `BaseIO` externs into pure types; it is gone, and the backend now
+  rejects that annotation at generation time, naming supply lifting
+  as the replacement (the note at the top of `lean-lib/LemLib.lean`
+  records the change).
 - **Derived instances are real and OCaml-compatible.** `BEq`/`Ord`
   are derived structurally per mutual block with OCaml polymorphic
   compare parity; `Inhabited` is derived fail-closed (bounded,
@@ -135,5 +136,8 @@ with sources and prices); the upstream-facing manual chapter
 [`doc/manual/backend_lean.md`](../manual/backend_lean.md);
 [`doc/notes/`](../notes/) for dated design records;
 `src/lean_backend.ml` for the backend itself; `lean-lib/` for the
-runtime; bug reports with reproducers live downstream in
-cerberus-lean's `lean_frontend/lembugs/`.
+runtime. Defects in this backend are recorded here, as dated records
+in `doc/lean-backend/` with reproducers in `tests/comprehensive/`;
+reports we intend for upstream Lem itself are drafted downstream in
+cerberus-lean's `lean_frontend/docs/upstream-tray/lem/` (see that
+directory's README).
