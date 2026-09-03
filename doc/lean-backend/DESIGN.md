@@ -324,10 +324,14 @@ definitionally bugs". Every such choice is a QUANTIFIED PARAMETER of the
 generated code, threaded from the entry point (the reader lifting is
 the mechanism), so a consumer's theorem can range over it. A numeral may
 live only in a caller's command-line default, never in LemLib, in
-generated code or in a target_rep. Constants forced by the OCaml
-reference are not magic; a recursion bound COMPUTED inside a definition
-(even from the data, e.g. a tree height) is magic unless it is passed in
-by the calling context or eliminated by a termination proof. Any
+generated code or in a target_rep. The general form [USER 2026-09-03],
+verbatim: "any instance of a value that can be quantified over by a
+context / theorem is fine. Defaults that are chosen eg. in test suites
+are fine. Any and all magic values that are hardcoded and can't be
+quantified over are definitionally bugs (unless they mirror lem or ISO-C
+design choices)". A recursion bound COMPUTED inside a definition (even
+from the data, e.g. a tree height) is hardcoded in that sense, unless it
+is passed in by the calling context or eliminated by a termination proof. Any
 mechanism that mints such numerals per declaration is itself the
 defect. Record: `2026-09-03_fuel-parameter-design.md`.
 
