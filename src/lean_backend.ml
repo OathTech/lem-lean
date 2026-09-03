@@ -151,11 +151,25 @@ let lean_syntax_keywords = [
   "break"; "continue"; "try"; "finally"; "unless"; "suffices";
   "nomatch"; "nofun"; "coinductive"; "axiom"; "opaque"; "universe";
   "scoped"; "local"; "public"; "nonrec"; "omit";
+  (* parity-fix F8 (2026-09-03): tokens the previous table missed — each
+     was a probe-verified Lean parse error when emitted bare *)
+  "from"; "termination_by"; "decreasing_by"; "elab"; "macro_rules"; "elab_rules";
+  "initialize"; "builtin_initialize"; "declare_syntax_cat"; "register_option";
+  "include"; "exposed";
   "notation"; "prefix"; "postfix"; "infixl"; "infixr"; "infix";
   "none"; "some"; "true"; "false"; "default";
   "this"; "rfl"; "calc"; "decide"; "sorry";
   "pure"; "get"; "set"; "throw"; "panic"; "admit"; "trivial"
 ]
+
+(* Supply transform (parity-fix F5/F6, 2026-09-03): a threaded VALUE is
+   either a synthesized variable (a draw result, a threaded call's or
+   control form's joined value) or a pure/compound rendering. Keeping the
+   variable NAME lets the application renderer receive real `Var`
+   expressions for threaded arguments instead of a fragile substitution
+   memo (identifier-form target reps rebuild the argument nodes). *)
+type lean_sval = SVar of string | SPure of Output.t
+let lean_sv_out = function SVar n -> Output.meta_utf8 n | SPure o -> o
 (* Arc-8 S1 (derived Inhabited instances, replacing the DAEMON fallback):
    process-global census of the Inhabited instances this backend has
    emitted, keyed by type Path (modules are processed in dependency order
@@ -1496,6 +1510,20 @@ let lean_supply_prepass env (ds : def list) =
               || not (Types.Cdset.is_empty
                         (Types.Cdset.inter used !St.supply_lifted)) in
             if needs then begin
+              (* Parity-fix F6 (deviation-4 disposition, [USER] zero-
+                 discrepancy ruling): a drawing top-level VALUE binding
+                 is evaluated ONCE at module initialisation by the OCaml
+                 reference, while state-passing would re-run its draws at
+                 every use — no faithful lifting exists, so it is refused
+                 (a loud refusal is not a divergence; a per-use def was). *)
+              List.iter (fun (c, a) ->
+                  if a = 0 then begin
+                    let cd = c_env_lookup Ast.Unknown env.c_env c in
+                    raise (Reporting_basic.err_general true cd.spec_l
+                      (Printf.sprintf
+                        "Lean backend: supply draw in the top-level VALUE binding '%s' (a definition without parameters) is unsupported: the OCaml reference evaluates a value binding once at module initialisation, whereas supply threading would draw afresh at every use — make it a function (e.g. of unit) so each call site draws explicitly"
+                        (Name.to_string (Path.get_name cd.const_binding))))
+                  end) arities;
               St.supply_lifted := Types.Cdset.union defined !St.supply_lifted;
               List.iter (fun (c, a) ->
                   St.supply_arity := Types.Cdmap.insert !St.supply_arity (c, a))
@@ -3463,11 +3491,22 @@ type pat_style = FunParam | MatchArm
     (* ===== The supply-threading body transform =====
 
        [supply_thread senv e] emits e with every draw and every lifted
-       call A-normalized into let-bindings, sequenced in LEFT-TO-RIGHT
-       DEPTH-FIRST order — exactly the evaluation order of the strict
-       Lean code being replaced (charter obligation O1). It returns
-       (bindings, value, senv'): the bindings to emit before the value,
-       the (pure) value output, and the updated supply environment
+       call A-normalized into let-bindings, sequenced in the EVALUATION
+       ORDER OF THE OCAML TARGET — the reference semantics of the lem
+       program (parity-fix F6, 2026-09-03; [USER] ruling: follow the LEM
+       semantics, i.e. what the OCaml backend computes). ocamlopt and
+       the bytecode compiler evaluate the subexpressions of one node
+       RIGHT-TO-LEFT: function-application arguments (then the head),
+       tuple components, constructor arguments, list-literal elements,
+       infix-operator operands, and record fields in the type's FIELD
+       DECLARATION order (translcore sorts labels by position before
+       the right-to-left makeblock) — while let, sequence, if and match
+       are ordered as written (binding/test/scrutinee first, then the
+       taken branch). Every rule below was established by a compiled
+       two-target probe (tests/comprehensive/parity/probes/p_eval_order.lem,
+       pin expected/p_eval_order.out) before it was implemented. It
+       returns (bindings, value, senv'): the bindings to emit before the
+       value, the (pure) value output, and the updated supply environment
        (supply cref -> current state variable name). Supply-free
        subexpressions delegate to the ordinary [exp] emitter verbatim.
 
@@ -3505,13 +3544,13 @@ type pat_style = FunParam | MatchArm
         ([from_string "let ("; from_string v]
          @ List.concat_map (fun (_, s) -> [from_string ", "; from_string s]) updates
          @ [from_string ") := ("; rhs; from_string ")"]) in
-      (bind, from_string v, updates)
+      (bind, SVar v, updates)
     (* An if/match ARM (or a def body) rendered to the pair form:
        (bindings; (value, final states)). *)
     and supply_arm inside_instance senv e =
       let (bs, v, senv') = supply_thread inside_instance senv e in
       let tup = Output.flat
-        ([from_string "("; v]
+        ([from_string "("; lean_sv_out v]
          @ List.concat_map (fun s -> [from_string ", "; from_string s]) (supply_state_names senv')
          @ [from_string ")"]) in
       Output.flat
@@ -3530,6 +3569,7 @@ type pat_style = FunParam | MatchArm
            @ List.concat_map (fun s -> [from_string ", "; from_string s])
                (supply_state_names senv1)
            @ [from_string ")"]) in
+      let vl = lean_sv_out vl in
       let rhs =
         if kind = "&&" then
           Output.flat [from_string "if "; vl; from_string " then "; arm_r;
@@ -3539,13 +3579,39 @@ type pat_style = FunParam | MatchArm
                        from_string " else "; arm_r] in
       let (bind, v, senv') = supply_join senv1 rhs in
       (bs1 @ [bind], v, senv')
+    (* F5 (2026-09-03): materialise threaded argument values as real `Var`
+       expressions so the shared application renderer (target reps, ascii
+       reps, renaming, paren insertion) can render an application whose
+       arguments drew — it may REBUILD argument nodes (identifier-form
+       reps inline to `App (Backend rep, args)`; mk_opt_paren_exp re-creates
+       spines), which defeated the previous physical-identity substitution
+       memo and left library-constructor arguments (`Just (fresh ())`)
+       refused with a misleading message. A synthesized variable is used
+       as-is; a compound threaded value is first bound to a fresh name
+       (A-normal form). Pure arguments keep their original node. *)
+    and supply_atomize_args (args : exp list) (vals : lean_sval list) : Output.t list * exp list =
+      List.fold_right2 (fun a v (bs, es) ->
+          if not (exp_needs_supply a) then (bs, a :: es)
+          else begin
+            let (bs', name) = (match v with
+              | SVar n -> ([], n)
+              | SPure o ->
+                let n = supply_fresh_name "A" in
+                ([Output.flat [from_string "let "; from_string n; from_string " := "; o]], n)) in
+            let var = C.mk_var (Typed_ast.exp_to_locn a)
+                (Name.add_lskip (Name.from_rope (Ulib.Text.of_string name)))
+                (Typed_ast.exp_to_typ a) in
+            (bs' @ bs, var :: es)
+          end)
+        args vals ([], [])
+    (* Thread a node's subexpressions in OCaml order: the LAST element is
+       evaluated first (right-to-left); the values come back in positional
+       order, the bindings in evaluation order. *)
     and supply_thread_list inside_instance senv es =
-      let (bs_rev, vs_rev, senv') =
-        List.fold_left (fun (bs, vs, senv) e ->
-            let (b, v, senv') = supply_thread inside_instance senv e in
-            (List.rev_append b bs, v :: vs, senv'))
-          ([], [], senv) es in
-      (List.rev bs_rev, List.rev vs_rev, senv')
+      List.fold_right (fun e (bs, vs, senv) ->
+          let (b, v, senv') = supply_thread inside_instance senv e in
+          (bs @ b, v :: vs, senv'))
+        es ([], [], senv)
     and supply_thread inside_instance senv (e : exp) =
       let l = Typed_ast.exp_to_locn e in
       let err msg = raise (Reporting_basic.err_general true l msg) in
@@ -3553,13 +3619,13 @@ type pat_style = FunParam | MatchArm
         if needs_parens (C.exp_to_term e') then
           Output.flat [from_string "("; exp inside_instance e'; from_string ")"]
         else exp inside_instance e' in
-      if not (exp_needs_supply e) then ([], pure_out e, senv)
+      if not (exp_needs_supply e) then ([], SPure (pure_out e), senv)
       else match C.exp_to_term e with
       | Paren (_, e1, _) -> supply_thread inside_instance senv e1
       | Begin (_, e1, _) -> supply_thread inside_instance senv e1
       | Typed (_, e1, _, t, _) ->
         let (bs, v, senv') = supply_thread inside_instance senv e1 in
-        (bs, Output.flat [from_string "("; v; from_string " :"; pat_typ t; from_string ")"], senv')
+        (bs, SPure (Output.flat [from_string "("; lean_sv_out v; from_string " :"; pat_typ t; from_string ")"]), senv')
       | App _ -> supply_thread_app inside_instance senv e
       | Let (_, (lb, _), _, e2) ->
         (match lb with
@@ -3575,17 +3641,18 @@ type pat_style = FunParam | MatchArm
                (match topt with
                 | None -> emp
                 | Some (_, t) -> Output.flat [from_string " :"; pat_typ t])) in
-           let bind = Output.flat [from_string "let "; p_out; topt_out; from_string " := "; v1] in
+           let bind = Output.flat [from_string "let "; p_out; topt_out; from_string " := "; lean_sv_out v1] in
            let (bs2, v2, senv2) = supply_thread inside_instance senv1 e2 in
            (bs1 @ (bind :: bs2), v2, senv2)
          | Let_fun _ ->
            err "Lean backend: unexpected Let_fun under supply threading (should have been compiled away)")
       | If (_, tst, _, et, _, ef) ->
         let (bs0, v0, senv0) = supply_thread inside_instance senv tst in
+        let v0 = lean_sv_out v0 in
         if not (exp_needs_supply et || exp_needs_supply ef) then
           (bs0,
-           Output.flat [from_string "(if "; v0; from_string " then "; pure_out et;
-                        from_string " else "; pure_out ef; from_string ")"],
+           SPure (Output.flat [from_string "(if "; v0; from_string " then "; pure_out et;
+                        from_string " else "; pure_out ef; from_string ")"]),
            senv0)
         else begin
           let armT = supply_arm inside_instance senv0 et in
@@ -3597,6 +3664,7 @@ type pat_style = FunParam | MatchArm
         end
       | Case (_, _, e0, _, cases, _) ->
         let (bs0, v0, senv0) = supply_thread inside_instance senv e0 in
+        let v0 = lean_sv_out v0 in
         let arm_list = Seplist.to_list cases in
         if not (List.exists (fun (_, _, ea, _) -> exp_needs_supply ea) arm_list) then
           let arms = List.map (fun (p, _, ea, _) ->
@@ -3604,8 +3672,8 @@ type pat_style = FunParam | MatchArm
                 [from_string "\n      | "; def_pattern p; from_string " => "; pure_out ea]))
             arm_list in
           (bs0,
-           Output.flat ([from_string "(match "; v0; from_string " with"]
-                        @ arms @ [from_string ")"]),
+           SPure (Output.flat ([from_string "(match "; v0; from_string " with"]
+                        @ arms @ [from_string ")"])),
            senv0)
         else begin
           let arms = List.map (fun (p, _, ea, _) ->
@@ -3618,10 +3686,10 @@ type pat_style = FunParam | MatchArm
         end
       | Tup (_, es, _) ->
         let (bs, vs, senv') = supply_thread_list inside_instance senv (Seplist.to_list es) in
-        (bs, Output.flat [from_string "("; Output.concat (from_string ", ") vs; from_string ")"], senv')
+        (bs, SPure (Output.flat [from_string "("; Output.concat (from_string ", ") (List.map lean_sv_out vs); from_string ")"]), senv')
       | List (_, es, _) ->
         let (bs, vs, senv') = supply_thread_list inside_instance senv (Seplist.to_list es) in
-        (bs, Output.flat [from_string "["; Output.concat (from_string ", ") vs; from_string "]"], senv')
+        (bs, SPure (Output.flat [from_string "["; Output.concat (from_string ", ") (List.map lean_sv_out vs); from_string "]"]), senv')
       | Record (_, fields, _) ->
         let typ = Typed_ast.exp_to_typ e in
         (match mutual_record_path typ with
@@ -3629,21 +3697,41 @@ type pat_style = FunParam | MatchArm
            err "Lean backend: supply draw in a mutual-record construction (unsupported; bind the drawn values in lets before the construction)"
          | None ->
            let fl = Seplist.to_list fields in
-           let (bs, vs, senv') =
-             supply_thread_list inside_instance senv (List.map (fun (_, _, ef, _) -> ef) fl) in
-           let fields_out = List.map2 (fun (fd, _, _, _) v ->
+           (* OCaml evaluates record fields in the type's FIELD DECLARATION
+              order (right-to-left), whatever the source order of the
+              construction; sort the fields accordingly before threading
+              and render them back in source order (Lean's structure
+              instance notation accepts any order). *)
+           let decl_index =
+             match Types.type_defs_lookup_typ Ast.Unknown A.env.t_env typ with
+             | Some td ->
+               (match td.Types.type_fields with
+                | Some refs ->
+                  (fun (fd : const_descr_ref id) ->
+                    let rec go i = function
+                      | [] -> err "Lean backend: internal error — record field missing from its type's field list under supply threading"
+                      | r :: rs -> if r = fd.descr then i else go (i + 1) rs in
+                    go 0 refs)
+                | None -> err "Lean backend: internal error — record type without a field list under supply threading")
+             | None -> err "Lean backend: internal error — record type not found under supply threading" in
+           let indexed = List.mapi (fun i ((fd, _, _, _) as f) -> (decl_index fd, i, f)) fl in
+           let by_decl = List.sort (fun (a, _, _) (b, _, _) -> Int.compare a b) indexed in
+           let (bs, vs_decl, senv') =
+             supply_thread_list inside_instance senv (List.map (fun (_, _, (_, _, ef, _)) -> ef) by_decl) in
+           let vs_by_src = List.sort (fun ((_, i, _), _) ((_, j, _), _) -> Int.compare i j) (List.combine by_decl vs_decl) in
+           let fields_out = List.map (fun ((_, _, (fd, _, _, _)), v) ->
                Output.flat [field_ident_to_output fd (use_ascii_rep_for_const fd.descr);
-                            from_string " := "; v])
-             fl vs in
+                            from_string " := "; lean_sv_out v])
+             vs_by_src in
            let src_t = C.t_to_src_t typ in
            (bs,
-            Output.flat [from_string "(({ "; Output.concat (from_string ", ") fields_out;
-                         from_string " } : "; pat_typ src_t; from_string "))"],
+            SPure (Output.flat [from_string "(({ "; Output.concat (from_string ", ") fields_out;
+                         from_string " } : "; pat_typ src_t; from_string "))"]),
             senv'))
       | Field (e0, sk, fd) ->
         let (bs, v0, senv') = supply_thread inside_instance senv e0 in
         let name = field_ident_to_output fd (use_ascii_rep_for_const fd.descr) in
-        (bs, Output.flat [v0; from_string "."; ws sk; name], senv')
+        (bs, SPure (Output.flat [lean_sv_out v0; from_string "."; ws sk; name]), senv')
       | Infix (le, ce, re) ->
         (match C.exp_to_term ce with
          | Constant cd when is_supply_cref cd.descr
@@ -3662,24 +3750,22 @@ type pat_style = FunParam | MatchArm
                err "Lean backend: internal error — short-circuit head lost its classification") in
            supply_shortcircuit inside_instance senv kind le re
          | Constant cd ->
-           let (bs1, vl, senv1) = supply_thread inside_instance senv le in
-           let (bs2, vr, senv2) = supply_thread inside_instance senv1 re in
-           (* render via the pure Infix machinery with the operands
-              substituted by their threaded values (physical-identity
-              memo; a miss falls back to ordinary emission, where the
-              supply net fails closed) *)
-           let memo_trans a =
-             if a == le then vl else if a == re then vr else pure_out a in
-           let pieces = B.function_application_to_output (exp_to_locn e) memo_trans true e cd [le; re] (use_ascii_rep_for_const cd.descr) in
-           (bs1 @ bs2,
-            Output.flat [from_string "("; Output.concat (from_string " ") pieces; from_string ")"],
+           (* OCaml order: the RIGHT operand is evaluated first *)
+           let (bs2, vr, senv1) = supply_thread inside_instance senv re in
+           let (bs1, vl, senv2) = supply_thread inside_instance senv1 le in
+           (* render via the pure Infix machinery with the drawing
+              operands replaced by their threaded variables (F5) *)
+           let (bs_a, ops) = supply_atomize_args [le; re] [vl; vr] in
+           let pieces = B.function_application_to_output (exp_to_locn e) pure_out true e cd ops (use_ascii_rep_for_const cd.descr) in
+           (bs2 @ bs1 @ bs_a,
+            SPure (Output.flat [from_string "("; Output.concat (from_string " ") pieces; from_string ")"]),
             senv2)
          | _ ->
-           let (bs1, vl, senv1) = supply_thread inside_instance senv le in
-           let (bs2, vr, senv2) = supply_thread inside_instance senv1 re in
-           (bs1 @ bs2,
-            Output.flat [from_string "("; vl; from_string " "; pure_out ce;
-                         from_string " "; vr; from_string ")"],
+           let (bs2, vr, senv1) = supply_thread inside_instance senv re in
+           let (bs1, vl, senv2) = supply_thread inside_instance senv1 le in
+           (bs2 @ bs1,
+            SPure (Output.flat [from_string "("; lean_sv_out vl; from_string " "; pure_out ce;
+                         from_string " "; lean_sv_out vr; from_string ")"]),
             senv2))
       | Fun _ | Function _ ->
         (* G-λ: the honest boundary of the feature — a linear supply
@@ -3700,7 +3786,7 @@ type pat_style = FunParam | MatchArm
         (* G-bare *)
         err "Lean backend: bare (unapplied) reference to a supply-lifted definition (unsupported: linear supply threading has no partial-application repair — apply it fully inside a lifted definition instead of passing it as a value)"
       | Var _ | Constant _ | Lit _ | Backend _ | Nvar_e _ ->
-        ([], pure_out e, senv)
+        ([], SPure (pure_out e), senv)
     and supply_thread_app inside_instance senv e =
       let l = Typed_ast.exp_to_locn e in
       let err msg = raise (Reporting_basic.err_general true l msg) in
@@ -3728,7 +3814,7 @@ type pat_style = FunParam | MatchArm
            from_string ") := LemLib.supplySplit "; from_string scur] in
         let senv' = List.map (fun (c, s) ->
             if c = cd.descr then (c, s') else (c, s)) senv in
-        ([bind], from_string v, senv')
+        ([bind], SVar v, senv')
       | Constant cd when Types.Cdset.mem cd.descr !St.supply_lifted ->
         (* THREADED CALL of a lifted def: bind the value×states pair. *)
         let arity = supply_arity_of cd.descr in
@@ -3749,7 +3835,7 @@ type pat_style = FunParam | MatchArm
         let call = Output.flat
           ([head]
            @ List.concat_map (fun s -> [from_string " "; from_string s]) scurs
-           @ List.concat_map (fun a -> [from_string " "; a]) argvs) in
+           @ List.concat_map (fun a -> [from_string " "; lean_sv_out a]) argvs) in
         let (bind, v, senv2) = supply_join senv1 call in
         (bs @ [bind], v, senv2)
       | Constant cd when (match lean_shortcircuit_kind cd.descr, args with
@@ -3774,13 +3860,13 @@ type pat_style = FunParam | MatchArm
            consumer branch (reader injection + scope check), apply. *)
         let (bs, argvs, senv1) = supply_thread_list inside_instance senv args in
         (bs,
-         Output.flat ([from_string "("; pure_out e0]
-                      @ List.concat_map (fun a -> [from_string " "; a]) argvs
-                      @ [from_string ")"]),
+         SPure (Output.flat ([from_string "("; pure_out e0]
+                      @ List.concat_map (fun a -> [from_string " "; lean_sv_out a]) argvs
+                      @ [from_string ")"])),
          senv1)
       | Constant cd ->
         (* pure head with supply-using arguments: hoist the arguments in
-           order, then render the application through the ordinary
+           OCaml order (right-to-left), then render the application through the ordinary
            machinery (target reps, ascii reps, renaming) with the
            argument nodes substituted by their threaded values. The
            special head classes cannot take hoisted arguments soundly
@@ -3792,19 +3878,16 @@ type pat_style = FunParam | MatchArm
         if is_reader_cref cd.descr then
           err "Lean backend: internal error — a reader constant's unit argument cannot use the supply";
         let (bs, argvs, senv1) = supply_thread_list inside_instance senv args in
-        let memo = List.combine args argvs in
-        let memo_trans a =
-          match List.find_opt (fun (k, _) -> k == a) memo with
-          | Some (_, o) -> o
-          | None -> pure_out a in
-        let pieces = B.function_application_to_output (exp_to_locn e) memo_trans false e cd args (use_ascii_rep_for_const cd.descr) in
-        (bs,
-         Output.flat [from_string "("; Output.concat (from_string " ") pieces; from_string ")"],
+        (* F5: drawing arguments become real variables (see supply_atomize_args) *)
+        let (bs_a, args') = supply_atomize_args args argvs in
+        let pieces = B.function_application_to_output (exp_to_locn e) pure_out false e cd args' (use_ascii_rep_for_const cd.descr) in
+        (bs @ bs_a,
+         SPure (Output.flat [from_string "("; Output.concat (from_string " ") pieces; from_string ")"]),
          senv1)
       | _ ->
-        (* general head (variable, threaded subexpression, ...): the
-           head and every argument are hoisted in order — STRICT
-           threading.
+        (* general head (variable, threaded subexpression, ...): every
+           argument and then the head are hoisted — STRICT threading in
+           OCaml order.
            NOTE (L1 delta audit NOTE-1, pinned in L2): PAREN-WRAPPED
            heads land here too, because strip_app_exp
            (typed_ast_syntax.ml) deliberately does not unwrap Paren.
@@ -3822,12 +3905,13 @@ type pat_style = FunParam | MatchArm
            normalization that unwraps Paren will change the threading
            class of such spines and MUST re-adjudicate those pins
            against the oracle, not just update them. *)
-        let (bs0, v0, senv0) = supply_thread inside_instance senv e0 in
-        let (bs, argvs, senv1) = supply_thread_list inside_instance senv0 args in
-        (bs0 @ bs,
-         Output.flat ([from_string "("; v0]
-                      @ List.concat_map (fun a -> [from_string " "; a]) argvs
-                      @ [from_string ")"]),
+        (* OCaml order: the arguments (right-to-left), THEN the head *)
+        let (bs, argvs, senv0) = supply_thread_list inside_instance senv args in
+        let (bs0, v0, senv1) = supply_thread inside_instance senv0 e0 in
+        (bs @ bs0,
+         SPure (Output.flat ([from_string "("; lean_sv_out v0]
+                      @ List.concat_map (fun a -> [from_string " "; lean_sv_out a]) argvs
+                      @ [from_string ")"])),
          senv1)
     (* A supply-lifted def BODY: bindings then the value×states tuple,
        threading from the binder names. *)
@@ -3836,7 +3920,7 @@ type pat_style = FunParam | MatchArm
       let senv0 = List.map (fun (cref, pname) -> (cref, pname)) (get_supply_params ()) in
       let (bs, v, senv') = supply_thread inside_instance senv0 e in
       let tup = Output.flat
-        ([from_string "("; v]
+        ([from_string "("; lean_sv_out v]
          @ List.concat_map (fun s -> [from_string ", "; from_string s]) (supply_state_names senv')
          @ [from_string ")"]) in
       Output.flat
@@ -4764,6 +4848,27 @@ type pat_style = FunParam | MatchArm
         | Te_record (_, _, fields, _) ->
           not (Seplist.exists (fun (_, _, _, src_t) -> src_t_has_fn src_t) fields)
         | Te_opaque | Te_abbrev _ -> false
+    (* Parity-fix F4 (2026-09-03): does Lean's `deriving Ord` order differ
+       from OCaml's polymorphic compare on this variant? Lean's derive
+       handler ranks constructors by DECLARATION INDEX; OCaml ranks every
+       nullary constructor (immediate) below every non-nullary one (block),
+       declaration order within each class (runtime/compare.c). The two
+       coincide unless a nullary constructor is declared AFTER a block
+       constructor. Such variants are routed through the same
+       ctor_rank_ocaml-based derivation mutual blocks use, so the OCaml
+       rank holds for ALL variants (single and mutual alike). Records
+       (field declaration order on both targets) and all-nullary /
+       all-block variants keep `deriving`. *)
+    and texp_needs_ocaml_rank (t : texp) : bool =
+      match t with
+        | Te_variant (_, ctors) ->
+          let kinds = List.map (fun (_, _, _, args) -> Seplist.to_list args = []) (Seplist.to_list ctors) in
+          let rec nullary_after_block seen_block = function
+            | [] -> false
+            | is_nullary :: rest ->
+              (is_nullary && seen_block) || nullary_after_block (seen_block || not is_nullary) rest in
+          nullary_after_block false kinds
+        | _ -> false
     (* --- Type definition rendering ---
        Dispatch by type form:
        - Te_abbrev → type_def_abbreviation (Lean abbrev)
@@ -5171,7 +5276,8 @@ type pat_style = FunParam | MatchArm
         | Te_variant (skips, ctors) ->
           let body = flat @@ Seplist.to_sep_list_first Seplist.Optional (constructor name ty_vars) (sep @@ from_string "\n") ctors in
           let is_all_nullary = Seplist.for_all (fun (_, _, _, args) -> Seplist.to_list args = []) ctors in
-          let deriving_clause = if (emit_deriving || is_all_nullary) && texp_can_derive_beq ty then
+          let deriving_clause = if (emit_deriving || is_all_nullary) && texp_can_derive_beq ty
+                                   && not (texp_needs_ocaml_rank ty) then
             from_string "\n  deriving BEq, Ord"
           else emp in
             Output.flat [
@@ -5618,7 +5724,8 @@ type pat_style = FunParam | MatchArm
               Seplist.for_all (fun (_, _, _, args) -> Seplist.to_list args = []) ctors
             | _ -> false
           in
-          let has_deriving = (emit_deriving || is_all_nullary) && texp_can_derive_beq t in
+          let has_deriving = (emit_deriving || is_all_nullary) && texp_can_derive_beq t
+                             && not (texp_needs_ocaml_rank t) in
           let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n)) in
           let bare_tvs = concat emp @@ List.map (fun t ->
             let name = tnvar_to_string t in
@@ -5850,11 +5957,11 @@ type pat_style = FunParam | MatchArm
          the OCaml value representation of the corresponding lem library
          type;
        - leaf fields (no mutual sibling inside) compare through their Lean
-         BEq/Ord instances. NOTE (registered): for MIXED nullary/non-nullary
-         variants whose Ord comes from Lean `deriving Ord`, that leaf order
-         is Lean's flat constructor index, which diverges from the OCaml
-         two-class rank — a pre-existing deriving-path divergence, recorded
-         in the arc-10 register, NOT introduced here.
+         BEq/Ord instances. Leaf variants that mix nullary-after-block
+         constructors no longer take Lean's `deriving Ord` (flat declaration
+         index): the parity-fix slice (2026-09-03, F4) routes every such
+         variant through this derivation (texp_needs_ocaml_rank), so the
+         OCaml two-class rank holds at leaves too.
 
        FAIL-CLOSED: types whose comparison cannot be honestly derived
        (function-typed fields anywhere — where OCaml (=)/compare RAISE —
@@ -6181,8 +6288,40 @@ type pat_style = FunParam | MatchArm
          avoided when generating the Inhabited instance. *)
       let mapped = List.map (fun (((_, _), _, path, _, _) as t) ->
         generate_inhabited_instance [path] t) ts in
-      let beq_instances = List.map generate_beq_ord_instances ts in
+      let beq_instances = List.map (fun (((_, _), _, _, t, _) as td) ->
+        if texp_needs_ocaml_rank t && texp_can_derive_beq t then
+          (* F4: OCaml constructor rank for a single mixed-order variant —
+             a mutual block of one through the arc-10 derivation. *)
+          let (cmp_defs, derived_cmp) = derived_comparison_single td in
+          Output.flat [cmp_defs; generate_beq_ord_instances ~emit_deriving:false ?derived_cmp td]
+        else generate_beq_ord_instances td) ts in
         Output.flat [concat_str "\n" mapped; concat emp beq_instances]
+    (* F4 helper: run the derived-comparison generator on a single type
+       whose constructor order needs the OCaml rank, fail-closed. A shape
+       the derivation cannot recurse through (a self-reference under a
+       head other than list/maybe/either/tuple) would leave the type with
+       a residual (panicking) instance where OCaml compares fine, and
+       `deriving Ord` would compute the WRONG order — neither is
+       acceptable, so the type is refused with the workarounds named. *)
+    and derived_comparison_single (((name, _), _, path, t, _) as td) : Output.t * string list option =
+      let skip =
+        let l = Ast.Trans (false, "derived_comparison_single", None) in
+        let tdescr = Types.type_defs_lookup l A.env.t_env path in
+        Target.Targetset.mem Target.Target_lean tdescr.Types.type_skip_instances ||
+        Target.Targetmap.apply_target tdescr.Types.type_target_rep
+          (Target.Target_no_ident Target.Target_lean) <> None in
+      if skip then (emp, None)
+      else begin
+        let (cmp_defs, derived_info) = generate_derived_comparisons [td] in
+        match List.find_opt (fun (p, _) -> Path.compare p path = 0) derived_info with
+        | Some (_, bounds) -> (cmp_defs, Some bounds)
+        | None ->
+          let _ = t in
+          raise (Reporting_basic.err_general true Ast.Unknown
+            (Printf.sprintf
+              "Lean backend: type '%s' declares a nullary constructor after a non-nullary one (OCaml polymorphic compare ranks nullary constructors below block constructors, Lean's `deriving Ord` ranks by declaration index) and its constructor fields reference the type under a head the derived comparison cannot recurse through (only list/maybe/either/tuples are supported) — emitting `deriving Ord` would compute a different order than the OCaml reference. Provide a hand-written Ord instance (`declare {lean} skip_instances type %s`) or restructure the field"
+              (Name.to_string (Name.strip_lskip name)) (Name.to_string (Name.strip_lskip name))))
+      end
     and generate_default_values_mutual ts : Output.t =
       let ts_list = Seplist.to_list ts in
       let is_lib = is_library_module !St.current_module_name in
@@ -6208,6 +6347,11 @@ type pat_style = FunParam | MatchArm
       (* If only 1 non-abbreviation type remains, it was rendered with deriving
          (not as a mutual block), so emit_deriving:true to avoid duplicate instances. *)
       let emit_deriving = List.length non_abbrev <= 1 in
+      (* F4: a block of one whose single variant needs the OCaml rank goes
+         through the derivation like the single-type path. *)
+      let single_needs_rank = match non_abbrev with
+        | [(_, _, _, t, _)] -> texp_needs_ocaml_rank t && texp_can_derive_beq t
+        | _ -> false in
       (* Arc-10 S2: derived structural comparisons for the block's
          derivable types (real mutual beq/compare defs; fail-closed
          residual for the rest). Homogeneous-parameter multi-type blocks
@@ -6217,7 +6361,14 @@ type pat_style = FunParam | MatchArm
          auditor A F1 — the sorried Type-1 residual is deleted;
          population empty). *)
       let (cmp_defs, derived_info) =
-        if is_type1 || emit_deriving then (emp, [])
+        if single_needs_rank then
+          (match List.find_opt (fun (_, _, _, t, _) -> texp_needs_ocaml_rank t) non_abbrev with
+           | Some td ->
+             let (o, bounds) = derived_comparison_single td in
+             let (_, _, path, _, _) = td in
+             (o, match bounds with Some b -> [(path, b)] | None -> [])
+           | None -> (emp, []))
+        else if is_type1 || emit_deriving then (emp, [])
         else generate_derived_comparisons ts_list
       in
       let beq_instances = List.map (fun (((_, _), _, path, _, _) as td) ->

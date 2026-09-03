@@ -1,8 +1,12 @@
 /-
   Generate lean_constants from the current Lean environment.
 
-  Usage:
-    lake env lean library/gen_lean_constants.lean > library/lean_constants
+  Usage (the committed file is the UNION over the deployed toolchains —
+  the suite's lean-lib toolchain and the cerberus consumer's; run under
+  each and `sort -u` the outputs; a root name present in either must be
+  avoided, since generated code may be built by either):
+    cd lean-lib && lake env lean --run ../library/gen_lean_constants.lean
+    ~/.elan/bin/lean +leanprover/lean4:v4.32.2 --run library/gen_lean_constants.lean
 
   This extracts all top-level names from Lean's Init library (auto-imported)
   that could conflict with Lem-generated identifiers. The output is used by
@@ -24,7 +28,7 @@ def hasSpecialChar (s : String) : Bool :=
                    c.val > 127)
 
 def isLowerWithUnderscore (s : String) : Bool :=
-  !s.isEmpty && (s.get ⟨0⟩).isLower && s.toList.any (· == '_')
+  !s.isEmpty && s.front.isLower && s.toList.any (· == '_')
 
 def hasSkipPrefix (s : String) : Bool :=
   s.startsWith "_aux_" || s.startsWith "inst" || s.startsWith "term" ||
@@ -43,7 +47,18 @@ def keywords : List String := [
   "this", "extends", "opaque", "mutual", "notation", "macro", "syntax",
   "set_option", "attribute", "export", "end", "rec", "scoped", "local",
   "nomatch", "nofun", "infix", "infixl", "infixr", "prefix", "postfix",
-  "where"
+  -- contextual / newer tokens and root names the environment walk does not
+  -- surface (parity-fix slice 2026-09-03, F8): `from`, `termination_by`,
+  -- `decreasing_by`, `elab` are Lean 4 tokens that cannot head a `def`;
+  -- `main` is checked by Lean for the entry-point type wherever it is
+  -- declared; the rest were hand-added to lean_constants before this
+  -- generator carried them and are kept so regeneration is reproducible.
+  "at", "from", "termination_by", "decreasing_by", "elab", "main", "omit",
+  "unless", "break", "continue", "try", "catch", "finally", "nonrec",
+  "public", "meta", "coinductive", "forall", "admit", "decide", "default",
+  "none", "some", "pure", "bind", "get", "set", "throw", "run", "mapM",
+  "macro_rules", "elab_rules", "initialize", "builtin_initialize",
+  "declare_syntax_cat", "register_option", "include", "exposed"
 ]
 
 open Lean in
