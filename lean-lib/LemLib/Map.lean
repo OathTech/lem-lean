@@ -149,8 +149,8 @@ def  all  {k : Type} {v : Type} [MapKeyType k] [Eq0 v]  (P : k → v → Bool) (
 
 
 /-  instance of SetType  -/
-def  map_setElemCompare  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [SetType a] [SetType b] [SetType c] [SetType d] [MapKeyType b] [MapKeyType d]  (cmp : List ((d ×c)) → List ((b ×a)) → e) (x : Fmap d c) (y : Fmap b a)  : e := 
-  cmp  (fmapElements  x)  (fmapElements  y)
+def  map_setElemCompare  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [SetType a] [SetType b] [SetType c] [SetType d] [MapKeyType b] [MapKeyType d]  (cmp : Pset ((d ×c)) → Pset ((b ×a)) → e) (x : Fmap d c) (y : Fmap b a)  : e := 
+  cmp  ((fmapToSetBy  (pairCompare  (@setElemCompare (d) _)  (@setElemCompare (c) _))  x))  ((fmapToSetBy  (pairCompare  (@setElemCompare (b) _)  (@setElemCompare (a) _))  y))
 
 instance (a b : Type) [SetType a] [SetType b] [MapKeyType a] : SetType (Fmap  a  b) where
 

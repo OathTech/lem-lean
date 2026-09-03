@@ -30,10 +30,10 @@ open Lem_Map
 def  find0  {k : Type} {v : Type} [MapKeyType k] [Inhabited v]  (k1 : k) (m : Fmap k v)  : v :=  match  ((fmapLookupBy  (@mapKeyCompare (k) _)  k1  m)) with |  some  x =>  x |  none => (failwithI  "Map_extra.find" : v) 
 /- removed value specification -/
 
-def  fromSet  {k : Type} {v : Type} [MapKeyType k]  (f : k → v) (s : List k)  : Fmap k v :=  setFold  (fun (k1 : k) (m : Fmap k v) =>  (fmapAddBy  (@mapKeyCompare (k) _)  k1  (f  k1)  m))  s  fmapEmpty
+def  fromSet  {k : Type} {v : Type} [MapKeyType k]  (f : k → v) (s : Pset k)  : Fmap k v :=  setFold  (fun (k1 : k) (m : Fmap k v) =>  (fmapAddBy  (@mapKeyCompare (k) _)  k1  (f  k1)  m))  s  fmapEmpty
 /- removed value specification -/
 
-def  fold  {k : Type} {r : Type} {v : Type} [MapKeyType k] [SetType k] [SetType v]  (f : k → v → r → r) (m : Fmap k v) (v1 : r)  : r :=  setFold  (fun (p : (k ×v)) (r1 : r) =>  match p, r1 with |  (k1,  v1),  r1 =>  f  k1  v1  r1 )  (fmapElements  m)  v1
+def  fold  {k : Type} {r : Type} {v : Type} [MapKeyType k] [SetType k] [SetType v]  (f : k → v → r → r) (m : Fmap k v) (v1 : r)  : r :=  setFold  (fun (p : (k ×v)) (r1 : r) =>  match p, r1 with |  (k1,  v1),  r1 =>  f  k1  v1  r1 )  ((fmapToSetBy  (pairCompare  (@setElemCompare (k) _)  (@setElemCompare (v) _))  m))  v1
 /- removed value specification -/
 
 /- removed value specification -/

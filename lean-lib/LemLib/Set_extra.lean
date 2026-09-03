@@ -49,15 +49,15 @@ open Lem_Set
 
 /- removed value specification -/
 
-def  setCompare  {a : Type} [SetType a] [Ord0 a]   : List a → List a → LemOrdering :=  setCompareBy  Ord0.compare
+def  setCompare  {a : Type} [SetType a] [Ord0 a]   : Pset a → Pset a → LemOrdering :=  setCompareBy  Ord0.compare
 
-instance (a : Type) [SetType a] : SetType (List  a) where
+instance (a : Type) [SetType a] : SetType (Pset  a) where
 
     setElemCompare   :=  setCompareBy  (@setElemCompare (a) _)
 
 /- removed value specification -/
 
- partial def  leastFixedPointUnbounded  {a : Type} [SetType a]  (f : List a → List a) (x : List a)  : List a := 
+ partial def  leastFixedPointUnbounded  {a : Type} [SetType a]  (f : Pset a → Pset a) (x : Pset a)  : Pset a := 
    let  fx   := f  x; 
    if  (setSubsetBy  (@setElemCompare (a) _)  fx  x) then  x
     else  leastFixedPointUnbounded  f  ( (setUnionBy  (@setElemCompare (a) _) fx  x))

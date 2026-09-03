@@ -360,7 +360,7 @@ declare hol      target_rep function foldr = `FOLDR`
 declare ocaml    target_rep function foldr f b l = `List.fold_right` f l b
 declare isabelle target_rep function foldr f b l = `List.foldr` f l b
 declare coq      target_rep function foldr = `List.fold_right`
-declare lean     target_rep function foldr = `List.foldr`
+declare lean     target_rep function foldr = `lemListFoldr`
 
 assert foldr_0: (foldr (+) (0:nat) [] = 0)
 assert foldr_1: (foldr (+) 1 [(4:nat)] = 5)
@@ -795,6 +795,7 @@ let rec update l n e =
     | x :: xs -> if n = 0 then e :: xs else x :: (update xs (n - 1) e)
 end
 declare termination_argument update = automatic
+declare lean     target_rep function update = `lemListUpdate`
 
 declare isabelle target_rep function update = `List.list_update`
 declare hol      target_rep function update l n e = `LUPDATE` e n l
@@ -948,6 +949,7 @@ let rec deleteFirst P l = match l with
                             | x :: xs -> if (P x) then Just xs else Maybe.map (fun xs' -> x :: xs') (deleteFirst P xs)
                           end
 declare termination_argument deleteFirst = automatic
+declare lean     target_rep function deleteFirst = `lemListDeleteFirst`
 
 declare isabelle target_rep function deleteFirst = `delete_first`
 declare {ocaml;hol} rename function deleteFirst = list_delete_first
@@ -990,7 +992,7 @@ end
 declare termination_argument zip = automatic
 
 declare isabelle target_rep function zip = `List.zip`
-declare lean     target_rep function zip = `List.zip`
+declare lean     target_rep function zip = `lemListZip`
 declare {ocaml;hol} rename function zip = list_combine
 
 assert zip_1 : (zip [(1:nat); 2;3;4;5] [(2:nat); 3;4;5;6] = [(1,2);(2,3);(3,4);(4,5);(5,6)])
@@ -1012,7 +1014,7 @@ declare termination_argument unzip = automatic
 declare hol      target_rep function unzip = `UNZIP` 
 declare isabelle target_rep function unzip = `list_unzip`
 declare ocaml    target_rep function unzip = `List.split`
-declare lean     target_rep function unzip = `List.unzip`
+declare lean     target_rep function unzip = `lemListUnzip`
 
 assert unzip_1 : (unzip ([] : list (nat * nat)) = ([], []))
 assert unzip_2 : (unzip [((1:nat),(2:nat));(2,3);(3,4)] = ([1;2;3], [2;3;4]))
@@ -1056,6 +1058,7 @@ let rec mapiAux f (n : nat) l = match l with
 end
 declare {lean} termination_argument mapiAux = automatic
 let mapi f l = mapiAux f 0 l
+declare lean     target_rep function mapi = `lemListMapi`
 
 val deletes: forall 'a. Eq 'a => list 'a -> list 'a -> list 'a
 let deletes xs ys =
@@ -1217,3 +1220,4 @@ let rec catMaybes xs =
         x :: catMaybes xs'
   end
 declare {lean} termination_argument catMaybes = automatic
+declare lean     target_rep function catMaybes = `lemListCatMaybes`

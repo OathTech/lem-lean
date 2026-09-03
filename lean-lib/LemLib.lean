@@ -1,15 +1,13 @@
-import Std.Data.TreeMap
-
 /-!
 # LemLib — Lean 4 runtime library for Lem
 
 Provides the core types and operations that Lem-generated Lean 4 code depends on:
 - `LemOrdering`: three-way comparison type used by set/map operations
 - Comparison, arithmetic, and string helpers
-- Set operations (using sorted `List` representation with `LemOrdering` comparators)
-- Finite map operations (`Fmap`: comparator-keyed `Std.TreeMap` index + insertion-order
-  spine index; observable behavior identical to the retired assoc-list representation —
-  see the Fmap section below and LemLibTest.lean for the equivalence obligations)
+- Set and finite-map operations: `Pset`/`Pmap`, VERBATIM PORTS of lem's OCaml
+  runtime AVL trees (ocaml-lib/pset.ml, pmap.ml) so that every observable —
+  iteration order, representative choice, failure points — is the OCaml
+  reference's by construction (parity-fix slice 2026-09-03)
 
 **Convention**: Functions suffixed with `By` take an explicit `(cmp : α → α → LemOrdering)`
 comparator. Functions without `By` use Lean's `BEq` or `Ord` type classes.
@@ -71,25 +69,6 @@ def LemLib.supplySplit (s : Nat) : Nat × Nat := (s, s + 1)
 /- Lem uses lowercase 'vector' for its built-in vector type -/
 abbrev vector (α : Type) (n : Nat) := Vector α n
 
-/- Vector slice — lem `vector` slicing (be:S13, conventions documented):
-   * WIDTH-FROM-RETURN-TYPE: the result length is the implicit `m`
-     inferred from the USE SITE's expected type — the same convention as
-     mwordExtract/mwordConcat below ("hi is redundant", Isabelle
-     Word.slice); the `_stop` argument is therefore IGNORED by design
-     (redundant with `m`), and is named `_stop` to say so.
-   * PAD-WITH-DEFAULT, deliberately: out-of-range reads yield `default`
-     rather than panicking — lem's vector slicing is total on
-     type-correct input (the typechecker relates m/start/stop), so the
-     pad arm is unreachable from generated code; it exists to keep the
-     def total without a proof obligation. A panic here would add a
-     runtime trap to a statically-safe operation.
-   * Injected into the core `Vector` namespace so generated projections
-     `v.slice` resolve (be:S13 residual: a LemLib-local name would need
-     backend qualification — registered, not done). -/
-namespace Vector
-def slice [Inhabited α] {n m : Nat} (v : Vector α n) (start _stop : Nat) : Vector α m :=
-  Vector.ofFn fun i => (v.toArray.extract start (start + m)).getD i.val default
-end Vector
 
 /- Ordering type for comparisons -/
 inductive LemOrdering where
@@ -170,9 +149,21 @@ def lemBoolToProp (b : Bool) : Prop := b = true
      inhabitation; opaque does not expose it definitionally;
    - computable at runtime via @[implemented_by]: panics with the message,
      byte-identical behavior to the retired legacy failwith (arc-8 S3). -/
-private unsafe def failwithIImpl {α : Type} [Inhabited α] (msg : String) : α :=
+/- `never_extract` on the IMPLEMENTATION too: the compiler substitutes the
+   `implemented_by` target before closed-term extraction, so an attribute
+   on the opaque alone does not protect `failwithIImpl "msg"` at a closed
+   type from being lifted to module initialisation (measured: `import
+   LemLib` alone aborted under LEAN_ABORT_ON_PANIC=1 until this). -/
+@[never_extract] private unsafe def failwithIImpl {α : Type} [Inhabited α] (msg : String) : α :=
   panic! msg
-@[implemented_by failwithIImpl]
+/- `never_extract` (parity-fix slice 2026-09-03): a closed application
+   `failwithI "msg"` at a closed type is otherwise lifted by the
+   compiler's closed-term extraction into a module-initialisation
+   constant, so the panic fired at INIT of every importing binary under
+   LEAN_ABORT_ON_PANIC=1 (the L0 record's "abort fires at module init"
+   observation) instead of at the failing program point — which is where
+   the OCaml reference raises. -/
+@[implemented_by failwithIImpl, never_extract]
 opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
 
 /- fuelExhaustedWith: out-of-fuel sentinel for fuel'd defs whose return
@@ -184,10 +175,31 @@ opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
    equations — the fuel-exhausted branch is not provably equal to
    anything, in particular NOT to the witness), axiom-free, and loud at
    runtime via @[implemented_by] panic. -/
-private unsafe def fuelExhaustedWithImpl {α : Type} (msg : String) (witness : α) : α :=
+@[never_extract] private unsafe def fuelExhaustedWithImpl {α : Type} (msg : String) (witness : α) : α :=
   @panic α ⟨witness⟩ msg
-@[implemented_by fuelExhaustedWithImpl]
+@[implemented_by fuelExhaustedWithImpl, never_extract]
 opaque fuelExhaustedWith {α : Type} (msg : String) (witness : α) : α := witness
+
+/- Vector slice — lem `vector` slicing (be:S13, conventions documented):
+   * WIDTH-FROM-RETURN-TYPE: the result length is the implicit `m`
+     inferred from the USE SITE's expected type — the same convention as
+     mwordExtract/mwordConcat below ("hi is redundant", Isabelle
+     Word.slice); the `_stop` argument is therefore IGNORED by design
+     (redundant with `m`), and is named `_stop` to say so.
+   * OUT-OF-RANGE FAILS LOUDLY (parity-fix slice 2026-09-03, census V1):
+     the OCaml rep `vector_slice n1 n2 (Vector a) = Vector (Array.sub a n1 n2)`
+     (ocaml-lib/vector.ml:33) raises Invalid_argument when the slice is
+     not within the array; the previous pad-with-default arm SUCCEEDED
+     there. lem's typechecker relates m/start/stop, so the arm is
+     unreachable from type-correct generated code on both targets.
+   * Injected into the core `Vector` namespace so generated projections
+     `v.slice` resolve (be:S13 residual: a LemLib-local name would need
+     backend qualification — registered, not done). -/
+namespace Vector
+def slice [Inhabited α] {n m : Nat} (v : Vector α n) (start _stop : Nat) : Vector α m :=
+  if start + m > n then failwithI "Invalid_argument \"Array.sub\""
+  else Vector.ofFn fun i => (v.toArray.extract start (start + m)).getD i.val default
+end Vector
 
 /- Message-less variant for 'declare {lean} fuel val' sentinels: the lem
    backtick lexer excludes double quotes, so declares cannot carry a
@@ -268,325 +280,858 @@ def sort_by_ordering (cmp : α → α → LemOrdering) (l : List α) : List α :
   l.mergeSort leanCmp
 
 /- ============================================================================
-   Set operations (List representation, COMPARATOR-keyed)
-
-   SOUNDNESS NOTE (arc-14 S2 B3, be:G4 — the Fmap section's standard,
-   see its bucket rationale below at the Fmap header):
-
-   OCaml lem sets are `Pset` — keyed by ONE comparator for membership,
-   insertion-dedup, and equality. This section mirrors that: EVERY
-   operation that decides element identity does so through the SAME
-   `cmp : α → α → LemOrdering` (the SetType dictionary's setElemCompare
-   at all generated call sites — the backend splices it explicitly for
-   `insert` and set literals; the *By family takes it as an argument).
-
-   THE HAZARD THIS CLOSES: the previous `setAdd`/`setFromList` deduped by
-   [BEq α] while `setMemberBy`/`setUnionBy`/`setEqualBy` used the
-   comparator — two equalities in one representation. With a BEq strictly
-   FINER than the comparator (exactly the cerberus `sym` situation the
-   Fmap section documents as load-bearing: BEq compares digest+num,
-   setElemCompare orders by a coarser projection in adversarial cases), a
-   set could hold comparator-EQ, BEq-distinct duplicates — and
-   setEqualBy's length guard then DENIES extensional equality of equal
-   sets. The BEq-keyed setAdd/setFromList are DELETED, not kept beside
-   the comparator versions: a mixed-equality API is the defect, not a
-   convenience. Adversarial-key property tests: LemLibTest.lean
-   (setCoherence section, the Fmap tests' pattern).
-
-   INVARIANT (representation): a set list holds no two comparator-EQ
-   elements; order is insertion-derived (setAddBy prepends new elements;
-   setFromListBy folds from the right, so the LAST comparator-duplicate's
-   representative survives — pinned in LemLibTest's SetCoherence guards.
-   Pset iteration order differs, a deliberate divergence the Fmap
-   section's order-observable tests keep honest at the consumer level). -/
-def setEmpty : List α := []
-@[inline] def setIsEmpty : List α → Bool := List.isEmpty
-def setSingleton (x : α) : List α := [x]
-
-def setMemberBy (cmp : α → α → LemOrdering) (x : α) (s : List α) : Bool :=
-  match s with
-  | [] => false
-  | y :: ys => match cmp x y with
-    | .EQ => true
-    | _ => setMemberBy cmp x ys
-
-/-- Comparator-keyed insert — Pset.add parity (arc-14 S2 B3; replaces the
-    BEq-keyed setAdd; the backend's `insert` target_rep splices
-    setElemCompare here). No-op iff a comparator-EQ element is present. -/
-def setAddBy (cmp : α → α → LemOrdering) (x : α) (s : List α) : List α :=
-  if setMemberBy cmp x s then s else x :: s
-
-@[inline] def setCardinal : List α → Nat := List.length
-
-def setFromListBy (cmp : α → α → LemOrdering) (l : List α) : List α :=
-  l.foldr (fun x acc => if setMemberBy cmp x acc then acc else x :: acc) []
-
-@[inline] def setToList (s : List α) : List α := s
-
-def setEqualBy (cmp : α → α → LemOrdering) (s1 s2 : List α) : Bool :=
-  s1.length == s2.length &&
-  s1.all (fun x => setMemberBy cmp x s2) &&
-  s2.all (fun x => setMemberBy cmp x s1)
-
-private def sortedCompareBy (cmp : α → α → LemOrdering) : List α → List α → LemOrdering
-  | [], [] => .EQ
-  | [], _ :: _ => .LT
-  | _ :: _, [] => .GT
-  | x :: xs, y :: ys => match cmp x y with
-    | .LT => .LT
-    | .GT => .GT
-    | .EQ => sortedCompareBy cmp xs ys
-
-def setCompareBy (cmp : α → α → LemOrdering) (s1 s2 : List α) : LemOrdering :=
-  sortedCompareBy cmp (sort_by_ordering cmp s1) (sort_by_ordering cmp s2)
-
-def setUnionBy (cmp : α → α → LemOrdering) (s1 s2 : List α) : List α :=
-  match s1 with
-  | [] => s2
-  | x :: xs =>
-    if setMemberBy cmp x s2 then
-      setUnionBy cmp xs s2
-    else
-      x :: setUnionBy cmp xs s2
-
-def setInterBy (cmp : α → α → LemOrdering) (s1 s2 : List α) : List α :=
-  match s1 with
-  | [] => []
-  | x :: xs =>
-    if setMemberBy cmp x s2 then
-      x :: setInterBy cmp xs s2
-    else
-      setInterBy cmp xs s2
-
-def setDiffBy (cmp : α → α → LemOrdering) (s1 s2 : List α) : List α :=
-  match s1 with
-  | [] => []
-  | x :: xs =>
-    if setMemberBy cmp x s2 then
-      setDiffBy cmp xs s2
-    else
-      x :: setDiffBy cmp xs s2
-
-def setSubsetBy (cmp : α → α → LemOrdering) (s1 s2 : List α) : Bool :=
-  match s1 with
-  | [] => true
-  | x :: xs =>
-    if setMemberBy cmp x s2 then
-      setSubsetBy cmp xs s2
-    else
-      false
-
-def setProperSubsetBy (cmp : α → α → LemOrdering) (s1 s2 : List α) : Bool :=
-  setSubsetBy cmp s1 s2 && !(setEqualBy cmp s1 s2)
-
-def setSigmaBy (_cmp : α → α → LemOrdering) (s : List α) (f : α → List β) : List (α × β) :=
-  s.foldl (fun acc x => acc ++ (f x).map (fun y => (x, y))) []
-
-@[inline] def setAny (f : α → Bool) (s : List α) : Bool := s.any f
-@[inline] def setForAll (f : α → Bool) (s : List α) : Bool := s.all f
-def setFold (f : α → β → β) (s : List α) (init : β) : β := s.foldr f init
-
-def setCase (s : List α) (empty : β) (single : α → β) (otherwise : β) : β :=
-  match s with
-  | [] => empty
-  | [x] => single x
-  | _ :: _ => otherwise
-
-/- Mirrors Pset.choose = min_elt (ocaml-lib/pset.ml:297,358): the
-   comparator-MINIMUM element, not the newest-inserted head — the
-   order is observable downstream (e.g. cerberus Core_linking's
-   topo_order emission order), so head-choice was an undocumented
-   divergence (M4, 2026-08-31 backend quality review). The comparator
-   is spliced at call sites via `setElemCompare`, like setAddBy.
-   Comparator-EQ ties cannot arise (representation invariant: no two
-   comparator-EQ elements in a set list). -/
-def setChoose [Inhabited α] (cmp : α → α → LemOrdering) (s : List α) : α :=
-  match s with
-  | x :: xs => xs.foldl (fun m y => match cmp y m with | .LT => y | _ => m) x
-  | [] => panic! "setChoose: empty set"
-
-def chooseAndSplit (cmp : α → α → LemOrdering) (s : List α) : Option (List α × α × List α) :=
-  match s with
-  | [] => none
-  | x :: xs =>
-    let lt := xs.filter (fun y => match cmp y x with | .LT => true | _ => false)
-    let gt := xs.filter (fun y => match cmp y x with | .LT => false | .EQ => false | .GT => true)
-    some (lt, x, gt)
-
-/- ============================================================================
-   Finite map operations (arc-6 S3 representation change)
+   Sets and finite maps: VERBATIM PORTS of lem's OCaml runtime
+   (ocaml-lib/pset.ml, ocaml-lib/pmap.ml — the OCaml stdlib AVL trees as
+   modified by Scott Owens 2010-10-28), parity-fix slice 2026-09-03.
    ============================================================================
 
-   Previous representation: `Fmap α β := List (α × β)` (assoc list, newest
-   insert at the head; `fmapAdd` = cons + full BEq-filter; `fmapLookupBy` =
-   linear comparator scan). O(n) insert/lookup made every generated lem `map`
-   seam superlinear at runtime (arc-6 S0 profile).
+   [USER 2026-09-03] ruling: the OCaml target is the reference semantics
+   of a lem program and there are to be ZERO behavioural discrepancies.
+   The previous Lean representations (a comparator-keyed insertion-order
+   list for sets; a `Std.TreeMap`-indexed, insertion-sequenced `Fmap`)
+   reproduced the RETIRED Lean assoc-list observables, not the OCaml
+   ones: iteration/fold/toList order (OCaml: ascending by comparator),
+   Pmap.add replacing the key AND value of a comparator-equal binding
+   (F3), Pmap.equal comparing keys with the map's comparator (F3),
+   Set.choose_and_split / set_case / union representatives, and every
+   panic-order nuance of for_all/exists. Rather than approximate them
+   one by one, the two AVL modules are ported line for line: the tree
+   SHAPE is then identical after every operation sequence, so every
+   shape-dependent observable (which representative of comparator-equal
+   but distinguishable elements a `union` keeps depends on subtree
+   HEIGHTS in pset.ml) agrees by construction. Each function cites its
+   OCaml source line. Comparators are lem's `LemOrdering`; `c = 0`,
+   `c < 0`, `c > 0` in the OCaml read `.EQ`, `.LT`, `.GT`.
 
-   New representation: two `Std.TreeMap` indexes + an insertion-sequence
-   counter, chosen so that EVERY observable of the old representation is
-   preserved bit-for-bit (the arc-6 zero-differential-movement bar):
+   Failure parity: where the OCaml raises (Not_found on choose/min_elt of
+   the empty set, Invalid_argument in bal/remove_min_elt on ill-formed
+   input) the port fails loudly with failwithI (exception class (a)).
 
-   - `bySeq : Std.TreeMap Nat (α × β)` — the ORDER SPINE. Each live entry
-     holds the sequence number of its insertion; `fmapElements` (= lem
-     `Map_extra.toList` / `Map.toSet`) enumerates seq-descending, i.e. the
-     exact newest-first list the old cons spine produced. Folds over maps
-     (`Map_extra.fold` = setFold = List.foldr over that list) therefore
-     apply the folded function oldest-first, exactly as before.
-   - `byKey : Std.TreeMap α (bucket) cmp` — the LOOKUP INDEX, keyed by the
-     lem `mapKeyCompare` comparator captured at first insert (the map type
-     itself cannot carry the comparator: `fmapEmpty` has no instances).
-     A bucket is the list of live entries whose keys are comparator-EQ,
-     seq-descending. Buckets (rather than single values) are load-bearing:
-     the old `fmapAdd` deduplicated by `BEq` while lookup/delete use the
-     comparator, and these can differ (e.g. cerberus `sym`: derived BEq is
-     symbol_description-sensitive, symbol_compare is not) — comparator-EQ
-     but BEq-distinct keys legally coexist, and lookup must return the
-     newest. The new `fmapAddBy` still deduplicates by `BEq`, inside the
-     comparator-EQ bucket only.
+   Termination: structural where the OCaml is structural on one tree.
+   `join` is well-founded on the two subtree sizes. The mutually
+   descending functions of the OCaml (union/inter/diff/subset on two
+   trees via `split`, merge on two maps, compare on two enumerations,
+   the lfp loop of `tc`) recurse on results of `split`/`join`, whose
+   size relation to the inputs is not structural; they take an explicit
+   FUEL bounded by the stored AVL heights (each level of the recursion
+   strictly decreases height s1 + height s2; split never increases a
+   height) or, for compare/tc, by the element counts — the established
+   LemLib pattern (set_tc_go): kernel-total, and the exhaustion arm is
+   the loud `fuelExhaustedWith` sentinel, never a silent truncation.
 
-   Soundness assumptions (checked against the generated cerberus frontier,
-   arc-6 S3; violated ⇒ the old linear scan and the tree search could
-   disagree):
-   1. Per map value, all comparator-taking operations receive the same
-      comparator (lem inlines the static `mapKeyCompare` instance, so this
-      holds per key TYPE; the only custom comparators in the frontier —
-      identifier-by-string in Core_linking — coincide with the instance).
-      Operations use the CAPTURED comparator on the tree.
-   2. `BEq`-equal keys are comparator-EQ (BEq is structural or equal to the
-      comparator at every call site; comparators are reflexive).
-   3. Comparators are lawful total preorders (Std.TransCmp-style), which
-      all `mapKeyCompare` instances are (lexicographic structural orders).
+   Two-target pins: tests/comprehensive/parity/probes/p_set_ops.lem,
+   p_map_ops.lem, p_map_beq.lem, p_cmp_order.lem, p_show.lem. -/
 
-   The retired assoc-list implementation is kept, test-only, in
-   LemLibTest.lean (namespace `LemLibLegacy`) as the reference for the
-   equivalence theorems and property tests. -/
+/-- pset.ml:16 `type 'a rep = Empty | Node of 'a rep * 'a * 'a rep * int`.
+    The lem `set 'a` Lean representation (library/set.lem). `Empty` is
+    the first, nullary constructor: `lean_box(0)` is a valid empty set. -/
+inductive Pset (α : Type) : Type where
+  | Empty : Pset α
+  | Node : Pset α → α → Pset α → Nat → Pset α
 
-/-- Convert a `LemOrdering`-comparator to an `Ordering`-comparator (the form
-    `Std.TreeMap` expects). -/
-@[inline] def lemCmpToOrd (cmp : α → α → LemOrdering) (a b : α) : Ordering :=
-  match cmp a b with
-  | .LT => .lt
-  | .EQ => .eq
-  | .GT => .gt
+instance : Inhabited (Pset α) := ⟨.Empty⟩
 
-/-- Finite map. The nullary `empty` constructor is deliberate ABI: it makes
-    `lean_box(0)` a valid (empty) `Fmap`, exactly as it was for the retired
-    `List` representation — consumer C externs (e.g. cerberus
-    `native/tags.c`) return `lean_box(0)` for an unset map global. In `mk`,
-    `cmp` is the comparator captured at first insert. A byKey bucket entry
-    is `(seq, key, value)`; buckets and `bySeq` always describe the same
-    live entry set. -/
+namespace Pset
+variable {α β : Type}
+
+/-- pset.ml:21 -/
+def height : Pset α → Nat
+  | Empty => 0
+  | Node _ _ _ h => h
+
+/-- pset.ml:28 -/
+def create (l : Pset α) (v : α) (r : Pset α) : Pset α :=
+  let hl := height l
+  let hr := height r
+  Node l v r (if hl >= hr then hl + 1 else hr + 1)
+
+/-- pset.ml:37 `bal` — one rebalancing step; `invalid_arg "Set.bal"` on
+    the (unreachable by construction) ill-formed shapes. -/
+def bal (l : Pset α) (v : α) (r : Pset α) : Pset α :=
+  let hl := height l
+  let hr := height r
+  if hl > hr + 2 then
+    match l with
+    | Empty => failwithI "Set.bal"
+    | Node ll lv lr _ =>
+      if height ll >= height lr then create ll lv (create lr v r)
+      else match lr with
+        | Empty => failwithI "Set.bal"
+        | Node lrl lrv lrr _ => create (create ll lv lrl) lrv (create lrr v r)
+  else if hr > hl + 2 then
+    match r with
+    | Empty => failwithI "Set.bal"
+    | Node rl rv rr _ =>
+      if height rr >= height rl then create (create l v rl) rv rr
+      else match rl with
+        | Empty => failwithI "Set.bal"
+        | Node rll rlv rlr _ => create (create l v rll) rlv (create rlr rv rr)
+  else Node l v r (if hl >= hr then hl + 1 else hr + 1)
+
+/-- pset.ml:76 `add` — a comparator-EQ element already present wins (the
+    set is returned unchanged). -/
+def add (cmp : α → α → LemOrdering) (x : α) : Pset α → Pset α
+  | Empty => Node Empty x Empty 1
+  | Node l v r h =>
+    match cmp x v with
+    | .EQ => Node l v r h
+    | .LT => bal (add cmp x l) v r
+    | .GT => bal l v (add cmp x r)
+
+/-- pset.ml:86 `join` -/
+def join (cmp : α → α → LemOrdering) (l : Pset α) (v : α) (r : Pset α) : Pset α :=
+  match l, r with
+  | Empty, _ => add cmp v r
+  | _, Empty => add cmp v l
+  | Node ll lv lr lh, Node rl rv rr rh =>
+    if lh > rh + 2 then bal ll lv (join cmp lr v (Node rl rv rr rh))
+    else if rh > lh + 2 then bal (join cmp (Node ll lv lr lh) v rl) rv rr
+    else create l v r
+termination_by sizeOf l + sizeOf r
+decreasing_by all_goals simp_wf <;> omega
+
+/-- pset.ml:97 `min_elt` (raises Not_found on Empty — the callers decide:
+    `choose` fails loudly, `min_elt_opt` yields none). -/
+def minElt? : Pset α → Option α
+  | Empty => none
+  | Node Empty v _ _ => some v
+  | Node l _ _ _ => minElt? l
+
+/-- pset.ml:102 `max_elt` -/
+def maxElt? : Pset α → Option α
+  | Empty => none
+  | Node _ v Empty _ => some v
+  | Node _ _ r _ => maxElt? r
+
+/-- pset.ml:109 `remove_min_elt` -/
+def removeMinElt : Pset α → Pset α
+  | Empty => failwithI "Set.remove_min_elt"
+  | Node Empty _ r _ => r
+  | Node l v r _ => bal (removeMinElt l) v r
+
+/-- pset.ml:117 `merge` (all elements of t1 precede those of t2) -/
+def merge (t1 t2 : Pset α) : Pset α :=
+  match t1, t2 with
+  | Empty, t => t
+  | t, Empty => t
+  | _, _ =>
+    match minElt? t2 with
+    | some m => bal t1 m (removeMinElt t2)
+    | none => failwithI "Set.merge: unreachable (non-empty tree without a minimum)"
+
+/-- pset.ml:126 `concat` -/
+def concat (cmp : α → α → LemOrdering) (t1 t2 : Pset α) : Pset α :=
+  match t1, t2 with
+  | Empty, t => t
+  | t, Empty => t
+  | _, _ =>
+    match minElt? t2 with
+    | some m => join cmp t1 m (removeMinElt t2)
+    | none => failwithI "Set.concat: unreachable (non-empty tree without a minimum)"
+
+/-- pset.ml:137 `split x s = (l, present, r)` -/
+def split (cmp : α → α → LemOrdering) (x : α) : Pset α → Pset α × Bool × Pset α
+  | Empty => (Empty, false, Empty)
+  | Node l v r _ =>
+    match cmp x v with
+    | .EQ => (l, true, r)
+    | .LT => let (ll, pres, rl) := split cmp x l; (ll, pres, join cmp rl v r)
+    | .GT => let (lr, pres, rr) := split cmp x r; (join cmp l v lr, pres, rr)
+
+/-- pset.ml:151 -/
+def isEmpty : Pset α → Bool
+  | Empty => true
+  | _ => false
+
+/-- pset.ml:153 `mem` -/
+def mem (cmp : α → α → LemOrdering) (x : α) : Pset α → Bool
+  | Empty => false
+  | Node l v r _ =>
+    match cmp x v with
+    | .EQ => true
+    | .LT => mem cmp x l
+    | .GT => mem cmp x r
+
+/-- pset.ml:159 -/
+def singleton (x : α) : Pset α := Node Empty x Empty 1
+
+/-- pset.ml:161 `remove` -/
+def remove (cmp : α → α → LemOrdering) (x : α) : Pset α → Pset α
+  | Empty => Empty
+  | Node l v r _ =>
+    match cmp x v with
+    | .EQ => merge l r
+    | .LT => bal (remove cmp x l) v r
+    | .GT => bal l v (remove cmp x r)
+
+/-- pset.ml:168 `union` — height-fuelled (see the header). `h2 = 1` /
+    `h1 = 1` are the OCaml's singleton short-cuts and decide WHICH
+    representative of a comparator-equal pair survives. -/
+def unionGo (cmp : α → α → LemOrdering) : Nat → Pset α → Pset α → Pset α
+  | 0, s1, _ => fuelExhaustedWith "Pset.union: height fuel exhausted (unreachable: AVL heights bound the recursion)" s1
+  | fuel + 1, s1, s2 =>
+    match s1, s2 with
+    | Empty, t2 => t2
+    | t1, Empty => t1
+    | Node l1 v1 r1 h1, Node l2 v2 r2 h2 =>
+      if h1 >= h2 then
+        if h2 == 1 then add cmp v2 s1
+        else
+          let (l2', _, r2') := split cmp v1 s2
+          join cmp (unionGo cmp fuel l1 l2') v1 (unionGo cmp fuel r1 r2')
+      else
+        if h1 == 1 then add cmp v1 s2
+        else
+          let (l1', _, r1') := split cmp v2 s1
+          join cmp (unionGo cmp fuel l1' l2) v2 (unionGo cmp fuel r1' r2)
+
+def union (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Pset α :=
+  unionGo cmp (height s1 + height s2 + 1) s1 s2
+
+/-- pset.ml:184 `inter` (keeps s1's representative) -/
+def interGo (cmp : α → α → LemOrdering) : Nat → Pset α → Pset α → Pset α
+  | 0, s1, _ => fuelExhaustedWith "Pset.inter: height fuel exhausted (unreachable)" s1
+  | fuel + 1, s1, s2 =>
+    match s1, s2 with
+    | Empty, _ => Empty
+    | _, Empty => Empty
+    | Node l1 v1 r1 _, t2 =>
+      match split cmp v1 t2 with
+      | (l2, false, r2) => concat cmp (interGo cmp fuel l1 l2) (interGo cmp fuel r1 r2)
+      | (l2, true, r2) => join cmp (interGo cmp fuel l1 l2) v1 (interGo cmp fuel r1 r2)
+
+def inter (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Pset α :=
+  interGo cmp (height s1 + height s2 + 1) s1 s2
+
+/-- pset.ml:194 `diff` -/
+def diffGo (cmp : α → α → LemOrdering) : Nat → Pset α → Pset α → Pset α
+  | 0, s1, _ => fuelExhaustedWith "Pset.diff: height fuel exhausted (unreachable)" s1
+  | fuel + 1, s1, s2 =>
+    match s1, s2 with
+    | Empty, _ => Empty
+    | t1, Empty => t1
+    | Node l1 v1 r1 _, t2 =>
+      match split cmp v1 t2 with
+      | (l2, false, r2) => join cmp (diffGo cmp fuel l1 l2) v1 (diffGo cmp fuel r1 r2)
+      | (l2, true, r2) => concat cmp (diffGo cmp fuel l1 l2) (diffGo cmp fuel r1 r2)
+
+def diff (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Pset α :=
+  diffGo cmp (height s1 + height s2 + 1) s1 s2
+
+/-- pset.ml:204 `type 'a enumeration = End | More of 'a * 'a rep * 'a enumeration` -/
+inductive Enum (α : Type) : Type where
+  | End : Enum α
+  | More : α → Pset α → Enum α → Enum α
+
+/-- pset.ml:213 `cons_enum` -/
+def consEnum : Pset α → Enum α → Enum α
+  | Empty, e => e
+  | Node l v r _, e => consEnum l (.More v r e)
+
+/-- pset.ml:204 `cardinal` -/
+def cardinal : Pset α → Nat
+  | Empty => 0
+  | Node l _ r _ => cardinal l + 1 + cardinal r
+
+/-- pset.ml:218 `compare_aux` — one element consumed per step, so the
+    element counts bound the recursion. -/
+def compareAux (cmp : α → α → LemOrdering) : Nat → Enum α → Enum α → LemOrdering
+  | 0, _, _ => fuelExhaustedWith "Pset.compare: fuel exhausted (unreachable: bounded by the element counts)" .EQ
+  | fuel + 1, e1, e2 =>
+    match e1, e2 with
+    | .End, .End => .EQ
+    | .End, _ => .LT
+    | _, .End => .GT
+    | .More v1 r1 e1, .More v2 r2 e2 =>
+      match cmp v1 v2 with
+      | .EQ => compareAux cmp fuel (consEnum r1 e1) (consEnum r2 e2)
+      | c => c
+
+/-- pset.ml:229 `compare` -/
+def compare (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : LemOrdering :=
+  compareAux cmp (cardinal s1 + cardinal s2 + 1) (consEnum s1 .End) (consEnum s2 .End)
+
+/-- pset.ml:232 `equal` -/
+def equal (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Bool :=
+  match compare cmp s1 s2 with
+  | .EQ => true
+  | _ => false
+
+/-- pset.ml:235 `subset` (height-fuelled; the synthetic `Node (l1, v1,
+    Empty, 0)` of the OCaml is reproduced literally) -/
+def subsetGo (cmp : α → α → LemOrdering) : Nat → Pset α → Pset α → Bool
+  | 0, _, _ => fuelExhaustedWith "Pset.subset: height fuel exhausted (unreachable)" false
+  | fuel + 1, s1, s2 =>
+    match s1, s2 with
+    | Empty, _ => true
+    | _, Empty => false
+    | Node l1 v1 r1 _, Node l2 v2 r2 h2 =>
+      match cmp v1 v2 with
+      | .EQ => subsetGo cmp fuel l1 l2 && subsetGo cmp fuel r1 r2
+      | .LT => subsetGo cmp fuel (Node l1 v1 Empty 0) l2 && subsetGo cmp fuel r1 (Node l2 v2 r2 h2)
+      | .GT => subsetGo cmp fuel (Node Empty v1 r1 0) r2 && subsetGo cmp fuel l1 (Node l2 v2 r2 h2)
+
+def subset (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Bool :=
+  subsetGo cmp (height s1 + height s2 + 1) s1 s2
+
+/-- pset.ml:254 `fold` — in-order (ascending): `fold f r (f v (fold f l accu))` -/
+def fold (f : α → β → β) : Pset α → β → β
+  | Empty, accu => accu
+  | Node l v r _, accu => fold f r (f v (fold f l accu))
+
+/-- pset.ml:259 `map` -/
+def map (cmp : β → β → LemOrdering) (f : α → β) (s : Pset α) : Pset β :=
+  fold (fun e s => add cmp (f e) s) s Empty
+
+/-- pset.ml:261 `map_union` -/
+def mapUnion (cmp : β → β → LemOrdering) (f : α → Pset β) (s : Pset α) : Pset β :=
+  fold (fun e s => union cmp (f e) s) s Empty
+
+/-- pset.ml:263 `for_all` — `p v && for_all p l && for_all p r` (this
+    exact order decides which element a failing `p` fails on) -/
+def forAll (p : α → Bool) : Pset α → Bool
+  | Empty => true
+  | Node l v r _ => p v && forAll p l && forAll p r
+
+/-- pset.ml:267 `exists` -/
+def exists_ (p : α → Bool) : Pset α → Bool
+  | Empty => false
+  | Node l v r _ => p v || exists_ p l || exists_ p r
+
+/-- pset.ml:271 `filter` (root, then left, then right, accumulating with `add`) -/
+def filterAux (cmp : α → α → LemOrdering) (p : α → Bool) : Pset α → Pset α → Pset α
+  | accu, Empty => accu
+  | accu, Node l v r _ => filterAux cmp p (filterAux cmp p (if p v then add cmp v accu else accu) l) r
+
+def filter (cmp : α → α → LemOrdering) (p : α → Bool) (s : Pset α) : Pset α :=
+  filterAux cmp p Empty s
+
+/-- pset.ml:278 `partition` -/
+def partitionAux (cmp : α → α → LemOrdering) (p : α → Bool) : Pset α × Pset α → Pset α → Pset α × Pset α
+  | accu, Empty => accu
+  | (t, f), Node l v r _ =>
+    partitionAux cmp p (partitionAux cmp p (if p v then (add cmp v t, f) else (t, add cmp v f)) l) r
+
+def partition (cmp : α → α → LemOrdering) (p : α → Bool) (s : Pset α) : Pset α × Pset α :=
+  partitionAux cmp p (Empty, Empty) s
+
+/-- pset.ml:290 `elements` — ascending -/
+def elementsAux : List α → Pset α → List α
+  | accu, Empty => accu
+  | accu, Node l v r _ => elementsAux (v :: elementsAux accu r) l
+
+def elements (s : Pset α) : List α := elementsAux [] s
+
+/-- pset.ml:297 `choose = min_elt` (Not_found on the empty set) -/
+def choose [Inhabited α] (s : Pset α) : α :=
+  match minElt? s with
+  | some v => v
+  | none => failwithI "Not_found (Pset.choose of the empty set)"
+
+/-- pset.ml:367 `from_list c l = List.fold_left (fun s x -> add x s) (empty c) l`
+    — the FIRST of several comparator-equal list elements survives -/
+def fromList (cmp : α → α → LemOrdering) (l : List α) : Pset α :=
+  l.foldl (fun s x => add cmp x s) Empty
+
+/-- pset.ml:480 `bigunion c xss = fold union xss (empty c)` (note the
+    argument order of `union`: the element set is s1, the accumulator s2) -/
+def bigunion (cmp : α → α → LemOrdering) (xss : Pset (Pset α)) : Pset α :=
+  fold (fun s acc => union cmp s acc) xss Empty
+
+/-- pset.ml:483 `sigma` -/
+def sigma (cmp : (α × β) → (α × β) → LemOrdering) (xs : Pset α) (ys : α → Pset β) : Pset (α × β) :=
+  fold (fun x xys => fold (fun y xys => add cmp (x, y) xys) (ys x) xys) xs Empty
+
+/-- pset.ml:486 `cross` -/
+def cross (cmp : (α × β) → (α × β) → LemOrdering) (xs : Pset α) (ys : Pset β) : Pset (α × β) :=
+  sigma cmp xs (fun _ => ys)
+
+/-- pset.ml:488 `lfp s f = let s' = f s in if subset s' s then s else lfp (union s' s) f`
+    — the OCaml may loop forever; the port takes a fuel and fails loudly. -/
+def lfpGo (cmp : α → α → LemOrdering) (f : Pset α → Pset α) : Nat → Pset α → Pset α
+  | 0, s => fuelExhaustedWith "Pset.lfp: fuel exhausted" s
+  | fuel + 1, s =>
+    let s' := f s
+    if subset cmp s' s then s else lfpGo cmp f fuel (union cmp s' s)
+
+/-- pset.ml:494 `tc` — transitive closure of a relation given as a set of
+    pairs; `one_step` adds (x,z) for every (x,y),(y',z) with y ~ y' under
+    the pair comparator's diagonal. Converges within (2|r|)^2 + 1 steps
+    (every productive step adds a pair drawn from the finite square of
+    r's endpoints), which bounds the fuel. -/
+def tc (cmp : (α × α) → (α × α) → LemOrdering) (r : Pset (α × α)) : Pset (α × α) :=
+  let oneStep (r : Pset (α × α)) : Pset (α × α) :=
+    fold (fun (x, y) xs =>
+      fold (fun (y', z) xs =>
+        match cmp (y, y) (y', y') with
+        | .EQ => add cmp (x, z) xs
+        | _ => xs) r xs) r Empty
+  let n := cardinal r
+  lfpGo cmp oneStep ((2 * n) * (2 * n) + 1) r
+
+/-- pset.ml:360 `set_case` (a singleton is exactly the shape
+    `Node (Empty, v, Empty, _)`) -/
+def setCase (s : Pset α) (cEmp : β) (cSing : α → β) (cElse : β) : β :=
+  match s with
+  | Empty => cEmp
+  | Node Empty v Empty _ => cSing v
+  | _ => cElse
+
+/-- pset.ml:524 `choose_and_split` — the ROOT and its subtrees -/
+def chooseAndSplit (s : Pset α) : Option (Pset α × α × Pset α) :=
+  match s with
+  | Empty => none
+  | Node l v r _ => some (l, v, r)
+
+end Pset
+
+/- ---- the lem `set` API (library/set.lem, set_extra.lem, set_helpers.lem
+        Lean target reps) over `Pset` ---- -/
+
+def setEmpty : Pset α := .Empty
+@[inline] def setIsEmpty (s : Pset α) : Bool := Pset.isEmpty s
+def setSingleton (x : α) : Pset α := Pset.singleton x
+def setMemberBy (cmp : α → α → LemOrdering) (x : α) (s : Pset α) : Bool := Pset.mem cmp x s
+def setAddBy (cmp : α → α → LemOrdering) (x : α) (s : Pset α) : Pset α := Pset.add cmp x s
+def setRemoveBy (cmp : α → α → LemOrdering) (x : α) (s : Pset α) : Pset α := Pset.remove cmp x s
+@[inline] def setCardinal (s : Pset α) : Nat := Pset.cardinal s
+def setFromListBy (cmp : α → α → LemOrdering) (l : List α) : Pset α := Pset.fromList cmp l
+def setToList (s : Pset α) : List α := Pset.elements s
+def setEqualBy (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Bool := Pset.equal cmp s1 s2
+def setCompareBy (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : LemOrdering := Pset.compare cmp s1 s2
+def setUnionBy (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Pset α := Pset.union cmp s1 s2
+def setInterBy (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Pset α := Pset.inter cmp s1 s2
+def setDiffBy (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Pset α := Pset.diff cmp s1 s2
+def setSubsetBy (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Bool := Pset.subset cmp s1 s2
+/-- pset.ml:328 `subset_proper s1 s2 = subset s1 s2 && not (equal s1 s2)` -/
+def setProperSubsetBy (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Bool :=
+  Pset.subset cmp s1 s2 && !(Pset.equal cmp s1 s2)
+def setFilterBy (cmp : α → α → LemOrdering) (p : α → Bool) (s : Pset α) : Pset α := Pset.filter cmp p s
+def setPartitionBy (cmp : α → α → LemOrdering) (p : α → Bool) (s : Pset α) : Pset α × Pset α := Pset.partition cmp p s
+def setMapBy (cmp : β → β → LemOrdering) (f : α → β) (s : Pset α) : Pset β := Pset.map cmp f s
+def setBigunionBy (cmp : α → α → LemOrdering) (xss : Pset (Pset α)) : Pset α := Pset.bigunion cmp xss
+def setBigunionMapBy (cmp : β → β → LemOrdering) (f : α → Pset β) (s : Pset α) : Pset β := Pset.mapUnion cmp f s
+def setSigmaBy (cmp : (α × β) → (α × β) → LemOrdering) (s : Pset α) (f : α → Pset β) : Pset (α × β) := Pset.sigma cmp s f
+def setCrossBy (cmp : (α × β) → (α × β) → LemOrdering) (s1 : Pset α) (s2 : Pset β) : Pset (α × β) := Pset.cross cmp s1 s2
+@[inline] def setAny (f : α → Bool) (s : Pset α) : Bool := Pset.exists_ f s
+@[inline] def setForAll (f : α → Bool) (s : Pset α) : Bool := Pset.forAll f s
+def setFold (f : α → β → β) (s : Pset α) (init : β) : β := Pset.fold f s init
+def setCase (s : Pset α) (empty : β) (single : α → β) (otherwise : β) : β := Pset.setCase s empty single otherwise
+def setChoose [Inhabited α] (_cmp : α → α → LemOrdering) (s : Pset α) : α := Pset.choose s
+def chooseAndSplit (s : Pset α) : Option (Pset α × α × Pset α) := Pset.chooseAndSplit s
+/-- pset.ml:350/354 `min_elt_opt` / `max_elt_opt` (lem Set.findMin / findMax) -/
+def setFindMin (s : Pset α) : Option α := Pset.minElt? s
+def setFindMax (s : Pset α) : Option α := Pset.maxElt? s
+def set_tcByCmp (cmp : (α × α) → (α × α) → LemOrdering) (r : Pset (α × α)) : Pset (α × α) := Pset.tc cmp r
+/-- lem `Set.leastFixedPoint bound f x` (set.lem; the OCaml is the lem
+    definition itself: `if bound = 0 then x else let fx = f x in if fx subset x
+    then x else leastFixedPoint (bound-1) f (fx union x)`) -/
+def lemLeastFixedPoint (cmp : α → α → LemOrdering) (bound : Nat)
+    (f : Pset α → Pset α) (x : Pset α) : Pset α :=
+  match bound with
+  | 0 => x
+  | bound + 1 =>
+    let fx := f x
+    if Pset.subset cmp fx x then x
+    else lemLeastFixedPoint cmp bound f (Pset.union cmp fx x)
+
+/-- Structural instances for `deriving BEq, Ord` on generated types that
+    carry a set field: the ascending element spines. NOTE (divergence
+    census X1, EXCEPTION-CASE candidate): OCaml's polymorphic compare
+    RAISES `Invalid_argument "compare: functional value"` on a Pset
+    record (it carries its comparator closure) unless the closures are
+    physically identical; lem's own set equality (`setEqualBy`) is the
+    comparator-keyed `Pset.equal` above. -/
+instance [BEq α] : BEq (Pset α) where
+  beq s1 s2 := Pset.elements s1 == Pset.elements s2
+instance [Ord α] : Ord (Pset α) where
+  compare s1 s2 := compare (Pset.elements s1) (Pset.elements s2)
+
+/- ============================================================================
+   Finite maps: verbatim port of ocaml-lib/pmap.ml
+   ============================================================================ -/
+
+/-- pmap.ml:16 `type ('key,'a) rep = Empty | Node of rep * 'key * 'a * rep * int` -/
+inductive Pmap (α β : Type) : Type where
+  | Empty : Pmap α β
+  | Node : Pmap α β → α → β → Pmap α β → Nat → Pmap α β
+
+instance : Inhabited (Pmap α β) := ⟨.Empty⟩
+
+namespace Pmap
+variable {α β γ : Type}
+
+/-- pmap.ml:20 -/
+def height : Pmap α β → Nat
+  | Empty => 0
+  | Node _ _ _ _ h => h
+
+/-- pmap.ml:24 -/
+def create (l : Pmap α β) (x : α) (d : β) (r : Pmap α β) : Pmap α β :=
+  let hl := height l
+  let hr := height r
+  Node l x d r (if hl >= hr then hl + 1 else hr + 1)
+
+/-- pmap.ml:28 -/
+def singleton (x : α) (d : β) : Pmap α β := Node Empty x d Empty 1
+
+/-- pmap.ml:30 `bal` -/
+def bal (l : Pmap α β) (x : α) (d : β) (r : Pmap α β) : Pmap α β :=
+  let hl := height l
+  let hr := height r
+  if hl > hr + 2 then
+    match l with
+    | Empty => failwithI "Map.bal"
+    | Node ll lv ld lr _ =>
+      if height ll >= height lr then create ll lv ld (create lr x d r)
+      else match lr with
+        | Empty => failwithI "Map.bal"
+        | Node lrl lrv lrd lrr _ => create (create ll lv ld lrl) lrv lrd (create lrr x d r)
+  else if hr > hl + 2 then
+    match r with
+    | Empty => failwithI "Map.bal"
+    | Node rl rv rd rr _ =>
+      if height rr >= height rl then create (create l x d rl) rv rd rr
+      else match rl with
+        | Empty => failwithI "Map.bal"
+        | Node rll rlv rld rlr _ => create (create l x d rll) rlv rld (create rlr rv rd rr)
+  else Node l x d r (if hl >= hr then hl + 1 else hr + 1)
+
+/-- pmap.ml:67 `add` — a comparator-EQ binding is REPLACED: the NEW key
+    `x` and the new datum are stored (`Node(l, x, data, r, h)`). -/
+def add (cmp : α → α → LemOrdering) (x : α) (data : β) : Pmap α β → Pmap α β
+  | Empty => Node Empty x data Empty 1
+  | Node l v d r h =>
+    match cmp x v with
+    | .EQ => Node l x data r h
+    | .LT => bal (add cmp x data l) v d r
+    | .GT => bal l v d (add cmp x data r)
+
+/-- pmap.ml:79 `find` (Not_found → none; pmap.ml:315 `lookup`) -/
+def find? (cmp : α → α → LemOrdering) (x : α) : Pmap α β → Option β
+  | Empty => none
+  | Node l v d r _ =>
+    match cmp x v with
+    | .EQ => some d
+    | .LT => find? cmp x l
+    | .GT => find? cmp x r
+
+/-- pmap.ml:87 `mem` -/
+def mem (cmp : α → α → LemOrdering) (x : α) : Pmap α β → Bool
+  | Empty => false
+  | Node l v _ r _ =>
+    match cmp x v with
+    | .EQ => true
+    | .LT => mem cmp x l
+    | .GT => mem cmp x r
+
+/-- pmap.ml:94 `min_binding` -/
+def minBinding? : Pmap α β → Option (α × β)
+  | Empty => none
+  | Node Empty x d _ _ => some (x, d)
+  | Node l _ _ _ _ => minBinding? l
+
+/-- pmap.ml:99 `max_binding` -/
+def maxBinding? : Pmap α β → Option (α × β)
+  | Empty => none
+  | Node _ x d Empty _ => some (x, d)
+  | Node _ _ _ r _ => maxBinding? r
+
+/-- pmap.ml:104 `remove_min_binding` -/
+def removeMinBinding : Pmap α β → Pmap α β
+  | Empty => failwithI "Map.remove_min_elt"
+  | Node Empty _ _ r _ => r
+  | Node l x d r _ => bal (removeMinBinding l) x d r
+
+/-- pmap.ml:109 `merge` (two trees, all keys of t1 below those of t2) -/
+def merge2 (t1 t2 : Pmap α β) : Pmap α β :=
+  match t1, t2 with
+  | Empty, t => t
+  | t, Empty => t
+  | _, _ =>
+    match minBinding? t2 with
+    | some (x, d) => bal t1 x d (removeMinBinding t2)
+    | none => failwithI "Map.merge: unreachable (non-empty tree without a minimum)"
+
+/-- pmap.ml:117 `remove` -/
+def remove (cmp : α → α → LemOrdering) (x : α) : Pmap α β → Pmap α β
+  | Empty => Empty
+  | Node l v d r _ =>
+    match cmp x v with
+    | .EQ => merge2 l r
+    | .LT => bal (remove cmp x l) v d r
+    | .GT => bal l v d (remove cmp x r)
+
+/-- pmap.ml:134 `map` (left, datum, right — the OCaml's let-sequence) -/
+def map (f : β → γ) : Pmap α β → Pmap α γ
+  | Empty => Empty
+  | Node l v d r h =>
+    let l' := map f l
+    let d' := f d
+    let r' := map f r
+    Node l' v d' r' h
+
+/-- pmap.ml:143 `mapi` -/
+def mapi (f : α → β → γ) : Pmap α β → Pmap α γ
+  | Empty => Empty
+  | Node l v d r h =>
+    let l' := mapi f l
+    let d' := f v d
+    let r' := mapi f r
+    Node l' v d' r' h
+
+/-- pmap.ml:152 `fold` — ascending -/
+def fold (f : α → β → γ → γ) : Pmap α β → γ → γ
+  | Empty, accu => accu
+  | Node l v d r _, accu => fold f r (f v d (fold f l accu))
+
+/-- pmap.ml:158 `for_all` -/
+def forAll (p : α → β → Bool) : Pmap α β → Bool
+  | Empty => true
+  | Node l v d r _ => p v d && forAll p l && forAll p r
+
+/-- pmap.ml:162 `exists` -/
+def exists_ (p : α → β → Bool) : Pmap α β → Bool
+  | Empty => false
+  | Node l v d r _ => p v d || exists_ p l || exists_ p r
+
+/-- pmap.ml:167 `filter` -/
+def filterAux (cmp : α → α → LemOrdering) (p : α → β → Bool) : Pmap α β → Pmap α β → Pmap α β
+  | accu, Empty => accu
+  | accu, Node l v d r _ => filterAux cmp p (filterAux cmp p (if p v d then add cmp v d accu else accu) l) r
+
+def filter (cmp : α → α → LemOrdering) (p : α → β → Bool) (s : Pmap α β) : Pmap α β :=
+  filterAux cmp p Empty s
+
+/-- pmap.ml:175 `partition` -/
+def partitionAux (cmp : α → α → LemOrdering) (p : α → β → Bool) : Pmap α β × Pmap α β → Pmap α β → Pmap α β × Pmap α β
+  | accu, Empty => accu
+  | (t, f), Node l v d r _ =>
+    partitionAux cmp p (partitionAux cmp p (if p v d then (add cmp v d t, f) else (t, add cmp v d f)) l) r
+
+def partition (cmp : α → α → LemOrdering) (p : α → β → Bool) (s : Pmap α β) : Pmap α β × Pmap α β :=
+  partitionAux cmp p (Empty, Empty) s
+
+/-- pmap.ml:185 `join` -/
+def join (cmp : α → α → LemOrdering) (l : Pmap α β) (v : α) (d : β) (r : Pmap α β) : Pmap α β :=
+  match l, r with
+  | Empty, _ => add cmp v d r
+  | _, Empty => add cmp v d l
+  | Node ll lv ld lr lh, Node rl rv rd rr rh =>
+    if lh > rh + 2 then bal ll lv ld (join cmp lr v d (Node rl rv rd rr rh))
+    else if rh > lh + 2 then bal (join cmp (Node ll lv ld lr lh) v d rl) rv rd rr
+    else create l v d r
+termination_by sizeOf l + sizeOf r
+decreasing_by all_goals simp_wf <;> omega
+
+/-- pmap.ml:196 `concat` -/
+def concat (cmp : α → α → LemOrdering) (t1 t2 : Pmap α β) : Pmap α β :=
+  match t1, t2 with
+  | Empty, t => t
+  | t, Empty => t
+  | _, _ =>
+    match minBinding? t2 with
+    | some (x, d) => join cmp t1 x d (removeMinBinding t2)
+    | none => failwithI "Map.concat: unreachable (non-empty tree without a minimum)"
+
+/-- pmap.ml:204 `concat_or_join` -/
+def concatOrJoin (cmp : α → α → LemOrdering) (t1 : Pmap α β) (v : α) (d : Option β) (t2 : Pmap α β) : Pmap α β :=
+  match d with
+  | some d => join cmp t1 v d t2
+  | none => concat cmp t1 t2
+
+/-- pmap.ml:209 `split` -/
+def split (cmp : α → α → LemOrdering) (x : α) : Pmap α β → Pmap α β × Option β × Pmap α β
+  | Empty => (Empty, none, Empty)
+  | Node l v d r _ =>
+    match cmp x v with
+    | .EQ => (l, some d, r)
+    | .LT => let (ll, pres, rl) := split cmp x l; (ll, pres, join cmp rl v d r)
+    | .GT => let (lr, pres, rr) := split cmp x r; (join cmp l v d lr, pres, rr)
+
+/-- pmap.ml:220 `merge cmp f s1 s2` — the general merge (Pmap.union is
+    `merge (fun _ o1 o2 -> match o1, o2 with (_, Some v) -> Some v | (Some v, _) -> Some v | _ -> None)`,
+    pmap.ml:290); height-fuelled. -/
+def mergeGo (cmp : α → α → LemOrdering) (f : α → Option β → Option β → Option β) :
+    Nat → Pmap α β → Pmap α β → Pmap α β
+  | 0, s1, _ => fuelExhaustedWith "Pmap.merge: height fuel exhausted (unreachable)" s1
+  | fuel + 1, s1, s2 =>
+    match s1, s2 with
+    | Empty, Empty => Empty
+    | Node l1 v1 d1 r1 h1, _ =>
+      if h1 >= height s2 then
+        let (l2, d2, r2) := split cmp v1 s2
+        concatOrJoin cmp (mergeGo cmp f fuel l1 l2) v1 (f v1 (some d1) d2) (mergeGo cmp f fuel r1 r2)
+      else
+        match s2 with
+        | Node l2 v2 d2 r2 _ =>
+          let (l1, d1, r1) := split cmp v2 s1
+          concatOrJoin cmp (mergeGo cmp f fuel l1 l2) v2 (f v2 d1 (some d2)) (mergeGo cmp f fuel r1 r2)
+        | Empty => failwithI "Map.merge: unreachable (h1 < height Empty)"
+    | Empty, Node l2 v2 d2 r2 _ =>
+      let (l1, d1, r1) := split cmp v2 s1
+      concatOrJoin cmp (mergeGo cmp f fuel l1 l2) v2 (f v2 d1 (some d2)) (mergeGo cmp f fuel r1 r2)
+
+def merge (cmp : α → α → LemOrdering) (f : α → Option β → Option β → Option β) (s1 s2 : Pmap α β) : Pmap α β :=
+  mergeGo cmp f (height s1 + height s2 + 1) s1 s2
+
+/-- pmap.ml:290 `union a b` — b's datum wins on a common key; WHICH key
+    survives follows the merge traversal (a's when a's node is visited
+    first). -/
+def union (cmp : α → α → LemOrdering) (a b : Pmap α β) : Pmap α β :=
+  merge cmp (fun _ o1 o2 =>
+    match o1, o2 with
+    | _, some v => some v
+    | some v, _ => some v
+    | _, _ => none) a b
+
+/-- pmap.ml:232 enumeration / `cons_enum` -/
+inductive Enum (α β : Type) : Type where
+  | End : Enum α β
+  | More : α → β → Pmap α β → Enum α β → Enum α β
+
+def consEnum : Pmap α β → Enum α β → Enum α β
+  | Empty, e => e
+  | Node l v d r _, e => consEnum l (.More v d r e)
+
+/-- pmap.ml:265 `cardinal` -/
+def cardinal : Pmap α β → Nat
+  | Empty => 0
+  | Node l _ _ r _ => cardinal l + 1 + cardinal r
+
+/-- pmap.ml:253 `equal cmp_key cmp_a m1 m2` — keys by the map's comparator -/
+def equalAux (cmp : α → α → LemOrdering) (eqV : β → β → Bool) : Nat → Enum α β → Enum α β → Bool
+  | 0, _, _ => fuelExhaustedWith "Pmap.equal: fuel exhausted (unreachable: bounded by the binding counts)" false
+  | fuel + 1, e1, e2 =>
+    match e1, e2 with
+    | .End, .End => true
+    | .End, _ => false
+    | _, .End => false
+    | .More v1 d1 r1 e1, .More v2 d2 r2 e2 =>
+      (match cmp v1 v2 with | .EQ => true | _ => false) && eqV d1 d2 &&
+      equalAux cmp eqV fuel (consEnum r1 e1) (consEnum r2 e2)
+
+def equal (cmp : α → α → LemOrdering) (eqV : β → β → Bool) (m1 m2 : Pmap α β) : Bool :=
+  equalAux cmp eqV (cardinal m1 + cardinal m2 + 1) (consEnum m1 .End) (consEnum m2 .End)
+
+/-- pmap.ml:238 `compare cmp_key cmp_a m1 m2` -/
+def compareAux (cmp : α → α → LemOrdering) (cmpV : β → β → LemOrdering) : Nat → Enum α β → Enum α β → LemOrdering
+  | 0, _, _ => fuelExhaustedWith "Pmap.compare: fuel exhausted (unreachable)" .EQ
+  | fuel + 1, e1, e2 =>
+    match e1, e2 with
+    | .End, .End => .EQ
+    | .End, _ => .LT
+    | _, .End => .GT
+    | .More v1 d1 r1 e1, .More v2 d2 r2 e2 =>
+      match cmp v1 v2 with
+      | .EQ =>
+        match cmpV d1 d2 with
+        | .EQ => compareAux cmp cmpV fuel (consEnum r1 e1) (consEnum r2 e2)
+        | c => c
+      | c => c
+
+def compare (cmp : α → α → LemOrdering) (cmpV : β → β → LemOrdering) (m1 m2 : Pmap α β) : LemOrdering :=
+  compareAux cmp cmpV (cardinal m1 + cardinal m2 + 1) (consEnum m1 .End) (consEnum m2 .End)
+
+/-- pmap.ml:269 `bindings` — ascending -/
+def bindingsAux : List (α × β) → Pmap α β → List (α × β)
+  | accu, Empty => accu
+  | accu, Node l v d r _ => bindingsAux ((v, d) :: bindingsAux accu r) l
+
+def bindings (m : Pmap α β) : List (α × β) := bindingsAux [] m
+
+end Pmap
+
+/-- The lem `map 'k 'v` Lean representation. `empty` is deliberate ABI
+    (`lean_box(0)` is a valid empty map for consumer C externs); a
+    non-empty map carries the comparator captured at first insert —
+    pmap.ml's `{cmp; m}` record — which `fmapEqualBy` needs because
+    lem's `mapEqualBy eq_k eq_v` is `Pmap.equal eq_v` on OCaml: keys are
+    compared with the MAP's comparator, `eq_k` is ignored
+    (library/map.lem:30-32). -/
 inductive Fmap (α β : Type) : Type where
   | empty
-  | mk (cmp : α → α → Ordering)
-       (byKey : Std.TreeMap α (List (Nat × α × β)) cmp)
-       (bySeq : Std.TreeMap Nat (α × β))
-       (counter : Nat)
+  | mk (cmp : α → α → LemOrdering) (m : Pmap α β)
 
 instance : Inhabited (Fmap α β) := ⟨.empty⟩
 
 def fmapEmpty : Fmap α β := .empty
 
-def fmapIsEmpty : Fmap α β → Bool
-  | .empty => true
-  | .mk _ _ bySeq _ => bySeq.isEmpty
+def Fmap.rep : Fmap α β → Pmap α β
+  | .empty => .Empty
+  | .mk _ m => m
 
-/-- Insert. Replaces (exactly) the BEq-equal entries the old
-    `(k, v) :: m.filter (fun p => !(p.1 == k))` removed; the new entry gets
-    the newest sequence number, so enumeration order matches the old
-    move-to-front behavior. On `empty` the passed comparator is captured as
-    the map's key order; a delete-emptied `mk` keeps its captured
-    comparator. -/
-def fmapAddBy [BEq α] (cmp : α → α → LemOrdering) (k : α) (v : β) : Fmap α β → Fmap α β
-  | .empty =>
-    let c' := lemCmpToOrd cmp
-    .mk c' (Std.TreeMap.empty.insert k [(0, k, v)])
-           (Std.TreeMap.empty.insert 0 (k, v)) 1
-  | .mk c byKey bySeq n =>
-    let bucket := (byKey.get? k).getD []
-    let dead := bucket.filter (fun e => e.2.1 == k)
-    let kept := bucket.filter (fun e => !(e.2.1 == k))
-    let bySeq' := dead.foldl (fun t e => t.erase e.1) bySeq
-    .mk c (byKey.insert k ((n, k, v) :: kept)) (bySeq'.insert n (k, v)) (n + 1)
+/-- pmap.ml:62/284 `is_empty` -/
+def fmapIsEmpty (m : Fmap α β) : Bool :=
+  match m.rep with
+  | .Empty => true
+  | _ => false
 
-/-- Lookup: the newest comparator-EQ entry (= first match of the old head-first
-    scan) is the bucket head. The tree is searched with the captured
-    comparator (assumption 1 above). -/
+/-- pmap.ml:285 `add k a m = {m with m = add m.cmp k a m.m}` -/
+def fmapAddBy (cmp : α → α → LemOrdering) (k : α) (v : β) : Fmap α β → Fmap α β
+  | .empty => .mk cmp (Pmap.add cmp k v .Empty)
+  | .mk c m => .mk c (Pmap.add c k v m)
+
+/-- pmap.ml:315 `lookup k m = try Some (find k m) with Not_found -> None` -/
 def fmapLookupBy (_cmp : α → α → LemOrdering) (k : α) : Fmap α β → Option β
   | .empty => none
-  | .mk _ byKey _ _ =>
-    match byKey.get? k with
-    | some ((_, _, v) :: _) => some v
-    | _ => none
+  | .mk c m => Pmap.find? c k m
+  -- (the comparator argument is the static instance; the CAPTURED one is
+  --  used, as in the OCaml wrapper `find k m = find m.cmp k m.m`)
 
-/-- Delete: removes ALL comparator-EQ entries (the old filter semantics),
-    i.e. the whole bucket. -/
+/-- pmap.ml:287 `remove` -/
 def fmapDeleteBy (_cmp : α → α → LemOrdering) (k : α) (m : Fmap α β) : Fmap α β :=
   match m with
   | .empty => .empty
-  | .mk c byKey bySeq n =>
-    match byKey.get? k with
-    | none => m
-    | some bucket =>
-      .mk c (byKey.erase k) (bucket.foldl (fun t e => t.erase e.1) bySeq) n
+  | .mk c m => .mk c (Pmap.remove c k m)
 
-/-- Enumerate as the old spine list: newest insert first (seq-descending). -/
-def fmapElements : Fmap α β → List (α × β)
-  | .empty => []
-  | .mk _ _ bySeq _ => bySeq.foldl (fun acc _ kv => kv :: acc) []
+/-- pmap.ml:308 `bindings_list` / `toSet` — ascending -/
+def fmapElements (m : Fmap α β) : List (α × β) := Pmap.bindings m.rep
 
+/-- pmap.ml:316-317 -/
 def fmapMap (f : β → γ) : Fmap α β → Fmap α γ
   | .empty => .empty
-  | .mk c byKey bySeq n =>
-    .mk c (byKey.map (fun _ bucket => bucket.map (fun (s, k, v) => (s, k, f v))))
-          (bySeq.map (fun _ kv => (kv.1, f kv.2))) n
-
+  | .mk c m => .mk c (Pmap.map f m)
 def fmapMapi (f : α → β → γ) : Fmap α β → Fmap α γ
   | .empty => .empty
-  | .mk c byKey bySeq n =>
-    .mk c (byKey.map (fun _ bucket => bucket.map (fun (s, k, v) => (s, k, f k v))))
-          (bySeq.map (fun _ kv => (kv.1, f kv.1 kv.2))) n
+  | .mk c m => .mk c (Pmap.mapi f m)
 
-/-- Structural instances matching the retired `List` representation exactly:
-    equality/ordering of the enumerated spines (order-SENSITIVE — these are
-    the instances `deriving BEq, Ord` on Fmap-carrying generated types
-    (lem `bimap`, `Multiset.t2`, cerberus `AilSyntax.sigma`) used to get
-    from `List`). Not to be confused with lem's own map equality
-    (`fmapEqualBy` below), which is containment-based. -/
+/-- Structural instances for `deriving BEq, Ord` on generated types with
+    map fields: the ascending binding spines (see the Pset note). -/
 instance [BEq α] [BEq β] : BEq (Fmap α β) where
   beq m1 m2 := fmapElements m1 == fmapElements m2
-
 instance [Ord α] [Ord β] : Ord (Fmap α β) where
   compare m1 m2 := compare (fmapElements m1) (fmapElements m2)
 
-/-- Order-insensitive double containment — the old algorithm verbatim, over
-    the enumerated spines. -/
-def fmapEqualBy (eqK : α → α → Bool) (eqV : β → β → Bool) (m1 m2 : Fmap α β) : Bool :=
-  let l1 := fmapElements m1
-  let l2 := fmapElements m2
-  let check (a b : List (α × β)) : Bool :=
-    a.all (fun (k, v) =>
-      match b.find? (fun (k', _) => eqK k k') with
-      | some (_, v') => eqV v v'
-      | none => false)
-  check l1 l2 && check l2 l1
+/-- pmap.ml:296 `equal f a b = equal a.cmp f a.m b.m`: `eq_k` is IGNORED,
+    keys compare with the first map's captured comparator. -/
+def fmapEqualBy (_eqK : α → α → Bool) (eqV : β → β → Bool) (m1 m2 : Fmap α β) : Bool :=
+  match m1, m2 with
+  | .empty, .empty => true
+  | .mk c a, b => Pmap.equal c eqV a b.rep
+  | .empty, .mk c b => Pmap.equal c eqV .Empty b
 
-def fmapDomainBy (cmp : α → α → LemOrdering) (m : Fmap α β) : List α :=
-  setFromListBy cmp ((fmapElements m).map (fun p => p.1))
+/-- pmap.ml:306 `domain m = Pset.from_list m.cmp (List.map fst (bindings m.m))` -/
+def fmapDomainBy (cmp : α → α → LemOrdering) (m : Fmap α β) : Pset α :=
+  Pset.fromList cmp ((fmapElements m).map Prod.fst)
 
-def fmapRangeBy (cmp : β → β → LemOrdering) (m : Fmap α β) : List β :=
-  setFromListBy cmp ((fmapElements m).map (fun p => p.2))
+/-- pmap.ml:307 `range cmp m = Pset.from_list cmp (List.map snd (bindings m.m))` -/
+def fmapRangeBy (cmp : β → β → LemOrdering) (m : Fmap α β) : Pset β :=
+  Pset.fromList cmp ((fmapElements m).map Prod.snd)
 
-def fmapAll (f : α → β → Bool) (m : Fmap α β) : Bool :=
-  (fmapElements m).all (fun p => f p.1 p.2)
+/-- pmap.ml:309 `bindings cmp m = Pset.from_list cmp (bindings m.m)` (lem Map.toSetBy) -/
+def fmapToSetBy (cmp : (α × β) → (α × β) → LemOrdering) (m : Fmap α β) : Pset (α × β) :=
+  Pset.fromList cmp (fmapElements m)
 
-/-- Union: fold m2's spine head-first (newest-first) into m1 — the old
-    `m2.foldl fmapAdd m1` order exactly. -/
-def fmapUnionBy [BEq α] (cmp : α → α → LemOrdering) (m1 m2 : Fmap α β) : Fmap α β :=
-  (fmapElements m2).foldl (fun acc (k, v) => fmapAddBy cmp k v acc) m1
+/-- pmap.ml:299 `for_all` -/
+def fmapAll (f : α → β → Bool) (m : Fmap α β) : Bool := Pmap.forAll f m.rep
 
-def fmapOfSpine [BEq α] (cmp : α → α → LemOrdering) (l : List (α × β)) : Fmap α β :=
-  l.foldr (fun (k, v) acc => fmapAddBy cmp k v acc) fmapEmpty
+/-- pmap.ml:289 `union a b = merge ... a b` with a's comparator -/
+def fmapUnionBy (cmp : α → α → LemOrdering) (m1 m2 : Fmap α β) : Fmap α β :=
+  match m1, m2 with
+  | .empty, .empty => .empty
+  | .mk c a, b => .mk c (Pmap.union c a b.rep)
+  | .empty, .mk c b => .mk c (Pmap.union c .Empty b)
 
 /- ============================================================================
    Unsupported numeric types
@@ -650,38 +1195,43 @@ instance : BEq LemFloat32 where beq _ _ := panic! "float32: not supported in Lea
 instance : Ord LemFloat32 where compare _ _ := panic! "float32: not supported in Lean backend"
 instance (n : Nat) : OfNat LemFloat32 n where ofNat := panic! "float32: not supported in Lean backend"
 
-/- Target rep wrappers for rational operations that can't use infix operators -/
-def unsupportedRationalFromNumeral (_ : Nat) : LemRational :=
+/- Target rep wrappers for rational/real operations. `never_extract`
+   (parity-fix slice 2026-09-03): a generated closed application such as
+   `unsupportedRationalFromNumeral 0` (the `(0 : rational)` literal inside
+   the generated `NumAbs LemRational` instance) was lifted to module
+   initialisation and panicked at start-up of EVERY binary importing
+   LemLib.Num — silently, and fatally under LEAN_ABORT_ON_PANIC=1. -/
+@[never_extract] def unsupportedRationalFromNumeral (_ : Nat) : LemRational :=
   panic! "rational: not supported in Lean backend"
-def unsupportedRationalFromInt (_ : Int) : LemRational :=
+@[never_extract] def unsupportedRationalFromInt (_ : Int) : LemRational :=
   panic! "rational: not supported in Lean backend"
-def unsupportedRationalFromFrac (_ _ : Int) : LemRational :=
+@[never_extract] def unsupportedRationalFromFrac (_ _ : Int) : LemRational :=
   panic! "rational: not supported in Lean backend"
-def unsupportedRationalLess (_ _ : LemRational) : Bool :=
+@[never_extract] def unsupportedRationalLess (_ _ : LemRational) : Bool :=
   panic! "rational: not supported in Lean backend"
-def unsupportedRationalLessEq (_ _ : LemRational) : Bool :=
+@[never_extract] def unsupportedRationalLessEq (_ _ : LemRational) : Bool :=
   panic! "rational: not supported in Lean backend"
-def unsupportedRationalGreater (_ _ : LemRational) : Bool :=
+@[never_extract] def unsupportedRationalGreater (_ _ : LemRational) : Bool :=
   panic! "rational: not supported in Lean backend"
-def unsupportedRationalGreaterEq (_ _ : LemRational) : Bool :=
+@[never_extract] def unsupportedRationalGreaterEq (_ _ : LemRational) : Bool :=
   panic! "rational: not supported in Lean backend"
 
 /- Target rep wrappers for real operations that can't use infix operators -/
-def unsupportedRealFromNumeral (_ : Nat) : LemReal :=
+@[never_extract] def unsupportedRealFromNumeral (_ : Nat) : LemReal :=
   panic! "real: not supported in Lean backend"
-def unsupportedRealFromInt (_ : Int) : LemReal :=
+@[never_extract] def unsupportedRealFromInt (_ : Int) : LemReal :=
   panic! "real: not supported in Lean backend"
-def unsupportedRealFromFrac (_ _ : Int) : LemReal :=
+@[never_extract] def unsupportedRealFromFrac (_ _ : Int) : LemReal :=
   panic! "real: not supported in Lean backend"
-def unsupportedRealLess (_ _ : LemReal) : Bool :=
+@[never_extract] def unsupportedRealLess (_ _ : LemReal) : Bool :=
   panic! "real: not supported in Lean backend"
-def unsupportedRealLessEq (_ _ : LemReal) : Bool :=
+@[never_extract] def unsupportedRealLessEq (_ _ : LemReal) : Bool :=
   panic! "real: not supported in Lean backend"
-def unsupportedRealGreater (_ _ : LemReal) : Bool :=
+@[never_extract] def unsupportedRealGreater (_ _ : LemReal) : Bool :=
   panic! "real: not supported in Lean backend"
-def unsupportedRealGreaterEq (_ _ : LemReal) : Bool :=
+@[never_extract] def unsupportedRealGreaterEq (_ _ : LemReal) : Bool :=
   panic! "real: not supported in Lean backend"
-def unsupportedRealAbs (_ : LemReal) : LemReal :=
+@[never_extract] def unsupportedRealAbs (_ : LemReal) : LemReal :=
   panic! "real: not supported in Lean backend"
 
 /- Integer square root (floor of exact sqrt) -/
@@ -689,20 +1239,26 @@ private partial def natSqrtAux (n guess : Nat) : Nat :=
   let next := (guess + n / guess) / 2
   if next >= guess then guess else natSqrtAux n next
 
+/-- lem integerSqrt = Nat_big_num.sqrt = Z.sqrt: `Invalid_argument "Z.sqrt:
+    square root of a negative number"` on a negative argument (the previous
+    Lean rep returned the root of the absolute value — divergence census
+    N5; parity probe f_sqrt_neg). -/
 def integerSqrt (n : Int) : Int :=
-  let m := n.natAbs
-  if m == 0 then 0 else Int.ofNat (natSqrtAux m m)
+  if n < 0 then failwithI "Z.sqrt: square root of a negative number"
+  else
+    let m := n.natAbs
+    if m == 0 then 0 else Int.ofNat (natSqrtAux m m)
 
 /- Target rep wrappers for rational/real decomposition operations -/
-def rationalNumerator (_ : LemRational) : Int :=
+@[never_extract] def rationalNumerator (_ : LemRational) : Int :=
   panic! "rational: not supported in Lean backend"
-def rationalDenominator (_ : LemRational) : Int :=
+@[never_extract] def rationalDenominator (_ : LemRational) : Int :=
   panic! "rational: not supported in Lean backend"
-def realSqrt (_ : LemReal) : LemReal :=
+@[never_extract] def realSqrt (_ : LemReal) : LemReal :=
   panic! "real: not supported in Lean backend"
-def realFloor (_ : LemReal) : Int :=
+@[never_extract] def realFloor (_ : LemReal) : Int :=
   panic! "real: not supported in Lean backend"
-def realCeiling (_ : LemReal) : Int :=
+@[never_extract] def realCeiling (_ : LemReal) : Int :=
   panic! "real: not supported in Lean backend"
 
 /- Integer absolute value returning Int (not Nat) -/
@@ -713,127 +1269,209 @@ def listGet? (l : List α) (n : Nat) : Option α := l[n]?
 def listGet! [Inhabited α] (l : List α) (n : Nat) : α := l[n]!
 
 /- ============================================================ -/
+/- Division and remainder — the OCaml reference semantics          -/
+/- ============================================================ -/
+/- Parity-fix slice 2026-09-03 (F1 + the division-by-zero class of the
+   divergence census). The OCaml target is the reference semantics of a
+   lem program; every lem division/remainder rep below mirrors its OCaml
+   rep byte-for-byte, including FAILURE: OCaml raises Division_by_zero
+   (native `/`, `mod`, Int32/Int64.div/rem, zarith), so the Lean side
+   fails loudly (failwithI — panic, then the Inhabited default; a
+   harness under LEAN_ABORT_ON_PANIC=1 fail-stops) instead of the
+   silent `x / 0 = 0` totalisation of Lean's core operators.
+
+   * lem `int` (OCaml native int): library/num.lem intDiv/intMod ->
+     ocaml-lib/nat_num.ml:12-18
+       let int_mod i n = let r = i mod n in if r < 0 then r + n else r
+       let int_div i n = let r = i / n in if (i mod n < 0) then r - 1 else r
+     over OCaml's truncating `/` and `mod` (Int.tdiv / Int.tmod). This is
+     Euclidean for a positive divisor but NOT for a negative one:
+     int_div (-7) (-2) = 2, int_mod (-7) (-2) = -3 (2 * -2 + -3 = -7); the
+     previous reps (`Int.ediv`/`Int.emod`) gave 4 and 1. Two-target pin:
+     tests/comprehensive/parity/probes/p_num_div.lem.
+   * lem `int32`/`int64`: nat_num.ml:20-33 — the same shape over
+     Int32.div/Int32.rem (truncating, wrapping at min_int / -1), which
+     Lean's Int32.div (BitVec.sdiv) / Int32.mod (BitVec.srem) match.
+   * lem `nat`/`natural`/`integer`: OCaml `/`,`mod` on non-negative ints
+     and zarith's Nat_big_num.div/modulus (Euclidean = Int.ediv/Int.emod,
+     the M2-verified mapping) — unchanged values, plus the zero guard.
+   * integerDiv_t / integerRem_t / integerRem_f (num_extra.lem):
+     Z.div / Z.rem / mod_big_int — truncating quotient, dividend-signed
+     remainder, non-negative remainder; zero raises. -/
+
+/- `never_extract`: at a concrete type this is a CLOSED term; without the
+   attribute the compiler lifted `@lemDivByZero Nat _` to a
+   module-initialisation constant — the panic fired (silently: messages
+   are off during init) at start-up and every `x / 0` then returned the
+   pre-computed default with no failure at the program point. Measured
+   in the parity suite (f_div_zero printed "at zero: 0" with no panic). -/
+@[never_extract] private def lemDivByZero {α : Type} [Inhabited α] : α :=
+  failwithI "Division_by_zero"
+
+def lemIntDiv (i n : Int) : Int :=
+  if n == 0 then lemDivByZero
+  else let r := Int.tdiv i n; if Int.tmod i n < 0 then r - 1 else r
+def lemIntMod (i n : Int) : Int :=
+  if n == 0 then lemDivByZero
+  else let r := Int.tmod i n; if r < 0 then r + n else r
+
+def lemNatDiv (a b : Nat) : Nat := if b == 0 then lemDivByZero else a / b
+def lemNatMod (a b : Nat) : Nat := if b == 0 then lemDivByZero else a % b
+
+def lemIntegerDiv (a b : Int) : Int := if b == 0 then lemDivByZero else a / b
+def lemIntegerMod (a b : Int) : Int := if b == 0 then lemDivByZero else a % b
+
+def lemInt32Div (i n : Int32) : Int32 :=
+  if n == 0 then lemDivByZero
+  else let r := i / n; if i % n < 0 then r - 1 else r
+def lemInt32Mod (i n : Int32) : Int32 :=
+  if n == 0 then lemDivByZero
+  else let r := i % n; if r < 0 then r + n else r
+def lemInt64Div (i n : Int64) : Int64 :=
+  if n == 0 then lemDivByZero
+  else let r := i / n; if i % n < 0 then r - 1 else r
+def lemInt64Mod (i n : Int64) : Int64 :=
+  if n == 0 then lemDivByZero
+  else let r := i % n; if r < 0 then r + n else r
+
+/- ============================================================ -/
 /- Fixed-width integer types                                   -/
 /- ============================================================ -/
-/- Lem's int32 and int64 types are represented as distinct newtype wrappers
-   around Int. This provides type safety (can't accidentally mix int32/int64/int)
-   and eliminates duplicate typeclass instances. Arithmetic uses Int operations
-   (arbitrary precision, no overflow) — same semantics as Coq's Z mapping.
-   For proper overflow semantics, these would need BitVec 32/BitVec 64. -/
+/- Parity-fix slice 2026-09-03 (divergence census N3): lem `int32`/`int64`
+   are Lean's `Int32`/`Int64` — two's-complement machine integers whose
+   arithmetic WRAPS exactly like OCaml's Int32/Int64 (the previous `Int`
+   newtypes had no overflow at all). Conversions mirror the OCaml reps of
+   library/num.lem one by one:
+   * Int32.of_int / Int64.of_int (int32FromInt, int32FromNat, ...): the
+     argument is taken modulo 2^32 / 2^64 — Int32.ofInt / Int64.ofInt;
+   * Nat_big_num.to_int32 / to_int64 (…FromInteger, …FromNatural,
+     …FromNumeral): zarith raises Overflow outside the range — the
+     Lean side fails loudly;
+   * Int64.to_int32 (int32FromInt64): the low 32 bits — Int64.toInt32
+     (signExtend to the smaller width truncates); Int64.of_int32
+     (int64FromInt32): sign extension — Int32.toInt64;
+   * Nat_big_num.of_int32/of_int64 (integerFromInt32/64): exact — .toInt.
+   Int32.abs / Int32.neg wrap at min_int on both targets (BitVec.abs /
+   two's-complement negation). Comparisons are signed on both.
+   Bitwise: Int32.logand/logor/logxor/lognot and the three shifts
+   (shift_left, shift_right = arithmetic, shift_right_logical) map onto
+   Lean's &&& ||| ^^^ ~~~ and <<< / >>> (arithmetic) / the UInt32
+   logical shift; shift amounts are reduced modulo the width on both
+   targets on x86-64 (OCaml leaves amounts >= width unspecified). -/
 
-structure LemInt32 where val : Int
-structure LemInt64 where val : Int
+def lemInt32Ltb (a b : Int32) : Bool := decide (a < b)
+def lemInt32Lteb (a b : Int32) : Bool := decide (a <= b)
+def lemInt32Gtb (a b : Int32) : Bool := decide (b < a)
+def lemInt32Gteb (a b : Int32) : Bool := decide (b <= a)
+def lemInt32OfNat (n : Nat) : Int32 := Int32.ofNat n
+def lemInt32OfInt (i : Int) : Int32 := Int32.ofInt i
+def lemInt32OfIntegerExact (i : Int) : Int32 :=
+  if Int32.minValue.toInt <= i && i <= Int32.maxValue.toInt then Int32.ofInt i
+  else failwithI s!"Nat_big_num.to_int32: Overflow ({i})"
+def lemInt32OfNaturalExact (n : Nat) : Int32 := lemInt32OfIntegerExact (Int.ofNat n)
+def lemInt32FromNumeral (n : Nat) : Int32 := lemInt32OfIntegerExact (Int.ofNat n)
+def lemInt32ToInt (n : Int32) : Int := n.toInt
+def lemInt32FromInt64 (n : Int64) : Int32 := n.toInt32
 
-instance : Inhabited LemInt32 := ⟨⟨0⟩⟩
-instance : BEq LemInt32 where beq a b := a.val == b.val
-instance : Ord LemInt32 where compare a b := compare a.val b.val
-instance : Add LemInt32 where add a b := ⟨a.val + b.val⟩
-instance : Sub LemInt32 where sub a b := ⟨a.val - b.val⟩
-instance : Mul LemInt32 where mul a b := ⟨a.val * b.val⟩
-instance : Div LemInt32 where div a b := ⟨a.val / b.val⟩
-instance : Mod LemInt32 where mod a b := ⟨a.val % b.val⟩
-instance : Neg LemInt32 where neg a := ⟨-a.val⟩
-instance : HPow LemInt32 Nat LemInt32 where hPow a n := ⟨a.val ^ n⟩
-instance : Min LemInt32 where min a b := if a.val <= b.val then a else b
-instance : Max LemInt32 where max a b := if a.val >= b.val then a else b
-instance (n : Nat) : OfNat LemInt32 n where ofNat := ⟨n⟩
-
-instance : Inhabited LemInt64 := ⟨⟨0⟩⟩
-instance : BEq LemInt64 where beq a b := a.val == b.val
-instance : Ord LemInt64 where compare a b := compare a.val b.val
-instance : Add LemInt64 where add a b := ⟨a.val + b.val⟩
-instance : Sub LemInt64 where sub a b := ⟨a.val - b.val⟩
-instance : Mul LemInt64 where mul a b := ⟨a.val * b.val⟩
-instance : Div LemInt64 where div a b := ⟨a.val / b.val⟩
-instance : Mod LemInt64 where mod a b := ⟨a.val % b.val⟩
-instance : Neg LemInt64 where neg a := ⟨-a.val⟩
-instance : HPow LemInt64 Nat LemInt64 where hPow a n := ⟨a.val ^ n⟩
-instance : Min LemInt64 where min a b := if a.val <= b.val then a else b
-instance : Max LemInt64 where max a b := if a.val >= b.val then a else b
-instance (n : Nat) : OfNat LemInt64 n where ofNat := ⟨n⟩
-
-/- Target rep wrappers for int32 operations -/
-def lemInt32Ltb (a b : LemInt32) : Bool := a.val < b.val
-def lemInt32Lteb (a b : LemInt32) : Bool := a.val <= b.val
-def lemInt32Gtb (a b : LemInt32) : Bool := a.val > b.val
-def lemInt32Gteb (a b : LemInt32) : Bool := a.val >= b.val
-def lemInt32Abs (a : LemInt32) : LemInt32 := ⟨Int.ofNat a.val.natAbs⟩
-def lemInt32OfNat (n : Nat) : LemInt32 := ⟨Int.ofNat n⟩
-def lemInt32OfInt (n : Int) : LemInt32 := ⟨n⟩
-def lemInt32ToInt (n : LemInt32) : Int := n.val
-def lemInt32ToNat (n : LemInt32) : Nat := Int.toNat n.val
-def lemInt32FromInt64 (n : LemInt64) : LemInt32 := ⟨n.val⟩
-
-/- Target rep wrappers for int64 operations -/
-def lemInt64Ltb (a b : LemInt64) : Bool := a.val < b.val
-def lemInt64Lteb (a b : LemInt64) : Bool := a.val <= b.val
-def lemInt64Gtb (a b : LemInt64) : Bool := a.val > b.val
-def lemInt64Gteb (a b : LemInt64) : Bool := a.val >= b.val
-def lemInt64Abs (a : LemInt64) : LemInt64 := ⟨Int.ofNat a.val.natAbs⟩
-def lemInt64OfNat (n : Nat) : LemInt64 := ⟨Int.ofNat n⟩
-def lemInt64OfInt (n : Int) : LemInt64 := ⟨n⟩
-def lemInt64ToInt (n : LemInt64) : Int := n.val
-def lemInt64FromInt32 (n : LemInt32) : LemInt64 := ⟨n.val⟩
+def lemInt64Ltb (a b : Int64) : Bool := decide (a < b)
+def lemInt64Lteb (a b : Int64) : Bool := decide (a <= b)
+def lemInt64Gtb (a b : Int64) : Bool := decide (b < a)
+def lemInt64Gteb (a b : Int64) : Bool := decide (b <= a)
+def lemInt64OfNat (n : Nat) : Int64 := Int64.ofNat n
+def lemInt64OfInt (i : Int) : Int64 := Int64.ofInt i
+def lemInt64OfIntegerExact (i : Int) : Int64 :=
+  if Int64.minValue.toInt <= i && i <= Int64.maxValue.toInt then Int64.ofInt i
+  else failwithI s!"Nat_big_num.to_int64: Overflow ({i})"
+def lemInt64OfNaturalExact (n : Nat) : Int64 := lemInt64OfIntegerExact (Int.ofNat n)
+def lemInt64FromNumeral (n : Nat) : Int64 := lemInt64OfIntegerExact (Int.ofNat n)
+def lemInt64ToInt (n : Int64) : Int := n.toInt
+def lemInt64FromInt32 (n : Int32) : Int64 := n.toInt64
 
 /- ============================================================ -/
 /- Bitwise operations for fixed-width integers                  -/
 /- ============================================================ -/
+def int32Lnot (x : Int32) : Int32 := ~~~x
+def int32Lor (x y : Int32) : Int32 := x ||| y
+def int32Lxor (x y : Int32) : Int32 := x ^^^ y
+def int32Land (x y : Int32) : Int32 := x &&& y
+def int32Lsl (x : Int32) (n : Nat) : Int32 := x <<< Int32.ofNat n
+def int32Lsr (x : Int32) (n : Nat) : Int32 := (x.toUInt32 >>> UInt32.ofNat n).toInt32
+def int32Asr (x : Int32) (n : Nat) : Int32 := x >>> Int32.ofNat n
 
-/- Two's complement conversion helpers -/
-private def toNat32 (x : Int) : Nat :=
-  if x >= 0 then x.toNat % (2 ^ 32)
-  else (2 ^ 32 - x.natAbs % (2 ^ 32)) % (2 ^ 32)
-
-private def fromNat32 (n : Nat) : Int :=
-  if n >= 2 ^ 31 then Int.ofNat n - Int.ofNat (2 ^ 32)
-  else Int.ofNat n
-
-private def toNat64 (x : Int) : Nat :=
-  if x >= 0 then x.toNat % (2 ^ 64)
-  else (2 ^ 64 - x.natAbs % (2 ^ 64)) % (2 ^ 64)
-
-private def fromNat64 (n : Nat) : Int :=
-  if n >= 2 ^ 63 then Int.ofNat n - Int.ofNat (2 ^ 64)
-  else Int.ofNat n
-
-/- int32 bitwise operations -/
-def int32Lnot (x : LemInt32) : LemInt32 := ⟨fromNat32 ((toNat32 x.val) ^^^ (2 ^ 32 - 1))⟩
-def int32Lor (x y : LemInt32) : LemInt32 := ⟨fromNat32 ((toNat32 x.val) ||| (toNat32 y.val))⟩
-def int32Lxor (x y : LemInt32) : LemInt32 := ⟨fromNat32 ((toNat32 x.val) ^^^ (toNat32 y.val))⟩
-def int32Land (x y : LemInt32) : LemInt32 := ⟨fromNat32 ((toNat32 x.val) &&& (toNat32 y.val))⟩
-def int32Lsl (x : LemInt32) (n : Nat) : LemInt32 := ⟨fromNat32 ((toNat32 x.val) <<< n)⟩
-def int32Lsr (x : LemInt32) (n : Nat) : LemInt32 := ⟨fromNat32 ((toNat32 x.val) >>> n)⟩
-def int32Asr (x : LemInt32) (n : Nat) : LemInt32 :=
-  let sx := fromNat32 (toNat32 x.val)
-  ⟨if sx < 0 then -((-sx - 1) >>> n) - 1
-  else Int.ofNat (x.val.toNat >>> n)⟩
-
-/- int64 bitwise operations -/
-def int64Lnot (x : LemInt64) : LemInt64 := ⟨fromNat64 ((toNat64 x.val) ^^^ (2 ^ 64 - 1))⟩
-def int64Lor (x y : LemInt64) : LemInt64 := ⟨fromNat64 ((toNat64 x.val) ||| (toNat64 y.val))⟩
-def int64Lxor (x y : LemInt64) : LemInt64 := ⟨fromNat64 ((toNat64 x.val) ^^^ (toNat64 y.val))⟩
-def int64Land (x y : LemInt64) : LemInt64 := ⟨fromNat64 ((toNat64 x.val) &&& (toNat64 y.val))⟩
-def int64Lsl (x : LemInt64) (n : Nat) : LemInt64 := ⟨fromNat64 ((toNat64 x.val) <<< n)⟩
-def int64Lsr (x : LemInt64) (n : Nat) : LemInt64 := ⟨fromNat64 ((toNat64 x.val) >>> n)⟩
-def int64Asr (x : LemInt64) (n : Nat) : LemInt64 :=
-  let sx := fromNat64 (toNat64 x.val)
-  ⟨if sx < 0 then -((-sx - 1) >>> n) - 1
-  else Int.ofNat (x.val.toNat >>> n)⟩
+def int64Lnot (x : Int64) : Int64 := ~~~x
+def int64Lor (x y : Int64) : Int64 := x ||| y
+def int64Lxor (x y : Int64) : Int64 := x ^^^ y
+def int64Land (x y : Int64) : Int64 := x &&& y
+def int64Lsl (x : Int64) (n : Nat) : Int64 := x <<< Int64.ofNat n
+def int64Lsr (x : Int64) (n : Nat) : Int64 := (x.toUInt64 >>> UInt64.ofNat n).toInt64
+def int64Asr (x : Int64) (n : Nat) : Int64 := x >>> Int64.ofNat n
 
 /- ============================================================ -/
 /- Missing library functions -/
 /- ============================================================ -/
 
+/-- zarith `Z.of_string` (lem Num_extra.integerOfString = Nat_big_num.of_string),
+    grammar as MEASURED against the OCaml reference (parity-fix slice
+    2026-09-03, census N6; probe p_num_parse): an optional single sign
+    (`+`/`-`), an optional base prefix `0x`/`0X` (16), `0o`/`0O` (8),
+    `0b`/`0B` (2), then digits of that base in which `_` may appear after
+    the first digit ("1_000", "1__0", "1_" accepted; "_1", "0x_1" not);
+    the EMPTY digit string reads as 0 ("", "+", "-", "0x", "0b" are 0);
+    anything else — whitespace, a second sign, an out-of-base digit,
+    "1e3", "1.5" — raises `Invalid_argument "Z.of_substring_base: invalid
+    digit"`, which is a loud failure here. -/
+def lemIntegerOfString (s : String) : Int :=
+  let digitVal (c : Char) : Option Nat :=
+    if '0' ≤ c && c ≤ '9' then some (c.toNat - '0'.toNat)
+    else if 'a' ≤ c && c ≤ 'f' then some (c.toNat - 'a'.toNat + 10)
+    else if 'A' ≤ c && c ≤ 'F' then some (c.toNat - 'A'.toNat + 10)
+    else none
+  let rec go (base acc : Nat) (first : Bool) : List Char → Option Nat
+    | [] => some acc
+    | '_' :: rest => if first then none else go base acc false rest
+    | c :: rest =>
+      match digitVal c with
+      | some d => if d < base then go base (acc * base + d) false rest else none
+      | none => none
+  let (neg, cs) := match s.toList with
+    | '-' :: rest => (true, rest)
+    | '+' :: rest => (false, rest)
+    | cs => (false, cs)
+  let (base, cs) := match cs with
+    | '0' :: c :: rest =>
+      if c == 'x' || c == 'X' then (16, rest)
+      else if c == 'o' || c == 'O' then (8, rest)
+      else if c == 'b' || c == 'B' then (2, rest)
+      else (10, '0' :: c :: rest)
+    | cs => (10, cs)
+  match go base 0 true cs with
+  | some n => if neg then -(Int.ofNat n) else Int.ofNat n
+  | none => failwithI "Z.of_substring_base: invalid digit"
+
+/-- lem Num_extra.naturalOfString = Nat_big_num.of_string_nat
+    (ocaml-lib/nat_big_num.ml:63-68): `of_string`, then `assert false` if
+    the result is negative. -/
 def naturalOfString (s : String) : Nat :=
-  match s.toNat? with
-  | some n => n
-  | none => panic! s!"naturalOfString: invalid input: {s}"
+  let i := lemIntegerOfString s
+  if i < 0 then failwithI "Assertion failed (Nat_big_num.of_string_nat: negative)"
+  else i.toNat
 
-def integerDiv_t (a b : Int) : Int := Int.tdiv a b
-def integerRem_t (a b : Int) : Int := Int.tmod a b
-def integerRem_f (a b : Int) : Int := Int.emod a b
+/-- lem Debug.print_string / print_endline: the OCaml reference PRINTS to
+    stdout (ocaml-lib: `print_string`/`print_endline`); pure Lean code
+    cannot. Refused LOUDLY rather than silently absorbed (the previous
+    Lean definition was `()`, a no-op — divergence census X2; a
+    generation-time refusal is the honest end state, registered). -/
+@[never_extract] def lemDebugPrintUnsupported (_s : String) : Unit :=
+  failwithI "Debug.print_string/print_endline: printing from pure code is unsupported on the Lean target (the OCaml reference prints to stdout)"
 
-def THE (_p : α → Bool) : Option α :=
+
+/- Z.div / Z.rem / mod_big_int (ocaml-lib/nat_big_num.ml integerDiv_t,
+   integerRem_t, integerRem_f); zarith raises Division_by_zero on 0. -/
+def integerDiv_t (a b : Int) : Int := if b == 0 then lemDivByZero else Int.tdiv a b
+def integerRem_t (a b : Int) : Int := if b == 0 then lemDivByZero else Int.tmod a b
+def integerRem_f (a b : Int) : Int := if b == 0 then lemDivByZero else Int.emod a b
+
+@[never_extract] def THE (_p : α → Bool) : Option α :=
   panic! "THE: Hilbert choice is not computable"
 
 /- List indexing — replaces removed List.get? and List.get! -/
@@ -867,58 +1505,119 @@ termination_by bl1.length + bl2.length
 def natLand (a b : Nat) : Nat := a &&& b
 def natLor (a b : Nat) : Nat := a ||| b
 def natLxor (a b : Nat) : Nat := a ^^^ b
-def natLnot (_a : Nat) : Nat := panic! "natLnot: bitwise NOT is not defined for Nat"
+@[never_extract] def natLnot (_a : Nat) : Nat := panic! "natLnot: bitwise NOT is not defined for Nat"
 def natLsl (a b : Nat) : Nat := a <<< b
 def natLsr (a b : Nat) : Nat := a >>> b
 def natAsr (a b : Nat) : Nat := a >>> b  -- same as lsr for Nat (unsigned)
 
-/- Transitive closure of a relation represented as a list of pairs.
-   Iterates composition until no new pairs are added.
+/- ============================================================ -/
+/- Deep lists: explicitly tail-recursive library functions       -/
+/- ============================================================ -/
+/- Parity-fix slice 2026-09-03 (F7; [USER] exception class (b): Lean must
+   not fail where the OCaml reference succeeds). The compiled Lean binary
+   has a fixed native stack; OCaml 5 grows its stack. A 300 000-element
+   sweep over the library (tests/comprehensive/parity/probes/p_list_deep.lem,
+   record) aborted with "Stack overflow detected" on: core `List.zip`
+   and `List.unzip` as called from generated code, the generated
+   `Lem_String.concat`, `Lem_Show.stringFromListAux`, `Lem_List.deleteFirst`,
+   `update`, `catMaybes`, `mapiAux`, `Lem_List_extra.init`,
+   `zipSameLength`, `unfoldr`, `Lem_Sorting.insertBy`, and `List.foldr`
+   as called from `Lem_List_extra.foldr1`. The core `@[csimp]`
+   tail-recursive replacements were measured NOT to apply reliably at
+   these call sites (the same `List.foldr` call worked or overflowed
+   depending on the enclosing definition), so nothing below relies on
+   csimp: every function is an explicit accumulator loop (self tail
+   call → compiled as a loop) or an `Array` fold, and the lem library
+   reps point here. Each has a kernel-checked equality theorem against
+   the definition it replaces in lean-lib/LemLibTheorems.lean (built
+   with the library; `unfoldr` is `partial` on both sides and admits no
+   theorem — recorded there). -/
 
-   TERMINATION (be:S12, totalized arc-14 re-mark — was `partial`): every
-   productive iteration strictly grows the pair list, and pairs are
-   drawn from the finite square of r's endpoints, so the pair count is
-   bounded by (2·|r|)²; fuel = that bound + 1 can never exhaust — the
-   exhaustion arm is the loud fuelExhaustedWith sentinel, never a
-   silent truncation. -/
-private def set_tc_go (join : α → α → Bool)
-    (mem : (α × α) → List (α × α) → Bool) :
-    Nat → List (α × α) → List (α × α)
-  | 0, cur =>
-    fuelExhaustedWith "LemLib.set_tc: fuel exhausted (unreachable: (2|r|)^2+1 bound)" cur
-  | fuel + 1, cur =>
-    let compose := cur.foldl (fun acc (a, b) =>
-      cur.foldl (fun acc2 (c, d) =>
-        let p := (a, d)
-        if join b c && !mem p acc2 then p :: acc2
-        else acc2
-      ) acc
-    ) cur
-    if compose.length == cur.length then cur
-    else set_tc_go join mem fuel compose
+/-- `List.zip` (lem List.zip): accumulator loop, then reverse. -/
+def lemListZipAux : List α → List β → List (α × β) → List (α × β)
+  | x :: xs, y :: ys, acc => lemListZipAux xs ys ((x, y) :: acc)
+  | _, _, acc => acc.reverse
+def lemListZip (l1 : List α) (l2 : List β) : List (α × β) := lemListZipAux l1 l2 []
 
-/-- Equality-keyed transitive closure (the transitiveClosureByEq rep;
-    coq shares the name). Prefer the comparator form below — with a BEq
-    finer than a set's comparator this one can MISS joins (the be:G4
-    hazard class); the lem `transitiveClosure` inline no longer routes
-    here (re-mark R1). -/
-def set_tc (eq : α → α → Bool) (r : List (α × α)) : List (α × α) :=
-  set_tc_go eq (fun p s => s.any (fun q => eq p.1 q.1 && eq p.2 q.2))
-    ((2 * r.length) * (2 * r.length) + 1) r
+/-- `List.unzip` (lem List.unzip) -/
+def lemListUnzipAux : List (α × β) → List α → List β → List α × List β
+  | [], as, bs => (as.reverse, bs.reverse)
+  | (a, b) :: l, as, bs => lemListUnzipAux l (a :: as) (b :: bs)
+def lemListUnzip (l : List (α × β)) : List α × List β := lemListUnzipAux l [] []
 
-/-- Comparator-keyed transitive closure — Pset.tc parity (arc-14 re-mark
-    R1: the lem `transitiveClosure` inline now routes HERE via
-    transitiveClosureByCmp setElemCompare, mirroring the ocaml inline —
-    the ByEq route diverged from the comparator-keyed set layer exactly
-    like the deleted BEq setAdd). Elements join via the pair comparator's
-    diagonal (cmp (b,b) (c,c) = EQ ⇔ b ~ c for the componentwise
-    comparators every call site passes); membership is setMemberBy on
-    the same comparator. Fuel-totalized as above (be:S12 rides along). -/
-def set_tcByCmp (cmp : (α × α) → (α × α) → LemOrdering) (r : List (α × α)) : List (α × α) :=
-  set_tc_go
-    (fun b c => match cmp (b, b) (c, c) with | .EQ => true | _ => false)
-    (fun p s => setMemberBy cmp p s)
-    ((2 * r.length) * (2 * r.length) + 1) r
+/-- `List.foldr` (lem List.foldr): an Array fold — a loop over indices. -/
+def lemListFoldr (f : α → β → β) (init : β) (l : List α) : β := l.toArray.foldr f init
+
+/-- lem List.deleteFirst: `match l with [] -> Nothing | x::xs -> if P x then Just xs
+    else Maybe.map (fun xs' -> x::xs') (deleteFirst P xs)` -/
+def lemListDeleteFirstAux (P : α → Bool) : List α → List α → Option (List α)
+  | [], _ => none
+  | x :: xs, acc => if P x then some (acc.reverseAux xs) else lemListDeleteFirstAux P xs (x :: acc)
+def lemListDeleteFirst (P : α → Bool) (l : List α) : Option (List α) := lemListDeleteFirstAux P l []
+
+/-- lem List.update: `[] -> [] | x::xs -> if n = 0 then e::xs else x :: update xs (n-1) e` -/
+def lemListUpdateAux (e : α) : List α → Nat → List α → List α
+  | [], _, acc => acc.reverse
+  | x :: xs, n, acc => if n == 0 then acc.reverseAux (e :: xs) else lemListUpdateAux e xs (n - 1) (x :: acc)
+def lemListUpdate (l : List α) (n : Nat) (e : α) : List α := lemListUpdateAux e l n []
+
+/-- lem List.catMaybes -/
+def lemListCatMaybesAux : List (Option α) → List α → List α
+  | [], acc => acc.reverse
+  | none :: xs, acc => lemListCatMaybesAux xs acc
+  | some x :: xs, acc => lemListCatMaybesAux xs (x :: acc)
+def lemListCatMaybes (xs : List (Option α)) : List α := lemListCatMaybesAux xs []
+
+/-- lem List.mapiAux / mapi -/
+def lemListMapiAuxAcc (f : Nat → α → β) : Nat → List α → List β → List β
+  | _, [], acc => acc.reverse
+  | n, x :: xs, acc => lemListMapiAuxAcc f (n + 1) xs (f n x :: acc)
+def lemListMapiAux (f : Nat → α → β) (n : Nat) (l : List α) : List β := lemListMapiAuxAcc f n l []
+def lemListMapi (f : Nat → α → β) (l : List α) : List β := lemListMapiAuxAcc f 0 l []
+
+/-- lem List_extra.init: all but the last element; `[]` fails loudly on
+    both targets (the OCaml lem definition is `failwith`). -/
+def lemListInitAux : List α → List α → List α
+  | [_], acc => acc.reverse
+  | x1 :: x2 :: xs, acc => lemListInitAux (x2 :: xs) (x1 :: acc)
+  | [], acc => acc.reverse  -- unreachable from lemListInit (the [] case is handled there)
+def lemListInit (l : List α) : List α :=
+  match l with
+  | [] => failwithI "List_extra.init of empty list"
+  | _ => lemListInitAux l []
+
+/-- lem List_extra.zipSameLength (OCaml `List.combine`: Invalid_argument on
+    unequal lengths). -/
+def lemListZipSameLengthAux : List α → List β → List (α × β) → List (α × β)
+  | x :: xs, y :: ys, acc => lemListZipSameLengthAux xs ys ((x, y) :: acc)
+  | [], [], acc => acc.reverse
+  | _, _, _ => failwithI "List_extra.zipSameLength of different length lists"
+def lemListZipSameLength (l1 : List α) (l2 : List β) : List (α × β) := lemListZipSameLengthAux l1 l2 []
+
+/-- lem List_extra.unfoldr (partial on both targets: the OCaml lem
+    definition loops as long as `f` yields `Just`). -/
+partial def lemListUnfoldrAux (f : α → Option (β × α)) (x : α) (acc : List β) : List β :=
+  match f x with
+  | some (y, x') => lemListUnfoldrAux f x' (y :: acc)
+  | none => acc.reverse
+partial def lemListUnfoldr (f : α → Option (β × α)) (x : α) : List β := lemListUnfoldrAux f x []
+
+/-- lem Sorting.insertBy: `[] -> [e] | x::xs -> if cmp x e then x :: insertBy cmp e xs else e::x::xs` -/
+def lemInsertByAux (cmp : α → α → Bool) (e : α) : List α → List α → List α
+  | [], acc => acc.reverseAux [e]
+  | x :: xs, acc => if cmp x e then lemInsertByAux cmp e xs (x :: acc) else acc.reverseAux (e :: x :: xs)
+def lemInsertBy (cmp : α → α → Bool) (e : α) (l : List α) : List α := lemInsertByAux cmp e l []
+
+/-- lem String.concat / Show.stringFromListAux: `sep`-separated join —
+    `[] -> "" | [s] -> s | s::ss -> s ^ sep ^ concat sep ss`. -/
+def lemStringJoinAux (sep : String) : List String → String → String
+  | [], acc => acc
+  | s :: ss, acc => lemStringJoinAux sep ss (acc ++ sep ++ s)
+def lemStringJoin (sep : String) : List String → String
+  | [] => ""
+  | s :: ss => lemStringJoinAux sep ss s
+def lemStringConcat (sep : String) (ss : List String) : String := lemStringJoin sep ss
+def lemShowListAux (showX : α → String) (xs : List α) : String := lemStringJoin "; " (xs.map showX)
 
 /- ============================================================ -/
 /- Total implementations for generated library functions         -/
@@ -977,9 +1676,16 @@ def mwordPlus {n : Nat} (a b : BitVec n) : BitVec n := a + b
 def mwordMinus {n : Nat} (a b : BitVec n) : BitVec n := a - b
 def mwordUminus {n : Nat} (a : BitVec n) : BitVec n := -a
 def mwordTimes {n : Nat} (a b : BitVec n) : BitVec n := a * b
-def mwordUnsignedDivide {n : Nat} (a b : BitVec n) : BitVec n := BitVec.udiv a b
-def mwordSignedDivide {n : Nat} (a b : BitVec n) : BitVec n := BitVec.sdiv a b
-def mwordModulo {n : Nat} (a b : BitVec n) : BitVec n := BitVec.umod a b
+/- Division by zero: the OCaml reps (ocaml-lib/lem.ml:240-241 `word_udiv`
+   / `word_mod` = Nat_big_num.div / modulus; `signedDivide` is a lem
+   definition over them) raise Division_by_zero; BitVec.udiv/umod/sdiv
+   totalise to 0 — fail loudly instead (divergence census D1). -/
+def mwordUnsignedDivide {n : Nat} (a b : BitVec n) : BitVec n :=
+  if b == 0 then failwithI "Division_by_zero" else BitVec.udiv a b
+def mwordSignedDivide {n : Nat} (a b : BitVec n) : BitVec n :=
+  if b == 0 then failwithI "Division_by_zero" else BitVec.sdiv a b
+def mwordModulo {n : Nat} (a b : BitVec n) : BitVec n :=
+  if b == 0 then failwithI "Division_by_zero" else BitVec.umod a b
 
 /- Comparison operations -/
 def mwordEq {n : Nat} (a b : BitVec n) : Bool := a == b
@@ -1021,13 +1727,4 @@ def mwordFromBitlist {n : Nat} (bits : List Bool) : BitVec n :=
 def mwordToBitlist {n : Nat} (w : BitVec n) : List Bool :=
   List.map (fun i => w.getLsbD i) (List.range n)
 
-/- Total leastFixedPoint: bounded set iteration with explicit comparator -/
-def lemLeastFixedPoint (cmp : α → α → LemOrdering) (bound : Nat)
-    (f : List α → List α) (x : List α) : List α :=
-  if h : bound = 0 then x
-  else
-    let fx := f x
-    if setSubsetBy cmp fx x then x
-    else lemLeastFixedPoint cmp (bound - 1) f (setUnionBy cmp fx x)
-termination_by bound
-decreasing_by omega
+

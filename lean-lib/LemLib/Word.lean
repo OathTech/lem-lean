@@ -77,7 +77,7 @@ def  cleanBitSeq  (b : bitSequence)  : bitSequence := match b with | ( BitSeq  l
 def  bitSeqTestBit  (b : bitSequence) (pos : Nat)  : Option (Bool) := match b, pos with | ( BitSeq  len  s  bl),  pos => ( match  len with  |  none => ( if  natLtb  pos  (List.length  bl) then  listGetOpt  bl  pos  else  some  s) |  some  l => ( if  ( natGteb pos  l) then  none  else                  if  ((pos  ==  (l  -   1))  ||  natGteb  pos  (List.length  bl)) then  some  s  else                  listGetOpt  bl  pos)   ) 
 /- removed value specification -/
 
-def  bitSeqSetBit  (b : bitSequence) (pos : Nat) (v : Bool)  : bitSequence := match b, pos, v with | ( BitSeq  len  s  bl),  pos,  v => ( let  bl'  := if  ( natLtb pos  (List.length  bl)) then  bl  else  bl  ++  List.replicate  pos  s;    let  bl''  := Lem_List.update  bl'  pos  v;    let  bs'  := BitSeq  len  s  bl'';    cleanBitSeq  bs') 
+def  bitSeqSetBit  (b : bitSequence) (pos : Nat) (v : Bool)  : bitSequence := match b, pos, v with | ( BitSeq  len  s  bl),  pos,  v => ( let  bl'  := if  ( natLtb pos  (List.length  bl)) then  bl  else  bl  ++  List.replicate  pos  s;    let  bl''  := lemListUpdate  bl'  pos  v;    let  bs'  := BitSeq  len  s  bl'';    cleanBitSeq  bs') 
 /- removed value specification -/
 
 def  resizeBitSeq  (new_len : Option (Nat)) (bs : bitSequence)  : bitSequence := 
@@ -127,8 +127,8 @@ def  integerFromBoolList  (p : (Bool ×List (Bool)))  : Int := match p with |  (
 
  def  boolListFromNatural  (acc : List (Bool))  (remainder  : Nat)  : List (Bool) := 
  if  (>  remainder  0) then  
-   (boolListFromNatural  (((remainder  mod  2)  =  1)  ::  acc)  
-      (remainder  /  2))
+   (boolListFromNatural  (((mod  remainder  2)  =  1)  ::  acc)  
+      (/  remainder  2))
   else 
    List.reverse  acc -/
 
@@ -256,7 +256,7 @@ instance   : NumPow bitSequence where
 
 /- removed value specification -/
 
-def  bitSeqDiv  (bs1 : bitSequence) (bs2 : bitSequence)  : bitSequence :=  bitSeqArithBinOp  (fun x y => x / y)  bs1  bs2
+def  bitSeqDiv  (bs1 : bitSequence) (bs2 : bitSequence)  : bitSequence :=  bitSeqArithBinOp  lemIntegerDiv  bs1  bs2
 
 instance   : NumIntegerDivision bitSequence where
  
@@ -269,7 +269,7 @@ instance   : NumDivision bitSequence where
 
 /- removed value specification -/
 
-def  bitSeqMod  (bs1 : bitSequence) (bs2 : bitSequence)  : bitSequence :=  bitSeqArithBinOp  (fun x y => x % y)  bs1  bs2
+def  bitSeqMod  (bs1 : bitSequence) (bs2 : bitSequence)  : bitSequence :=  bitSeqArithBinOp  lemIntegerMod  bs1  bs2
 
 instance   : NumRemainder bitSequence where
  
@@ -394,98 +394,98 @@ instance    : WordAsr bitSequence where
 /- removed value specification -/
 
 
-instance   : WordNot LemInt32 where
+instance   : WordNot Int32 where
  
     lnot   :=  int32Lnot
 
 /- removed value specification -/
 
 
-instance   : WordOr LemInt32 where
+instance   : WordOr Int32 where
  
     inclusive_or   :=  int32Lor
 
 /- removed value specification -/
 
 
-instance   : WordXor LemInt32 where
+instance   : WordXor Int32 where
  
     exclusive_or   :=  int32Lxor
 
 /- removed value specification -/
 
 
-instance   : WordAnd LemInt32 where
+instance   : WordAnd Int32 where
  
     conjunction   :=  int32Land
 
 /- removed value specification -/
 
 
-instance    : WordLsl LemInt32 where
+instance    : WordLsl Int32 where
  
     left_shift   :=  int32Lsl
 
 /- removed value specification -/
 
 
-instance    : WordLsr LemInt32 where
+instance    : WordLsr Int32 where
  
     logicial_right_shift   :=  int32Lsr
 
 /- removed value specification -/
 
 
-instance    : WordAsr LemInt32 where
+instance    : WordAsr Int32 where
  
     arithmetic_right_shift   :=  int32Asr
 
 /- removed value specification -/
 
 
-instance   : WordNot LemInt64 where
+instance   : WordNot Int64 where
  
     lnot   :=  int64Lnot
 
 /- removed value specification -/
 
 
-instance   : WordOr LemInt64 where
+instance   : WordOr Int64 where
  
     inclusive_or   :=  int64Lor
 
 /- removed value specification -/
 
 
-instance   : WordXor LemInt64 where
+instance   : WordXor Int64 where
  
     exclusive_or   :=  int64Lxor
 
 /- removed value specification -/
 
 
-instance   : WordAnd LemInt64 where
+instance   : WordAnd Int64 where
  
     conjunction   :=  int64Land
 
 /- removed value specification -/
 
 
-instance   : WordLsl LemInt64 where
+instance   : WordLsl Int64 where
  
     left_shift   :=  int64Lsl
 
 /- removed value specification -/
 
 
-instance   : WordLsr LemInt64 where
+instance   : WordLsr Int64 where
  
     logicial_right_shift   :=  int64Lsr
 
 /- removed value specification -/
 
 
-instance    : WordAsr LemInt64 where
+instance    : WordAsr Int64 where
  
     arithmetic_right_shift   :=  int64Asr
 

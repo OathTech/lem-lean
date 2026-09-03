@@ -40,7 +40,7 @@ open import {isabelle} `$LIB_DIR/Lem`
 (* Type of sets and set comprehensions are hard-coded *)
 
 declare ocaml target_rep type set = `Pset.set`
-declare lean  target_rep type set 'a = `List` 'a
+declare lean  target_rep type set 'a = `Pset` 'a
 
 (* ----------------------- *)
 (* Equality check          *)
@@ -368,6 +368,7 @@ val filter : forall 'a. SetType 'a => ('a -> bool) -> set 'a -> set 'a
 let filter P s = {e | forall (e IN s) | P e}
 
 declare ocaml    target_rep function filter = `Pset.filter`
+declare lean     target_rep function filter P s = `setFilterBy` `setElemCompare` P s
 declare isabelle target_rep function filter = `set_filter`
 declare hol      target_rep function filter = `SET_FILTER`
 
@@ -471,7 +472,8 @@ val bigunionBy : forall 'a. ('a -> 'a -> ordering) -> set (set 'a) -> set 'a
 let bigunion bs = {x | forall (s IN bs) (x IN s) | true}
 
 declare ocaml    target_rep function bigunionBy = `Pset.bigunion`
-let inline {ocaml} bigunion = bigunionBy setElemCompare
+declare lean     target_rep function bigunionBy = `setBigunionBy`
+let inline {ocaml;lean} bigunion = bigunionBy setElemCompare
 declare hol      target_rep function bigunion = `BIGUNION`
 declare isabelle target_rep function bigunion = `\<Union>`
 declare tex      target_rep function bigunion = `$\bigcup$`
@@ -544,8 +546,9 @@ let map f s = { f e | forall (e IN s) | true }
 val mapBy : forall 'a 'b. ('b -> 'b -> ordering) -> ('a -> 'b) -> set 'a -> set 'b 
 
 declare ocaml    target_rep function mapBy = `Pset.map` 
+declare lean     target_rep function mapBy = `setMapBy`
 
-let inline {ocaml} map = mapBy setElemCompare
+let inline {ocaml;lean} map = mapBy setElemCompare
 declare hol      target_rep function map = `IMAGE`
 declare isabelle target_rep function map = `Set.image`
 
@@ -566,7 +569,8 @@ val bigunionMapBy : forall 'a 'b. ('b -> 'b -> ordering) -> ('a -> set 'b) -> se
 let inline bigunionMap f bs = bigunion (map f bs)
 
 declare ocaml    target_rep function bigunionMapBy = `Pset.map_union`
-let inline {ocaml} bigunionMap = bigunionMapBy setElemCompare
+declare lean     target_rep function bigunionMapBy = `setBigunionMapBy`
+let inline {ocaml;lean} bigunionMap = bigunionMapBy setElemCompare
 
 assert bigunionmap_0: (bigunionMap (fun n -> {n; 2 * n; 3 * n}) {(1:nat)} = {1;2;3})
 assert bigunionmap_1: (bigunionMap (fun n -> {n; 2 * n; 3 * n}) {(2:nat);8} = {2;4;6;8;16;24})
@@ -609,6 +613,8 @@ let inline findMax = findMinBy (>=) (=)
 
 declare ocaml target_rep function findMin = `Pset.min_elt_opt` 
 declare ocaml target_rep function findMax = `Pset.max_elt_opt`
+declare lean  target_rep function findMin = `setFindMin`
+declare lean  target_rep function findMax = `setFindMax`
 
 (* XXX: move into Lem libraries... *)
 declare isabelle target_rep function findMin = `Elf_Types_Local.find_min_element`
@@ -670,13 +676,14 @@ val cross : forall 'a 'b. SetType 'a, SetType 'b => set 'a -> set 'b -> set ('a 
 val crossBy : forall 'a 'b. (('a * 'b) -> ('a * 'b) -> ordering) -> set 'a -> set 'b -> set ('a * 'b)
 
 declare ocaml    target_rep function crossBy = `Pset.cross`
+declare lean     target_rep function crossBy = `setCrossBy`
 
 let cross s1 s2 = { (e1, e2) | forall (e1 IN s1) (e2 IN s2) | true }
 
 declare isabelle target_rep function cross = infix `\<times>`
 declare hol      target_rep function cross = infix `CROSS`
 declare tex      target_rep function cross = infix `$\times$`
-let inline {ocaml} cross = crossBy setElemCompare
+let inline {ocaml;lean} cross = crossBy setElemCompare
 
 lemma cross_by_sigma : forall s1 s2. cross s1 s2 = sigma s1 (const s2)
 assert cross_1 : (cross {(2:nat);3} {true; false} = {(2,true);(3,true); (2,false); (3,false)})

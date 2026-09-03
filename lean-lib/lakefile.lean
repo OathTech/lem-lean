@@ -9,10 +9,17 @@ lean_lib LemLib where
   srcDir := "."
   globs := #[.one `LemLib, .submodules `LemLib]
 
-/-- Fmap representation-change equivalence: retired reference implementation,
-    kernel-checked equivalence theorems, and bounded-exhaustive property
-    tests (arc-6 S3). Building it IS running it. -/
+/-- Pset/Pmap representation invariants over bounded-exhaustive operation
+    sequences + kernel-checked examples of the OCaml observables the ports
+    reproduce (parity-fix slice 2026-09-03). Building it IS running it. -/
 @[default_target]
 lean_lib LemLibTest where
   srcDir := "."
   globs := #[.one `LemLibTest]
+
+/-- Kernel-checked equalities between the tail-recursive list/string
+    rewrites and the definitions they replaced (parity-fix F7). -/
+@[default_target]
+lean_lib LemLibTheorems where
+  srcDir := "."
+  globs := #[.one `LemLibTheorems]

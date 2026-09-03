@@ -171,7 +171,7 @@ declare ocaml    target_rep type int32 = `Int32.t`
 declare coq      target_rep type int32 = `Z`       (* ???: better type for this in Coq? *)
 declare isabelle target_rep type int32 = `word` 32
 declare hol      target_rep type int32 = `word32`
-declare lean     target_rep type int32 = `LemInt32` (* newtype wrapper — distinct from Int *)
+declare lean     target_rep type int32 = `Int32` (* newtype wrapper — distinct from Int *)
 
 (* 64 bit integers *)
 type int64
@@ -179,7 +179,7 @@ declare ocaml    target_rep type int64 = `Int64.t`
 declare coq      target_rep type int64 = `Z`       (* ???: better type for this in Coq? *)
 declare isabelle target_rep type int64 = `word` 64
 declare hol      target_rep type int64 = `word64`
-declare lean     target_rep type int64 = `LemInt64` (* newtype wrapper — distinct from Int *)
+declare lean     target_rep type int64 = `Int64` (* newtype wrapper — distinct from Int *)
 
 
 (* ----------------------- *)
@@ -365,7 +365,7 @@ declare hol      target_rep function natDiv = infix `DIV`
 declare ocaml    target_rep function natDiv = infix `/`
 declare isabelle target_rep function natDiv = infix `div`
 declare coq      target_rep function natDiv = `Coq.Numbers.Natural.Peano.NPeano.div`
-declare lean     target_rep function natDiv = infix `/`
+declare lean     target_rep function natDiv = `lemNatDiv`
 
 instance ( NumIntegerDivision nat ) 
   let (div) = natDiv
@@ -380,7 +380,7 @@ declare hol      target_rep function natMod = infix `MOD`
 declare ocaml    target_rep function natMod = infix `mod`
 declare isabelle target_rep function natMod = infix `mod`
 declare coq      target_rep function natMod = `Coq.Numbers.Natural.Peano.NPeano.modulo`
-declare lean     target_rep function natMod = infix `%`
+declare lean     target_rep function natMod = `lemNatMod`
 
 instance ( NumRemainder nat ) 
   let (mod) = natMod
@@ -581,7 +581,7 @@ declare hol      target_rep function naturalDiv = infix `DIV`
 declare ocaml    target_rep function naturalDiv = `Nat_big_num.div`
 declare isabelle target_rep function naturalDiv = infix `div`
 declare coq      target_rep function naturalDiv = `Coq.Numbers.Natural.Peano.NPeano.div`
-declare lean     target_rep function naturalDiv = infix `/`
+declare lean     target_rep function naturalDiv = `lemNatDiv`
 
 instance ( NumIntegerDivision natural ) 
   let (div) = naturalDiv
@@ -596,7 +596,7 @@ declare hol      target_rep function naturalMod = infix `MOD`
 declare ocaml    target_rep function naturalMod = `Nat_big_num.modulus`
 declare isabelle target_rep function naturalMod = infix `mod`
 declare coq      target_rep function naturalMod = `Coq.Numbers.Natural.Peano.NPeano.modulo`
-declare lean     target_rep function naturalMod = infix `%`
+declare lean     target_rep function naturalMod = `lemNatMod`
 
 instance ( NumRemainder natural ) 
   let (mod) = naturalMod
@@ -780,7 +780,7 @@ declare hol      target_rep function intDiv = infix `/`
 declare ocaml    target_rep function intDiv = `Nat_num.int_div`
 declare isabelle target_rep function intDiv = infix `div`
 declare coq      target_rep function intDiv = `Z.div`
-declare lean     target_rep function intDiv = infix `/`
+declare lean     target_rep function intDiv = `lemIntDiv`
 
 instance ( NumIntegerDivision int ) 
   let (div) = intDiv
@@ -795,7 +795,7 @@ declare hol      target_rep function intMod = infix `%`
 declare ocaml    target_rep function intMod = `Nat_num.int_mod`
 declare isabelle target_rep function intMod = infix `mod`
 declare coq      target_rep function intMod = `Coq.ZArith.Zdiv.Zmod`
-declare lean     target_rep function intMod = infix `%`
+declare lean     target_rep function intMod = `lemIntMod`
 
 instance ( NumRemainder int ) 
   let (mod) = intMod
@@ -831,7 +831,7 @@ declare ocaml    target_rep function int32FromNumeral = `Nat_big_num.to_int32`
 declare isabelle target_rep function int32FromNumeral n = ((`word_of_int` n) : int32)
 declare hol      target_rep function int32FromNumeral n = ((`n2w` n) : int32)
 declare coq      target_rep function int32FromNumeral n = (`Z.pred` (`Z.pos` (`P_of_succ_nat` n)))  (* TODO: check *)
-declare lean     target_rep function int32FromNumeral n = (``n : int32)
+declare lean     target_rep function int32FromNumeral = `lemInt32FromNumeral`
 
 instance (Numeral int32)
   let fromNumeral n = int32FromNumeral n
@@ -912,7 +912,7 @@ end
 val int32Abs : int32 -> int32
 let int32Abs i = (if 0 <= i then i else ~i)
 declare ocaml    target_rep function int32Abs = `Int32.abs`
-declare lean     target_rep function int32Abs = `lemInt32Abs`
+declare lean     target_rep function int32Abs = `Int32.abs`
 
 instance (NumAbs int32)
   let abs = int32Abs
@@ -988,7 +988,7 @@ declare isabelle target_rep function int32Div = infix `div`
 declare hol      target_rep function int32Div i1 i2 = ((`word_div` i1 i2) : int32)
 (*TODO: Implement the following correctly. *)
 declare coq      target_rep function int32Div = `Z.div`
-declare lean     target_rep function int32Div = infix `/`
+declare lean     target_rep function int32Div = `lemInt32Div`
 
 instance ( NumIntegerDivision int32 ) 
   let (div) = int32Div
@@ -1004,7 +1004,7 @@ declare isabelle target_rep function int32Mod = infix `mod`
 declare hol      target_rep function int32Mod i1 i2 = ((`word_mod` i1 i2) : int32)
 (*TODO: Implement the following correctly. *)
 declare coq      target_rep function int32Mod = `Coq.ZArith.Zdiv.Zmod`
-declare lean     target_rep function int32Mod = infix `%`
+declare lean     target_rep function int32Mod = `lemInt32Mod`
 
 instance ( NumRemainder int32 ) 
   let (mod) = int32Mod
@@ -1040,7 +1040,7 @@ declare ocaml    target_rep function int64FromNumeral = `Nat_big_num.to_int64`
 declare isabelle target_rep function int64FromNumeral n = ((`word_of_int` n) : int64)
 declare hol      target_rep function int64FromNumeral n = ((`n2w` n) : int64)
 declare coq      target_rep function int64FromNumeral n = (`Z.pred` (`Z.pos` (`P_of_succ_nat` n)))  (* TODO: check *)
-declare lean     target_rep function int64FromNumeral n = (``n : int64)
+declare lean     target_rep function int64FromNumeral = `lemInt64FromNumeral`
 
 instance (Numeral int64)
   let fromNumeral n = int64FromNumeral n
@@ -1121,7 +1121,7 @@ end
 val int64Abs : int64 -> int64
 let int64Abs i = (if 0 <= i then i else ~i)
 declare ocaml    target_rep function int64Abs = `Int64.abs`
-declare lean     target_rep function int64Abs = `lemInt64Abs`
+declare lean     target_rep function int64Abs = `Int64.abs`
 
 instance (NumAbs int64)
   let abs = int64Abs
@@ -1197,7 +1197,7 @@ declare isabelle target_rep function int64Div = infix `div`
 (*TODO: Implement the following two correctly. *)
 declare hol      target_rep function int64Div i1 i2 = ((`word_div` i1 i2) : int64)
 declare coq      target_rep function int64Div = `Z.div`
-declare lean     target_rep function int64Div = infix `/`
+declare lean     target_rep function int64Div = `lemInt64Div`
 
 instance ( NumIntegerDivision int64 ) 
   let (div) = int64Div
@@ -1213,7 +1213,7 @@ declare isabelle target_rep function int64Mod = infix `mod`
 (*TODO: Implement the following two correctly. *)
 declare hol      target_rep function int64Mod i1 i2 = ((`word_mod` i1 i2) : int64)
 declare coq      target_rep function int64Mod = `Coq.ZArith.Zdiv.Zmod`
-declare lean     target_rep function int64Mod = infix `%`
+declare lean     target_rep function int64Mod = `lemInt64Mod`
 
 instance ( NumRemainder int64 ) 
   let (mod) = int64Mod
@@ -1403,7 +1403,7 @@ declare hol      target_rep function integerDiv = infix `/`
 declare ocaml    target_rep function integerDiv = `Nat_big_num.div`
 declare isabelle target_rep function integerDiv = infix `div`
 declare coq      target_rep function integerDiv = `Z.div`
-declare lean     target_rep function integerDiv = infix `/`
+declare lean     target_rep function integerDiv = `lemIntegerDiv`
 
 instance ( NumIntegerDivision integer ) 
   let (div) = integerDiv
@@ -1418,7 +1418,7 @@ declare hol      target_rep function integerMod = infix `%`
 declare ocaml    target_rep function integerMod = `Nat_big_num.modulus`
 declare isabelle target_rep function integerMod = infix `mod`
 declare coq      target_rep function integerMod = `Coq.ZArith.Zdiv.Zmod`
-declare lean     target_rep function integerMod = infix `%`
+declare lean     target_rep function integerMod = `lemIntegerMod`
 
 instance ( NumRemainder integer ) 
   let (mod) = integerMod
@@ -2379,7 +2379,7 @@ declare hol      target_rep function int32FromNatural n = ((`n2w` n) : int32)
 declare ocaml    target_rep function int32FromNatural = `Nat_big_num.to_int32`
 declare coq      target_rep function int32FromNatural n = (`Z.pred` (`Z.pos` (`P_of_succ_nat` n))) (* TODO check *)
 declare isabelle target_rep function int32FromNatural n = ((`word_of_int` (`int` n)):int32)
-declare lean     target_rep function int32FromNatural = `lemInt32OfNat`
+declare lean     target_rep function int32FromNatural = `lemInt32OfNaturalExact`
 
 assert int32_from_natural_0: int32FromNatural 0 = 0
 assert int32_from_natural_1: int32FromNatural 1 = 1
@@ -2393,7 +2393,7 @@ let int32FromInteger i = (
 
 declare ocaml    target_rep function int32FromInteger = `Nat_big_num.to_int32`
 declare isabelle target_rep function int32FromInteger i = ((`word_of_int` i) : int32)
-declare lean     target_rep function int32FromInteger = `lemInt32OfInt`
+declare lean     target_rep function int32FromInteger = `lemInt32OfIntegerExact`
 
 assert int32_from_integer_0: int32FromInteger 0 = 0
 assert int32_from_integer_1: int32FromInteger 1 = 1
@@ -2453,7 +2453,7 @@ declare hol      target_rep function int64FromNatural n = ((`n2w` n) : int64)
 declare ocaml    target_rep function int64FromNatural = `Nat_big_num.to_int64`
 declare coq      target_rep function int64FromNatural n = (`Z.pred` (`Z.pos` (`P_of_succ_nat` n))) (* TODO check *)
 declare isabelle target_rep function int64FromNatural n = ((`word_of_int` (`int` n)):int64)
-declare lean     target_rep function int64FromNatural = `lemInt64OfNat`
+declare lean     target_rep function int64FromNatural = `lemInt64OfNaturalExact`
 
 assert int64_from_natural_0: int64FromNatural 0 = 0
 assert int64_from_natural_1: int64FromNatural 1 = 1
@@ -2467,7 +2467,7 @@ let int64FromInteger i = (
 
 declare ocaml    target_rep function int64FromInteger = `Nat_big_num.to_int64`
 declare isabelle target_rep function int64FromInteger i = ((`word_of_int` i) : int64)
-declare lean     target_rep function int64FromInteger = `lemInt64OfInt`
+declare lean     target_rep function int64FromInteger = `lemInt64OfIntegerExact`
 
 assert int64_from_integer_0: int64FromInteger 0 = 0
 assert int64_from_integer_1: int64FromInteger 1 = 1

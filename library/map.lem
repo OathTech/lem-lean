@@ -175,13 +175,11 @@ val toSet : forall 'k 'v. MapKeyType 'k, SetType 'k, SetType 'v => map 'k 'v -> 
 val toSetBy : forall 'k 'v. (('k * 'v) -> ('k * 'v) -> ordering) -> map 'k 'v -> set ('k * 'v) 
 
 declare ocaml    target_rep function toSetBy = `Pmap.bindings`
-let inline {ocaml} toSet = toSetBy setElemCompare
+declare lean     target_rep function toSetBy = `fmapToSetBy`
+let inline {ocaml;lean} toSet = toSetBy setElemCompare
 declare isabelle target_rep function toSet = `map_to_set`
 declare hol target_rep function toSet = `FMAP_TO_SET`
 declare coq target_rep function toSet = `id`
-(* lean: enumeration of the keyed Fmap representation; produces the exact
-   newest-first spine list the old `id` (assoc list) exposed (arc-6 S3) *)
-declare lean target_rep function toSet = `fmapElements`
 
 
 assert toSet_0: (toSet (empty : map nat bool) = {})

@@ -153,12 +153,12 @@ abbrev  integer := Int
 /-  TODO the bounded ints are only partially implemented, use with care.  -/
 
 /-  32 bit integers  -/
-abbrev  int32 := LemInt32
+abbrev  int32 := Int32
  -/
 /-  /-  newtype wrapper â distinct from Int  -/
 
 /-  64 bit integers  -/
-abbrev  int64 := LemInt64
+abbrev  int64 := Int64
  -/
 /-  /-  newtype wrapper â distinct from Int  -/
 
@@ -286,25 +286,25 @@ instance   : NumMult Nat where
 
 instance   : NumIntegerDivision Nat where
  
-    numIntegerDivision   :=  (fun x y => x / y)
+    numIntegerDivision   :=  lemNatDiv
 
 
 instance   : NumDivision Nat where
  
-    numDivision   :=  (fun x y => x / y)
+    numDivision   :=  lemNatDiv
 
 /- removed value specification -/
 
 
 instance   : NumRemainder Nat where
  
-    numRemainder   :=  (fun x y => x % y)
+    numRemainder   :=  lemNatMod
 
 /- removed value specification -/
 
 /- 
  def  gen_pow_aux  {a : Type}   (mul  : a →  a →  a)  (a  : a)  (b  : a)  (e  : Nat)  : a := 
-   match  e with  |  0 =>  a |  1 =>  mul  a  b | (  (e' + 2)) => ( let  e''  := e  /  2;                     let  a'   := (if  (e  mod  2)  =  0 then  a  else  mul  a  b);                     gen_pow_aux  mul  a'  (mul  b  b)  e'')
+   match  e with  |  0 =>  a |  1 =>  mul  a  b | (  (e' + 2)) => ( let  e''  := /  e  2;                     let  a'   := (if  (mod  e  2)  =  0 then  a  else  mul  a  b);                     gen_pow_aux  mul  a'  (mul  b  b)  e'')
     -/
        
 def  gen_pow  {a : Type}   (one  : a)  (mul  : a →  a →  a)  (b  : a)  (e  : Nat)   :  a :=  
@@ -425,19 +425,19 @@ instance   : NumPow Nat where
 
 instance   : NumIntegerDivision Nat where
  
-    numIntegerDivision   :=  (fun x y => x / y)
+    numIntegerDivision   :=  lemNatDiv
 
 
 instance   : NumDivision Nat where
  
-    numDivision   :=  (fun x y => x / y)
+    numDivision   :=  lemNatDiv
 
 /- removed value specification -/
 
 
 instance   : NumRemainder Nat where
  
-    numRemainder   :=  (fun x y => x % y)
+    numRemainder   :=  lemNatMod
 
 /- removed value specification -/
 
@@ -560,19 +560,19 @@ instance   : NumPow Int where
 
 instance   : NumIntegerDivision Int where
  
-    numIntegerDivision   :=  (fun x y => x / y)
+    numIntegerDivision   :=  lemIntDiv
 
 
 instance   : NumDivision Int where
  
-    numDivision   :=  (fun x y => x / y)
+    numDivision   :=  lemIntDiv
 
 /- removed value specification -/
 
 
 instance   : NumRemainder Int where
  
-    numRemainder   :=  (fun x y => x % y)
+    numRemainder   :=  lemIntMod
 
 /- removed value specification -/
 
@@ -591,15 +591,15 @@ instance   : OrdMaxMin Int where
 
 /- 
 
-instance   : Numeral LemInt32 where
+instance   : Numeral Int32 where
 
-    fromNumeral   n  :=  ( n :  LemInt32)
+    fromNumeral   n  :=  lemInt32FromNumeral  n
  -/
 /- removed value specification -/
 
 
 
-instance   : Eq0 LemInt32 where
+instance   : Eq0 Int32 where
 
     isEqual   :=  (fun x y => x == y)
 
@@ -620,7 +620,7 @@ instance   : Eq0 LemInt32 where
 
 
 
-instance   : Ord0 LemInt32 where
+instance   : Ord0 Int32 where
 
     compare   :=  defaultCompare
 
@@ -633,37 +633,37 @@ instance   : Ord0 LemInt32 where
     isGreaterEqual   :=  lemInt32Gteb
 
 
-instance   : SetType LemInt32 where
+instance   : SetType Int32 where
 
     setElemCompare   :=  defaultCompare
 
 /- removed value specification -/
 
 
-instance   : NumNegate LemInt32 where
+instance   : NumNegate Int32 where
 
     numNegate   :=  Neg.neg
 
 /- removed value specification -/
 
 /- 
-def  int32Abs  (i : LemInt32)  : LemInt32 :=  (if  <=  0  i then  i  else  ~ i) -/
+def  int32Abs  (i : Int32)  : Int32 :=  (if  <=  0  i then  i  else  ~ i) -/
 
-instance   : NumAbs LemInt32 where
+instance   : NumAbs Int32 where
 
-    abs   :=  lemInt32Abs
+    abs   :=  Int32.abs
 
 /- removed value specification -/
 
 
-instance   : NumAdd LemInt32 where
+instance   : NumAdd Int32 where
 
     numAdd   :=  (fun x y => x + y)
 
 /- removed value specification -/
 
 
-instance   : NumMinus LemInt32 where
+instance   : NumMinus Int32 where
 
     numMinus   :=  (fun x y => x - y)
 
@@ -671,49 +671,49 @@ instance   : NumMinus LemInt32 where
 
 
 
-instance   : NumSucc LemInt32 where
+instance   : NumSucc Int32 where
 
-    succ   :=  (fun  n=> n  + ( 1 :  LemInt32))
-
-/- removed value specification -/
-
-
-instance   : NumPred LemInt32 where
-
-    pred   :=  (fun  n=> n  - ( 1 :  LemInt32))
+    succ   :=  (fun  n=> n  + lemInt32FromNumeral  1)
 
 /- removed value specification -/
 
 
-instance   : NumMult LemInt32 where
+instance   : NumPred Int32 where
+
+    pred   :=  (fun  n=> n  - lemInt32FromNumeral  1)
+
+/- removed value specification -/
+
+
+instance   : NumMult Int32 where
 
     numMult   :=  (fun x y => x * y)
 
 /- removed value specification -/
 
 
-instance   : NumPow LemInt32 where
+instance   : NumPow Int32 where
  
     numPow   :=  (fun x y => x ^ y)
 
 /- removed value specification -/
 
 
-instance   : NumIntegerDivision LemInt32 where
+instance   : NumIntegerDivision Int32 where
  
-    numIntegerDivision   :=  (fun x y => x / y)
+    numIntegerDivision   :=  lemInt32Div
 
 
-instance   : NumDivision LemInt32 where
+instance   : NumDivision Int32 where
  
-    numDivision   :=  (fun x y => x / y)
+    numDivision   :=  lemInt32Div
 
 /- removed value specification -/
 
 
-instance   : NumRemainder LemInt32 where
+instance   : NumRemainder Int32 where
  
-    numRemainder   :=  (fun x y => x % y)
+    numRemainder   :=  lemInt32Mod
 
 /- removed value specification -/
 
@@ -722,7 +722,7 @@ instance   : NumRemainder LemInt32 where
 
 
 
-instance   : OrdMaxMin LemInt32 where
+instance   : OrdMaxMin Int32 where
  
     max   :=  max
 
@@ -732,15 +732,15 @@ instance   : OrdMaxMin LemInt32 where
 
 /- 
 
-instance   : Numeral LemInt64 where
+instance   : Numeral Int64 where
 
-    fromNumeral   n  :=  ( n :  LemInt64)
+    fromNumeral   n  :=  lemInt64FromNumeral  n
  -/
 /- removed value specification -/
 
 
 
-instance   : Eq0 LemInt64 where
+instance   : Eq0 Int64 where
 
     isEqual   :=  (fun x y => x == y)
 
@@ -761,7 +761,7 @@ instance   : Eq0 LemInt64 where
 
 
 
-instance   : Ord0 LemInt64 where
+instance   : Ord0 Int64 where
 
     compare   :=  defaultCompare
 
@@ -774,37 +774,37 @@ instance   : Ord0 LemInt64 where
     isGreaterEqual   :=  lemInt64Gteb
 
 
-instance   : SetType LemInt64 where
+instance   : SetType Int64 where
 
     setElemCompare   :=  defaultCompare
 
 /- removed value specification -/
 
 
-instance   : NumNegate LemInt64 where
+instance   : NumNegate Int64 where
 
     numNegate   :=  Neg.neg
 
 /- removed value specification -/
 
 /- 
-def  int64Abs  (i : LemInt64)  : LemInt64 :=  (if  <=  0  i then  i  else  ~ i) -/
+def  int64Abs  (i : Int64)  : Int64 :=  (if  <=  0  i then  i  else  ~ i) -/
 
-instance   : NumAbs LemInt64 where
+instance   : NumAbs Int64 where
 
-    abs   :=  lemInt64Abs
+    abs   :=  Int64.abs
 
 /- removed value specification -/
 
 
-instance   : NumAdd LemInt64 where
+instance   : NumAdd Int64 where
 
     numAdd   :=  (fun x y => x + y)
 
 /- removed value specification -/
 
 
-instance   : NumMinus LemInt64 where
+instance   : NumMinus Int64 where
 
     numMinus   :=  (fun x y => x - y)
 
@@ -812,49 +812,49 @@ instance   : NumMinus LemInt64 where
 
 
 
-instance   : NumSucc LemInt64 where
+instance   : NumSucc Int64 where
 
-    succ   :=  (fun  n=> n  + ( 1 :  LemInt64))
-
-/- removed value specification -/
-
-
-instance   : NumPred LemInt64 where
-
-    pred   :=  (fun  n=> n  - ( 1 :  LemInt64))
+    succ   :=  (fun  n=> n  + lemInt64FromNumeral  1)
 
 /- removed value specification -/
 
 
-instance   : NumMult LemInt64 where
+instance   : NumPred Int64 where
+
+    pred   :=  (fun  n=> n  - lemInt64FromNumeral  1)
+
+/- removed value specification -/
+
+
+instance   : NumMult Int64 where
 
     numMult   :=  (fun x y => x * y)
 
 /- removed value specification -/
 
 
-instance   : NumPow LemInt64 where
+instance   : NumPow Int64 where
  
     numPow   :=  (fun x y => x ^ y)
 
 /- removed value specification -/
 
 
-instance   : NumIntegerDivision LemInt64 where
+instance   : NumIntegerDivision Int64 where
  
-    numIntegerDivision   :=  (fun x y => x / y)
+    numIntegerDivision   :=  lemInt64Div
 
 
-instance   : NumDivision LemInt64 where
+instance   : NumDivision Int64 where
  
-    numDivision   :=  (fun x y => x / y)
+    numDivision   :=  lemInt64Div
 
 /- removed value specification -/
 
 
-instance   : NumRemainder LemInt64 where
+instance   : NumRemainder Int64 where
  
-    numRemainder   :=  (fun x y => x % y)
+    numRemainder   :=  lemInt64Mod
 
 /- removed value specification -/
 
@@ -863,7 +863,7 @@ instance   : NumRemainder LemInt64 where
 
 
 
-instance   : OrdMaxMin LemInt64 where
+instance   : OrdMaxMin Int64 where
  
     max   :=  max
 
@@ -979,19 +979,19 @@ instance   : NumPow Int where
 
 instance   : NumIntegerDivision Int where
  
-    numIntegerDivision   :=  (fun x y => x / y)
+    numIntegerDivision   :=  lemIntegerDiv
 
 
 instance   : NumDivision Int where
  
-    numDivision   :=  (fun x y => x / y)
+    numDivision   :=  lemIntegerDiv
 
 /- removed value specification -/
 
 
 instance   : NumRemainder Int where
  
-    numRemainder   :=  (fun x y => x % y)
+    numRemainder   :=  lemIntegerMod
 
 /- removed value specification -/
 
@@ -1329,18 +1329,18 @@ def  integerSqrt  (i : Int)  : Int :=  realFloor  (realSqrt  (unsupportedRealFro
 /- removed value specification -/
 
 /- 
-def  int32FromInteger  (i : Int)  : LemInt32 :=  (
-  let  abs_int32  := lemInt32OfNat  (Int.natAbs  i); 
+def  int32FromInteger  (i : Int)  : Int32 :=  (
+  let  abs_int32  := lemInt32OfNaturalExact  (Int.natAbs  i); 
   if  (<  i  0) then  (~  abs_int32)  else  abs_int32 
 ) -/
 /- removed value specification -/
 
 /- 
-def  int32FromInt  (i : Int)  : LemInt32 :=  lemInt32OfInt  (  i) -/
+def  int32FromInt  (i : Int)  : Int32 :=  lemInt32OfIntegerExact  (  i) -/
 /- removed value specification -/
 
 /- 
-def  int32FromInt64  (i : LemInt64)  : LemInt32 :=  lemInt32OfInt  (lemInt64ToInt  i) -/
+def  int32FromInt64  (i : Int64)  : Int32 :=  lemInt32OfIntegerExact  (lemInt64ToInt  i) -/
 /- removed value specification -/
 
 /- removed value specification -/
@@ -1348,18 +1348,18 @@ def  int32FromInt64  (i : LemInt64)  : LemInt32 :=  lemInt32OfInt  (lemInt64ToIn
 /- removed value specification -/
 
 /- 
-def  int64FromInteger  (i : Int)  : LemInt64 :=  (
-  let  abs_int64  := lemInt64OfNat  (Int.natAbs  i); 
+def  int64FromInteger  (i : Int)  : Int64 :=  (
+  let  abs_int64  := lemInt64OfNaturalExact  (Int.natAbs  i); 
   if  (<  i  0) then  (~  abs_int64)  else  abs_int64 
 ) -/
 /- removed value specification -/
 
 /- 
-def  int64FromInt  (i : Int)  : LemInt64 :=  lemInt64OfInt  (  i) -/
+def  int64FromInt  (i : Int)  : Int64 :=  lemInt64OfIntegerExact  (  i) -/
 /- removed value specification -/
 
 /- 
-def  int64FromInt32  (i : LemInt32)  : LemInt64 :=  lemInt64OfInt  (lemInt32ToInt  i) -/
+def  int64FromInt32  (i : Int32)  : Int64 :=  lemInt64OfIntegerExact  (lemInt32ToInt  i) -/
 /- removed value specification -/
 
 /- removed value specification -/

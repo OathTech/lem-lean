@@ -7,9 +7,7 @@ namespace Lem_Debug
 
 /- removed value specification -/
 
-def  print_string  (str : String)  : Unit :=  ()
 /- removed value specification -/
 
-def  print_endline  (str : String)  : Unit :=  ()
 end Lem_Debug
 

@@ -24,6 +24,7 @@ val integerOfString : string -> integer
 
 declare compile_message integerOfString = "integerOfString can fail, potentially with an exception, if the string cannot be parsed"
 declare ocaml target_rep function integerOfString = `Nat_big_num.of_string`
+declare lean  target_rep function integerOfString = `lemIntegerOfString`
 
 val integerOfChar : char -> integer
 
@@ -50,7 +51,7 @@ end
 
 declare {isabelle;lean} termination_argument integerOfStringHelper = automatic
 
-let ~{ocaml;hol} integerOfString s = match String.toCharList s with
+let ~{ocaml;hol;lean} integerOfString s = match String.toCharList s with
   | #'-' :: ds -> integerNegate (integerOfStringHelper (List.reverse ds))
   | ds -> integerOfStringHelper (List.reverse ds)
 end

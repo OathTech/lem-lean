@@ -27,7 +27,7 @@ open Lem_Num
 /- removed value specification -/
 
 
- def  isPermutationBy  {a : Type}  (eq : a → a → Bool) (l1 : List a) (l2 : List a)  : Bool :=  match  l1 with  |  [] =>  List.isEmpty  l2 | ( x  ::  xs) =>  (       match  deleteFirst  (eq  x)  l2 with  |  none =>  false |  some  ys =>  isPermutationBy  eq  xs  ys            )
+ def  isPermutationBy  {a : Type}  (eq : a → a → Bool) (l1 : List a) (l2 : List a)  : Bool :=  match  l1 with  |  [] =>  List.isEmpty  l2 | ( x  ::  xs) =>  (       match  lemListDeleteFirst  (eq  x)  l2 with  |  none =>  false |  some  ys =>  isPermutationBy  eq  xs  ys            )
 
 
 
@@ -49,13 +49,14 @@ open Lem_Num
 
 /- removed value specification -/
 
+/- 
 
- def  insertBy  {a : Type}  (cmp : a → a → Bool) (e : a) (l : List a)  : List a :=  match  l with  |  [] =>  [e] |  x  ::  xs => ( if  cmp  x  e then  x  ::  (insertBy  cmp  e  xs)  else  (e  ::  (x  ::  xs)))
+ def  insertBy  {a : Type}  (cmp : a → a → Bool) (e : a) (l : List a)  : List a :=  match  l with  |  [] =>  [e] |  x  ::  xs => ( if  cmp  x  e then  x  ::  (lemInsertBy  cmp  e  xs)  else  (e  ::  x  ::  xs))
+ -/
 
 
 
-
-def  insertSortBy  {a : Type}  (cmp : a → a → Bool) (l : List a)  : List a :=  List.foldl  (fun (l : List a) (e : a) =>  insertBy  cmp  e  l)  []  l
+def  insertSortBy  {a : Type}  (cmp : a → a → Bool) (l : List a)  : List a :=  List.foldl  (fun (l : List a) (e : a) =>  lemInsertBy  cmp  e  l)  []  l
 
 /- removed value specification -/
 

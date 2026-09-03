@@ -42,13 +42,14 @@ instance (a : Type) [Show a] : Show (Option  a) where
 
 /- removed value specification -/
 
+/- 
  def  stringFromListAux  {a : Type}  (showX : a → String) (x : List a)  : String := 
-  match  x with  |  [] =>  "" |  x :: xs' => (       match  xs' with  |  [] =>  showX  x |  _ =>   String.append (showX  x)   (String.append "; "  (stringFromListAux  showX  xs'))       )
-  
+  match  x with  |  [] =>  "" |  x :: xs' => (       match  xs' with  |  [] =>  showX  x |  _ =>  String.append  showX  x  String.append  "; "  lemShowListAux  showX  xs'       )
+   -/
 /- removed value specification -/
 
 def  stringFromList  {a : Type}  (showX : a → String) (xs : List a)  : String :=  
-  String.append "["   (String.append (stringFromListAux  showX  xs)  "]")
+  String.append "["   (String.append (lemShowListAux  showX  xs)  "]")
 
 instance (a : Type) [Show a] : Show (List  a) where
 

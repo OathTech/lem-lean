@@ -133,12 +133,12 @@ def  map  {a : Type} {b : Type}  (f : a → b) (l : List a)  : List b :=  count_
 /- removed value specification -/
 
 /-  /-  originally foldr with different argument order  -/
- def  foldr  {a : Type} {b : Type}  (f : a → b → b) (b : b) (l : List a)  : b :=  match  l with  |  [] =>  b |  x  ::  xs =>  f  x  (List.foldr  f  b  xs)
+ def  foldr  {a : Type} {b : Type}  (f : a → b → b) (b : b) (l : List a)  : b :=  match  l with  |  [] =>  b |  x  ::  xs =>  f  x  (lemListFoldr  f  b  xs)
  -/
 /- removed value specification -/
 
 /-  /-  before also called "flatten"  -/
-def  concat  {a : Type}   : List (List a) → List a :=  List.foldr  (fun x y => x ++ y)  [] -/
+def  concat  {a : Type}   : List (List a) → List a :=  lemListFoldr  (fun x y => x ++ y)  [] -/
 /- removed value specification -/
 
 
@@ -232,9 +232,10 @@ def  dropWhile  {a : Type}  (p : a → Bool) (l : List a)  : List a :=  Prod.snd
 
 /- removed value specification -/
 
+/- 
  def  update  {a : Type}  (l : List a) (n : Nat) (e : a)  : List a :=  
-  match  l with  |  [] =>  [] |  x  ::  xs => ( if  n  ==   0 then  e  ::  xs  else  x  ::  (update  xs  (n  -   1)  e))
-
+  match  l with  |  [] =>  [] |  x  ::  xs => ( if  n  =  0 then  e  ::  xs  else  x  ::  (lemListUpdate  xs  (n  -  1)  e))
+ -/
 /- removed value specification -/
 
 /- removed value specification -/
@@ -267,25 +268,26 @@ def  partition  {a : Type}  (P : a → Bool) (l : List a)  : (List a ×List a) :
 
 def  reversePartition  {a : Type}  (P : a → Bool) (l : List a)  : (List a ×List a) :=  partition  P  (List.reverse  l)
 /- removed value specification -/
- 
- def  deleteFirst  {a : Type}  (P : a → Bool) (l : List a)  : Option (List a) :=  match  l with  |  [] =>  none |  x  ::  xs => ( if  (P  x) then  some  xs  else  Option.map  (fun (xs' : List a) =>  x  ::  xs')  (deleteFirst  P  xs))
-                          
+
+/-  
+ def  deleteFirst  {a : Type}  (P : a → Bool) (l : List a)  : Option (List a) :=  match  l with  |  [] =>  none |  x  ::  xs => ( if  (P  x) then  some  xs  else  Option.map  (fun (xs' : List a) =>  x  ::  xs')  (lemListDeleteFirst  P  xs))
+                           -/
 /- removed value specification -/
 
 /- removed value specification -/
 
 
-def  deleteBy  {a : Type}  (eq : a → a → Bool) (x : a) (l : List a)  : List a :=  fromMaybe  l  (deleteFirst  (eq  x)  l)
+def  deleteBy  {a : Type}  (eq : a → a → Bool) (x : a) (l : List a)  : List a :=  fromMaybe  l  (lemListDeleteFirst  (eq  x)  l)
 
 /- removed value specification -/
 
 /-  /-  before combine  -/
- def  zip  {a : Type} {b : Type}  (l1 : List a) (l2 : List b)  : List ((a ×b)) :=  match l1,  l2 with  | x  ::  xs,  y  ::  ys =>  (x, y)  ::  List.zip  xs  ys | _, _ =>  []
+ def  zip  {a : Type} {b : Type}  (l1 : List a) (l2 : List b)  : List ((a ×b)) :=  match l1,  l2 with  | x  ::  xs,  y  ::  ys =>  (x, y)  ::  lemListZip  xs  ys | _, _ =>  []
  -/
 /- removed value specification -/
 
 /- 
- def  unzip  {a : Type} {b : Type}  (l : List ((a ×b)))  : (List a ×List b) :=  match  l with  |  [] =>  ([], []) |  (x,  y)  ::  xys => ( let  (xs,  ys)   := List.unzip  xys;  (x  ::  xs, y  ::  ys))
+ def  unzip  {a : Type} {b : Type}  (l : List ((a ×b)))  : (List a ×List b) :=  match  l with  |  [] =>  ([], []) |  (x,  y)  ::  xys => ( let  (xs,  ys)   := lemListUnzip  xys;  (x  ::  xs, y  ::  ys))
  -/
 
 
@@ -307,15 +309,17 @@ instance (a : Type) [SetType a] : SetType (List  a) where
 
  def  mapiAux  {a : Type} {b : Type}  (f : Nat → b → a)  (n  : Nat) (l : List b)  : List a :=  match  l with  |  [] =>  [] |  x  ::  xs =>  (f  n  x)  ::  mapiAux  f  (n  +   1)  xs
 
-def  mapi  {a : Type} {b : Type}  (f : Nat → a → b) (l : List a)  : List b :=  mapiAux  f (  0)  l
+/- 
+def  mapi  {a : Type} {b : Type}  (f : Nat → a → b) (l : List a)  : List b :=  mapiAux  f  0  l -/
 /- removed value specification -/
 
 def  deletes  {a : Type} [Eq0 a]  (xs : List a) (ys : List a)  : List a := 
   List.foldl  (flip  (deleteBy  (fun x y => x == y)))  xs  ys
 /- removed value specification -/
 
+/- 
  def  catMaybes  {a : Type}  (xs : List (Option a))  : List a := 
-  match  xs with  |  [] =>          [] | ( none  ::  xs') =>          catMaybes  xs' | ( some  x  ::  xs') =>          x  ::  catMaybes  xs'
-  
+  match  xs with  |  [] =>          [] | ( none  ::  xs') =>          lemListCatMaybes  xs' | ( some  x  ::  xs') =>          x  ::  lemListCatMaybes  xs'
+   -/
 end Lem_List
 

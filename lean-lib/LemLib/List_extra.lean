@@ -33,13 +33,14 @@ def  tail  {a : Type}  (l : List a)  : List a :=  match  l with  |  x :: xs =>  
  partial def  last  {a : Type}  (l : List a)  : a :=  match  l with  |  [x] =>  x |  x1 :: x2 :: xs =>  List.getLast!  (x2  ::  xs) |  [] => (failwithI  "List_extra.last of empty list" : a)  -/
 /- removed value specification -/
 
- def  init  {a : Type}  (l : List a)  : List a :=  match  l with  |  [x] =>  [] |  x1 :: x2 :: xs =>  x1 :: (init  (x2 :: xs)) |  [] => (failwithI  "List_extra.init of empty list" : List a) 
+/- 
+ def  init  {a : Type}  (l : List a)  : List a :=  match  l with  |  [x] =>  [] |  x1 :: x2 :: xs =>  x1 :: (lemListInit  (x2 :: xs)) |  [] => (failwithI  "List_extra.init of empty list" : List a)  -/
 /- removed value specification -/
 
 def  foldl1  {a : Type} [Inhabited a]  (f : a → a → a) (x_xs : List a)  : a :=  match  x_xs with  | ( x  ::  xs) =>  List.foldl  f  x  xs |  [] => (failwithI  "List_extra.foldl1 of empty list" : a) 
 /- removed value specification -/
 
-def  foldr1  {a : Type} [Inhabited a]  (f : a → a → a) (x_xs : List a)  : a :=  match  x_xs with  | ( x  ::  xs) =>  List.foldr  f  x  xs |  [] => (failwithI  "List_extra.foldr1 of empty list" : a) 
+def  foldr1  {a : Type} [Inhabited a]  (f : a → a → a) (x_xs : List a)  : a :=  match  x_xs with  | ( x  ::  xs) =>  lemListFoldr  f  x  xs |  [] => (failwithI  "List_extra.foldr1 of empty list" : a) 
 /- removed value specification -/
 
 /- 
@@ -49,15 +50,17 @@ def  nth  {a : Type}  (l : List a) (n : Nat)  : a :=  match  listGetOpt  l  n wi
 def  findNonPure  {a : Type} [Inhabited a]  (P : a → Bool) (l : List a)  : a :=  match  (find  P  l) with  |  some  e =>  e |  none => (failwithI  "List_extra.findNonPure" : a)
 
 /- removed value specification -/
- 
- def  zipSameLength  {a : Type} {b : Type}  (l1 : List a) (l2 : List b)  : List ((a ×b)) :=  match l1,  l2 with  | x  ::  xs,  y  ::  ys =>  (x, y)  ::  zipSameLength  xs  ys | [],  [] =>  [] | _, _ => (failwithI  "List_extra.zipSameLength of different length lists" : List ((a ×b)))
 
+/-  
+ def  zipSameLength  {a : Type} {b : Type}  (l1 : List a) (l2 : List b)  : List ((a ×b)) :=  match l1,  l2 with  | x  ::  xs,  y  ::  ys =>  (x, y)  ::  lemListZipSameLength  xs  ys | [],  [] =>  [] | _, _ => (failwithI  "List_extra.zipSameLength of different length lists" : List ((a ×b)))
 
+ -/
 /- removed value specification -/
 
+/- 
  partial def  unfoldr  {a : Type} {b : Type}  (f : a → Option ((b ×a))) (x : a)  : List b := 
-  match  f  x with  |  some  (y,  x') =>          y  ::  unfoldr  f  x' |  none =>          []
-  
+  match  f  x with  |  some  (y,  x') =>          y  ::  lemListUnfoldr  f  x' |  none =>          []
+   -/
 end Lem_List_extra
 
 

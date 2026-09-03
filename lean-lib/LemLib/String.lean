@@ -43,8 +43,9 @@ def  string_case  {a : Type}  (s : String) (c_empty : a) (c_cons : Char → Stri
 
 /- removed value specification -/
 
+/- 
  def  concat  (sep : String) (ss : List (String))  : String := 
-  match  ss with  |  [] =>  "" |  s  ::  ss' => (       match  ss' with  |  [] =>  s |  _ =>   String.append s   (String.append sep  (concat  sep  ss'))       )
-  
+  match  ss with  |  [] =>  "" |  s  ::  ss' => (       match  ss' with  |  [] =>  s |  _ =>  String.append  s  String.append  sep  lemStringConcat  sep  ss'       )
+   -/
 end Lem_String
 

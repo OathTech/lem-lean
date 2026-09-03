@@ -62,7 +62,7 @@ open Lem_Set_helpers
 
 
 
-instance (a : Type) [SetType a] : Eq0 (List  a) where
+instance (a : Type) [SetType a] : Eq0 (Pset  a) where
 
     isEqual   :=  (setEqualBy  (@setElemCompare (a) _))
 
@@ -111,50 +111,27 @@ instance (a : Type) [SetType a] : Eq0 (List  a) where
 /- removed value specification -/
 
 /- removed value specification -/
- 
-def  filter  {a : Type} [SetType a]  (P : a → Bool) (s : List a)  : List a :=  let  x2   := (setEmpty);  setFold  (fun (e : a) (x2 : List a) =>  if  P  e then setAddBy  setElemCompare  e  x2  else  x2)  s  x2
+
+/-  
+def  filter  {a : Type} [SetType a]  (P : a → Bool) (s : Pset a)  : Pset a := (sorry /- Lean backend: set comprehension binding not supported -/) -/
 /- removed value specification -/
 
-def  partition0  {a : Type} [SetType a]  (P : a → Bool) (s : List a)  : (List a ×List a) :=  (filter  P  s, filter  (fun (e : a) =>  not  (P  e))  s)
+def  partition0  {a : Type} [SetType a]  (P : a → Bool) (s : Pset a)  : (Pset a ×Pset a) :=  (setFilterBy  setElemCompare  P  s, setFilterBy  setElemCompare  (fun (e : a) =>  not  (P  e))  s)
 /- removed value specification -/
 
-def  split  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : List a)  : (List a ×List a) :=  (filter  (isGreater  p)  s, filter  (isLess  p)  s)
+def  split  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : Pset a)  : (Pset a ×Pset a) :=  (setFilterBy  setElemCompare  (isGreater  p)  s, setFilterBy  setElemCompare  (isLess  p)  s)
 /- removed value specification -/
 
-def  splitMember  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : List a)  : (List a ×Bool ×List a) :=  (filter  (isLess  p)  s, (setMemberBy  (@setElemCompare (a) _)  p  s), filter  (isGreater  p)  s)
-/- removed value specification -/
-
-/- removed value specification -/
-
+def  splitMember  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : Pset a)  : (Pset a ×Bool ×Pset a) :=  (setFilterBy  setElemCompare  (isLess  p)  s, (setMemberBy  (@setElemCompare (a) _)  p  s), setFilterBy  setElemCompare  (isGreater  p)  s)
 /- removed value specification -/
 
 /- removed value specification -/
-
-
-
-
-
-
 
 /- removed value specification -/
 
 /- removed value specification -/
 
 
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-def  bigunion  {a : Type} [SetType a]  (bs : List (List a))  : List a :=  let  x2   := (setEmpty);  setFold  (fun (s : List a) (x2 : List a) =>  setFold  (fun (x : a) (x2 : List a) =>  if  true then setAddBy  setElemCompare  x  x2  else  x2)  s  x2)  bs  x2
-/- removed value specification -/
-
-def  bigintersection  {a : Type} [SetType a]  (bs : List (List a))  : List a :=  let  x2   := (setEmpty);  setFold  (fun (x : a) (x2 : List a) =>  if  setForAll  (fun (s : List a) =>  (setMemberBy  (@setElemCompare (a) _)  x  s))  bs then setAddBy  setElemCompare  x  x2  else  x2)  (bigunion  bs)  x2
-/- removed value specification -/
-
-/- removed value specification -/
 
 
 
@@ -168,8 +145,34 @@ def  bigintersection  {a : Type} [SetType a]  (bs : List (List a))  : List a := 
 
 
 /- removed value specification -/
- /-  before image  -/
-def  map0  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → b) (s : List a)  : List b :=  let  x2   := (setEmpty);  setFold  (fun (e : a) (x2 : List b) =>  if  true then setAddBy  setElemCompare  (f  e)  x2  else  x2)  s  x2
+
+/- removed value specification -/
+
+/- 
+
+def  bigunion  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+/- removed value specification -/
+
+def  bigintersection  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a :=  let  x2   := (setEmpty);  setFold  (fun (x : a) (x2 : Pset a) =>  if  setForAll  (fun (s : Pset a) =>  (setMemberBy  (@setElemCompare (a) _)  x  s))  bs then setAddBy  setElemCompare  x  x2  else  x2)  ((setBigunionBy  (@setElemCompare (a) _)  bs))  x2
+/- removed value specification -/
+
+/- removed value specification -/
+
+
+
+
+
+/- removed value specification -/
+
+/- removed value specification -/
+
+
+
+
+/- removed value specification -/
+
+/-  /-  before image  -/
+def  map  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → b) (s : Pset a)  : Pset b := (sorry /- Lean backend: set comprehension binding not supported -/) -/
 /- removed value specification -/
 
 /- removed value specification -/
@@ -181,12 +184,13 @@ def  map0  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → b) (s : Lis
 
 /- removed value specification -/
 
-def  setMapMaybe  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → Option b) (s : List a)  : List b :=  
-  bigunion  (map0  (fun (x : a) =>  match  f  x with  |  some  y =>  setSingleton  y |  none =>  setEmpty
-                        )  s)
+def  setMapMaybe  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → Option b) (s : Pset a)  : Pset b :=  
+  (setBigunionMapBy  (@setElemCompare (b) _)  (fun (x : a) =>  match  f  x with  |  some  y =>  setSingleton  y |  none =>  setEmpty
+                        ) 
+              s)
 /- removed value specification -/
 
-def  removeMaybe  {a : Type} [SetType a]  (s : List (Option a))  : List a :=  setMapMaybe  (fun (x : Option a) =>  x)  s
+def  removeMaybe  {a : Type} [SetType a]  (s : Pset (Option a))  : Pset a :=  setMapMaybe  (fun (x : Option a) =>  x)  s
 /- removed value specification -/
 
 /- removed value specification -/
@@ -204,13 +208,14 @@ def  removeMaybe  {a : Type} [SetType a]  (s : List (Option a))  : List a :=  se
 
 /- 
 
-def  sigma  {a : Type} {b : Type} [SetType a] [SetType b]  (sa : List a) (sb : a → List b)  : List ((a ×b)) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+def  sigma  {a : Type} {b : Type} [SetType a] [SetType b]  (sa : Pset a) (sb : a → Pset b)  : Pset ((a ×b)) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
 /- removed value specification -/
 
 /- removed value specification -/
 
+/- 
 
-def  cross  {a : Type} {b : Type} [SetType a] [SetType b]  (s1 : List a) (s2 : List b)  : List ((a ×b)) :=  let  x2   := (setEmpty);  setFold  (fun (e1 : a) (x2 : List ((a ×b))) =>  setFold  (fun (e2 : b) (x2 : List ((a ×b))) =>  if  true then setAddBy  setElemCompare  (e1, e2)  x2  else  x2)  s2  x2)  s1  x2
+def  cross  {a : Type} {b : Type} [SetType a] [SetType b]  (s1 : Pset a) (s2 : Pset b)  : Pset ((a ×b)) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
 /- removed value specification -/
 
 
@@ -218,7 +223,7 @@ def  cross  {a : Type} {b : Type} [SetType a] [SetType b]  (s1 : List a) (s2 : L
 /- removed value specification -/
 
 /- 
- partial def  leastFixedPoint  {a : Type} [SetType a]  (bound : Nat) (f : List a → List a) (x : List a)  : List a := 
+ partial def  leastFixedPoint  {a : Type} [SetType a]  (bound : Nat) (f : Pset a → Pset a) (x : Pset a)  : Pset a := 
   match  bound with  |  0 =>  x | (bound' + 1) => ( let  fx   := f  x;                    if  subset  fx  x then  x                    else  lemLeastFixedPoint  setElemCompare  bound'  f  (union  fx  x))
    -/
 end Lem_Set

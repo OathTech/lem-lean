@@ -36,7 +36,7 @@ open Lem_List_extra
   if  n  =  0 then 
     acc
    else 
-    lemStringFromNatHelper  (n  /  10)  (Char.ofNat  (n  mod  10  +  48)  ::  acc) -/
+    lemStringFromNatHelper  (/  n  10)  (Char.ofNat  (mod  n  10  +  48)  ::  acc) -/
 /- removed value specification -/
 
 def  stringFromNat  (n : Nat)  : String :=  
@@ -48,7 +48,7 @@ def  stringFromNat  (n : Nat)  : String :=
   if  n  =  0 then 
     acc
    else 
-    lemStringFromNaturalHelper  (n  /  10)  (Char.ofNat  (id  (n  mod  10  +  48))  ::  acc) -/
+    lemStringFromNaturalHelper  (/  n  10)  (Char.ofNat  (id  (mod  n  10  +  48))  ::  acc) -/
 /- removed value specification -/
 
 def  stringFromNatural  (n : Nat)  : String :=  
@@ -73,7 +73,7 @@ def  nth  (s : String) (n : Nat)  : Char :=  listGetBang  (String.toList  s)  n
 /- removed value specification -/
 
 def  stringConcat  (s : List (String))  : String := 
-  List.foldr  String.append  ""  s
+  lemListFoldr  String.append  ""  s
 /- removed value specification -/
 
 

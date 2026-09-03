@@ -111,9 +111,10 @@ declare isabelle target_rep function toOrderedListBy = `ordered_list_of_set`
 declare hol      target_rep function toOrderedListBy = `ARB`
 
 val toOrderedList : forall 'a. SetType 'a, Ord 'a => set 'a -> list 'a
-let inline ~{isabelle;ocaml} toOrderedList l = sort (toList l)
+let inline ~{isabelle;ocaml;lean} toOrderedList l = sort (toList l)
 let inline {isabelle} toOrderedList = toOrderedListBy (<=)
 declare ocaml    target_rep function toOrderedList = `Pset.elements`
+declare lean     target_rep function toOrderedList = `setToList`
 
 declare compile_message toOrderedList = "toOrderedList is only defined on finite sets."
 

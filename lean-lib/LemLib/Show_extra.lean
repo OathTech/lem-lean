@@ -47,11 +47,11 @@ instance   : Show Int where
     show0   :=  Lem_String_extra.stringFromInteger
 
 
-def  stringFromSet  {a : Type} [SetType a]  (showX : a → String) (xs : List a)  : String :=  
-  String.append "{"   (String.append (Lem_Show.stringFromListAux  showX  (setToList  xs))  "}")
+def  stringFromSet  {a : Type} [SetType a]  (showX : a → String) (xs : Pset a)  : String :=  
+  String.append "{"   (String.append (lemShowListAux  showX  (setToList  xs))  "}")
 
 /-  Abbreviates the representation if the relation is transitive.  -/
-def  stringFromRelation  {a : Type} [Eq0 a] [SetType a]  (showX : (a ×a) → String) (rel1 : List ((a ×a)))  : String := 
+def  stringFromRelation  {a : Type} [Eq0 a] [SetType a]  (showX : (a ×a) → String) (rel1 : Pset ((a ×a)))  : String := 
   if  isTransitive  rel1 then 
     let  pruned_rel   := withoutTransitiveEdges  rel1; 
     if  (setForAll  (fun (e : (a ×a)) =>  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) e  pruned_rel)))  rel1) then 
@@ -63,7 +63,7 @@ def  stringFromRelation  {a : Type} [Eq0 a] [SetType a]  (showX : (a ×a) → St
    else 
     stringFromSet  showX  rel1
 
-instance (a : Type) [Show a] [SetType a] : Show (List  a) where
+instance (a : Type) [Show a] [SetType a] : Show (Pset  a) where
 
     show0   xs  :=  stringFromSet  (@show0 (a) _)  xs
 

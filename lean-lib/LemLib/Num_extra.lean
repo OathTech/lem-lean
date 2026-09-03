@@ -38,9 +38,6 @@ def  integerOfChar   : Char → Int :=  fun (x : Char) =>  match x with  |  '0' 
 
  def  integerOfStringHelper  (s : List (Char))  : Int :=  match  s with  |  d  ::  ds =>  integerOfChar  d  +  (( 10 :  Int)  *  integerOfStringHelper  ds) |  [] => ( 0 :  Int)
 
-
-def  integerOfString  (s : String)  : Int :=  match  String.toList  s with  |  '-'  ::  ds =>  (Int.neg  (integerOfStringHelper  (List.reverse  ds))) |  ds =>  integerOfStringHelper  (List.reverse  ds)
-
 /- removed value specification -/
 
 /- removed value specification -/
