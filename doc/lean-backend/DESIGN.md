@@ -104,24 +104,37 @@ explicit parameter — after any reader binders — and returns the final
 supply paired with its result; a draw compiles to
 `let (v, s') := LemLib.supplySplit s` with `supplySplit s = (s, s+1)`
 (a plain def — kernel-transparent, greppable, no axiom, no IO). The
-transform A-normalizes draw sites in left-to-right depth-first order —
-exactly the evaluation order of the strict code it replaces, so the
-threaded sequence reproduces the effectful counter's dynamic draw
-order — and it is DETERMINISTIC state-passing only: it emits
+transform A-normalizes draw sites in the EVALUATION ORDER OF THE OCAML
+TARGET — the reference semantics of a lem program — so the threaded
+sequence reproduces the effectful counter's dynamic draw order on the
+reference: OCaml evaluates the subexpressions of one node
+right-to-left (function-application arguments, then the head; tuple
+components; constructor arguments; list-literal elements; infix
+operands; record fields in the type's field-declaration order), and
+`let`/`if`/`match` as written. Every rule was established by a
+compiled two-target probe before it was implemented
+(`tests/comprehensive/parity/probes/p_eval_order.lem`,
+`p_supply_shapes.lem`; the pins are the OCaml binaries' outputs). The
+transform is DETERMINISTIC state-passing only: it emits
 let-bindings, tuples, and `supplySplit`, never a nondeterminism
 constructor (the effect-retirement charter's obligation O7 is
-structural, not asserted). Where the reader lifting survives
-higher-order code by type-preserving partial application, a supply
-cannot: its result type grows a `× Nat`, so lambdas that draw, bare
-references to lifted definitions, partial or over-saturated
-applications, infix uses, instance methods, indreln rules, and
-monadic positions are all fail-closed generation-time errors with
-named messages (guards G-λ, G-bare, G-arity, G-infix, G-inst, G-rel
-in `src/lean_backend.ml`; the honest boundary is that state-lifting a
-monadic region is a model change, not a backend transform). Entry
-points seed the supply explicitly and receive the final value in the
-returned pair; with several declared supplies every lifted def
-threads all of them, binders and result states in sorted-name order.
+structural, not asserted). Drawing arguments of a target_rep'd head
+(library constructors `Just`/`Left`/`Right`, rep'd functions) are
+bound to variables and passed to the ordinary application renderer.
+Where the reader lifting survives higher-order code by type-preserving
+partial application, a supply cannot: its result type grows a `× Nat`,
+so lambdas that draw, bare references to lifted definitions, partial
+or over-saturated applications, infix uses, instance methods, indreln
+rules, monadic positions, and drawing TOP-LEVEL VALUE bindings (the
+OCaml reference evaluates those once at module initialisation, which
+per-use state passing cannot mirror) are all fail-closed
+generation-time errors with named messages (guards G-λ, G-bare,
+G-arity, G-infix, G-inst, G-rel, G-value in `src/lean_backend.ml`; the
+honest boundary is that state-lifting a monadic region is a model
+change, not a backend transform). Entry points seed the supply
+explicitly and receive the final value in the returned pair; with
+several declared supplies every lifted def threads all of them,
+binders and result states in sorted-name order.
 Fuel composes (the worker threads the supply through the decremented
 self-call; exhaustion returns the sentinel with the supply unconsumed
 at the cut), readers and `reader_seed` compose (binder order is
@@ -177,13 +190,19 @@ inhabitant; it was logically inconsistent and is deleted — see the
 history note at the top of `lean-lib/LemLib.lean`.)
 
 **Comparisons mirror OCaml's polymorphic compare.** `BEq`/`Ord` (and
-the set/map instance trio) are derived structurally per mutual block
-with OCaml parity: nullary constructors rank below non-nullary,
-declaration order within each class, fields left-to-right. Types
-carrying functions — where OCaml's compare raises at runtime — get
-loud `failwithI` residual bodies rather than fake instances. This
-keeps the two backends' observable behavior aligned even in the
-corners.
+the set/map instance trio) are derived structurally with OCaml parity
+for EVERY type: nullary constructors rank below non-nullary,
+declaration order within each class, fields left-to-right, records by
+field declaration order. Lean's own `deriving Ord` ranks constructors
+by declaration index, which coincides with OCaml's rank unless a
+nullary constructor is declared after a block constructor; exactly
+those variants (single or mutual) are emitted through the backend's
+`ctor_rank_ocaml` derivation instead of `deriving` (parity-fix F4,
+2026-09-03; two-target pin
+`tests/comprehensive/parity/probes/p_cmp_order.lem`). Types carrying
+functions — where OCaml's compare raises at runtime — get loud
+`failwithI` residual bodies rather than fake instances. This keeps the
+two backends' observable behavior aligned even in the corners.
 
 **Set comprehensions: expanded where possible, rejected otherwise.**
 Comprehensions whose binders are `IN`-bounded
@@ -198,6 +217,32 @@ enclosing definition a `target_rep`. Library definitions in that
 corner render only as comments behind their Lean inlines/target reps
 (`set.lem`'s `sigma`).
 
+**Numbers, strings and lists follow the OCaml runtime, failure
+included.** The Lean reps of lem's numeric library mirror
+`ocaml-lib/nat_num.ml` and zarith one function at a time (parity-fix
+slice 2026-09-03): `int`/`int32`/`int64` division and remainder are
+`Nat_num.int_div`/`int_mod` (truncating with the sign adjustment — NOT
+Euclidean for a negative divisor; `integer` stays Euclidean), `int32`/
+`int64` are Lean's `Int32`/`Int64` and WRAP like OCaml's, the checked
+conversions (`…FromInteger`, numerals) fail on overflow exactly where
+zarith raises, every division by zero fails loudly instead of
+totalising to 0, `integerSqrt` of a negative fails, and
+`integerOfString`/`naturalOfString` parse zarith's `Z.of_string`
+grammar (signs, `0x`/`0o`/`0b`, underscores). Failure parity is the
+rule: wherever the OCaml reference raises, the Lean side panics
+(`failwithI`; a harness under `LEAN_ABORT_ON_PANIC=1` fail-stops at the
+same program point) — the message text may differ (the [USER
+2026-09-03] exception class (a)), the failure may not be absorbed.
+Deep lists: every library list/string function that overflowed the
+native stack at 300 000 elements has an explicitly tail-recursive LemLib
+rewrite with a kernel-checked equality theorem to the definition it
+replaced (`lean-lib/LemLibTheorems.lean`) — Lean must not fail where the
+OCaml reference succeeds (exception class (b)). The one open
+representation gap is strings (bytes on OCaml, Unicode scalars on
+Lean): `doc/lean-backend/2026-09-03_string-representation-design.md`,
+scheduled as the arc's last slice; its two parity probes are registered
+expected failures until then.
+
 **Instance priorities come from one table.** Every generated or
 library instance takes its priority from a single normative lattice
 (model-provided and derived `BEq`/`Ord` at default, the automatic
@@ -208,12 +253,25 @@ declaration-order accident. The table is
 current); a build-failing resolution probe in `tests/comprehensive`
 pins it.
 
-**Sets are comparator-keyed end to end.** Lem sets emit onto LemLib's
-sorted-list representation with explicit comparators
-(`setAddBy`/`setFromListBy`); there is deliberately no `BEq`-keyed
-insertion, so a finer `BEq` cannot smuggle comparator-equal
-duplicates past set equality. Property tests with adversarial keys
-live in `lean-lib/LemLibTest.lean`.
+**Sets and maps are the OCaml runtime, ported line for line.** Lem
+`set`/`map` emit onto LemLib's `Pset`/`Pmap` — verbatim ports of
+lem's OCaml runtime AVL trees (`ocaml-lib/pset.ml`, `pmap.ml`; every
+function cites its source line) with explicit comparators
+(`setAddBy`/`fmapAddBy` etc., spliced by the backend from
+`setElemCompare`/`mapKeyCompare`). Because the tree SHAPE evolves
+identically on both targets, every observable agrees by construction
+and not by argument: iteration/fold/toList order (ascending by the
+comparator), which representative of comparator-equal but
+distinguishable elements survives an insert/union/map, `Pmap.add`
+replacing key and value, `Pmap.equal` comparing keys with the map's
+comparator, `choose`/`chooseAndSplit`/`set_case`, and the panic order
+of `for_all`/`exists`. There is no `BEq`-keyed insertion anywhere.
+Two-target parity probes (`tests/comprehensive/parity/probes/p_set_ops.lem`,
+`p_map_ops.lem`, `p_map_beq.lem`) pin the observables; AVL invariants
+over bounded-exhaustive operation sequences live in
+`lean-lib/LemLibTest.lean`. (History: a comparator-keyed insertion-order
+list and a `Std.TreeMap`-indexed map reproduced the retired Lean
+assoc-list observables — the parity-fix slice 2026-09-03 replaced them.)
 
 **Backend state lives in one module.** All mutable emission state is
 in `St` (`src/lean_backend.ml`), fields classified by lifetime
