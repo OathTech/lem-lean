@@ -590,6 +590,13 @@ the gates above were run on the FINAL tree.
 
 ## 4. EXCEPTION-CASE arguments for the operator (not decided here)
 
+> RULED 2026-09-03 ([USER] "Agree re lem."): X1 and X3/N4 are recorded as
+> OCaml-backend deviations from lem's own prover-side semantics — the Lean
+> target follows lem; not exceptions. X2/X4 were fixed as class-(c)
+> generation-time refusals in this same commit. Record:
+> `2026-09-03_exception-case-rulings.md`. The arguments below are kept
+> verbatim as the record of what was asked.
+
 **X3 / N4 — OCaml `nat`/`int` are 63-bit machine integers.** lem `nat`
 is OCaml `int` (`num.lem:117`), lem `int` is OCaml `int`; `natFromNatural`,
 `intFromInteger`, `natFromNumeral` are `Nat_big_num.to_int` which raises

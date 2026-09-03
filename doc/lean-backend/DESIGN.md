@@ -243,6 +243,17 @@ Lean): `doc/lean-backend/2026-09-03_string-representation-design.md`,
 scheduled as the arc's last slice; its two parity probes are registered
 expected failures until then.
 
+Two OCaml-target behaviours are deliberately NOT mirrored, because they
+are the OCaml backend's own deviations from lem's semantics and the Lean
+target follows lem's prover-side reading ([USER 2026-09-03] ruling,
+`doc/lean-backend/2026-09-03_exception-case-rulings.md`): `nat`/`int`
+are unbounded on Lean where OCaml's 63-bit `int` wraps silently above
+2^62 (`library/num.lem:104-111` documents the OCaml choice as a
+compromise; the checked conversions still fail loudly at the boundary
+where `Nat_big_num.to_int` raises), and structural `BEq`/`Ord` on values
+containing a `Pset`/`Pmap` compute where OCaml's polymorphic compare
+raises on the comparator closure (`lean-lib/LemLib.lean:741-748`).
+
 **Unsupported constructs are refused at generation time, by a
 library-side marker.** A lem constant or type whose Lean target_rep
 identifier lives in the reserved `LemUnsupported.` namespace has no Lean
