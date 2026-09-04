@@ -1330,17 +1330,17 @@ def  integerSqrt  (i : Int)  : Int :=  realFloor  (realSqrt  (LemUnsupported.rea
 
 /- 
 def  int32FromInteger  (i : Int)  : Int32 :=  (
-  let  abs_int32  := lemInt32OfNaturalExact  (Int.natAbs  i); 
+  let  abs_int32  := lemInt32OfNat  (Int.natAbs  i); 
   if  (<  i  0) then  (~  abs_int32)  else  abs_int32 
 ) -/
 /- removed value specification -/
 
 /- 
-def  int32FromInt  (i : Int)  : Int32 :=  lemInt32OfIntegerExact  (  i) -/
+def  int32FromInt  (i : Int)  : Int32 :=  lemInt32OfInt  (  i) -/
 /- removed value specification -/
 
 /- 
-def  int32FromInt64  (i : Int64)  : Int32 :=  lemInt32OfIntegerExact  (lemInt64ToInt  i) -/
+def  int32FromInt64  (i : Int64)  : Int32 :=  lemInt32OfInt  (lemInt64ToInt  i) -/
 /- removed value specification -/
 
 /- removed value specification -/
@@ -1349,17 +1349,17 @@ def  int32FromInt64  (i : Int64)  : Int32 :=  lemInt32OfIntegerExact  (lemInt64T
 
 /- 
 def  int64FromInteger  (i : Int)  : Int64 :=  (
-  let  abs_int64  := lemInt64OfNaturalExact  (Int.natAbs  i); 
+  let  abs_int64  := lemInt64OfNat  (Int.natAbs  i); 
   if  (<  i  0) then  (~  abs_int64)  else  abs_int64 
 ) -/
 /- removed value specification -/
 
 /- 
-def  int64FromInt  (i : Int)  : Int64 :=  lemInt64OfIntegerExact  (  i) -/
+def  int64FromInt  (i : Int)  : Int64 :=  lemInt64OfInt  (  i) -/
 /- removed value specification -/
 
 /- 
-def  int64FromInt32  (i : Int32)  : Int64 :=  lemInt64OfIntegerExact  (lemInt32ToInt  i) -/
+def  int64FromInt32  (i : Int32)  : Int64 :=  lemInt64OfInt  (lemInt32ToInt  i) -/
 /- removed value specification -/
 
 /- removed value specification -/
