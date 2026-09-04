@@ -241,3 +241,43 @@ the six sealed recursions are named, with their new shape, in the
 record's cerberus dry-run section, and the restatement of a
 `potential e ≤ lemDefaultFuel` hypothesis is given there for the
 cerberus change manifest.
+
+## R2 (2026-09-04) — the structural declare, D4, monotonicity assessed
+
+Revision by the lem-lean worker [AGENT] after the consumer's review
+(refined-cerberus `docs/2026-09-04_review-of-fuel-parameter-design.md`:
+ACCEPT; requirement §2 — every fuel'd function on the execution path is
+(A) structural on its data, (B) absorbing typed exhaustion, or (C)
+unreachable) and the orchestrator's response (cerberus-lean
+`lean_frontend/docs/2026-09-04_fuel-parameter-consumer-review-response.md`
+§3–§4), adopted by the operator ([USER 2026-09-04] "go ahead with the
+merges as proposed, then work on this as you suggest"). Record:
+`2026-09-04_structural-declare-record.md`. Deltas against R1:
+
+1. **Form (A) has its declare: `declare {lean} structural val f`.** An
+   ordinary `def` with `termination_by structural <param>`; the parameter
+   is designated by a syntactic analysis mirroring Lean's checker; the
+   well-founded fallback is FORBIDDEN (it would trade kernel
+   computability for a `def` keyword silently — the consumer's `join`
+   finding); refusal at generation where no parameter works, the Lean
+   build as the backstop. R1 §5's "three admissible forms" now read: (a)
+   the `[LemFuel]` ambient for (B)-shaped partial recursion, (c) the
+   structural declare (or a data-measure index) for (A). D2 (fuel'd
+   equalities as instance methods) is resolved by it — a structural def
+   can be an instance method — but the three cerberus equalities recurse
+   through `List.all (uncurry …) (zip …)`/`listEqualBy`, a higher-order
+   self-use no structural checker eliminates: the cerberus half rewrites
+   each list traversal as an explicit sibling (the refusal names the site).
+2. **D4 = WRAP** ([USER 2026-09-04]): the Lean reps of the `int32`/`int64`
+   conversions are the modular `Int32.ofInt`/`Int32.ofNat` (lem's own
+   `word_of_int`/`n2w`); `f_int32_overflow` is a registered OCaml-target
+   deviation; `2026-09-03_exception-case-rulings.md` D4 addendum.
+3. **Monotonicity (R1 item 4, TODO row 13) assessed L on both routes;**
+   a hand-proved Route-B exemplar over the generated `spin_lemFuel`
+   (`lean-test/TestFuelMonoExemplar.lean`, axioms `[propext]`) fixes the
+   statement shape a generator would have to produce; the generation
+   itself and its vocabulary are for the operator (record §5).
+4. **The (A) census for the cerberus half** (record §6): every one of the
+   67 sentinel fuel declares tried as `structural` in a scratch copy,
+   mechanically, with the generation-time verdicts and the Lean 4.32.2
+   build verdicts.
