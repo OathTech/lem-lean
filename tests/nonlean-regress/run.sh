@@ -104,6 +104,15 @@ done
 find "$SCRATCH" -type f -exec sed -i "s|$ROOT|LEMROOT|g" {} + \
   || fail "path normalization failed"
 
+# --- exit-code list: locale-independent order -------------------------
+# The per-run exit rows were appended in `for f in *.lem` glob order,
+# which depends on the locale's collation (measured 2026-09-04: `classes`
+# vs `classes2`, `indreln` vs `indreln2` swap between environments). Sort
+# them under LC_ALL=C like the sha manifest below, so the golden compares
+# byte-for-byte in every environment.
+LC_ALL=C sort "$EXITS" > "$EXITS.sorted" && mv "$EXITS.sorted" "$EXITS" \
+  || fail "sorting the exit-code list failed"
+
 # --- manifests --------------------------------------------------------
 cd "$SCRATCH" || fail "scratch dir vanished"
 MANIFEST="$SCRATCH/manifest.sha256"
