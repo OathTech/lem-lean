@@ -39,6 +39,7 @@ lean_lib LemComprehensiveTest where
     `Test_fuel_param, `Test_fuel_param_auxiliary,
     `TestFuelConsumerImpl,  -- hand-written fuel_consumer implementation ([LemFuel])
     `TestFuelParamCheck,  -- hand-written fuel-parameter kernel pins (fuel-parameter arc)
+    `TestFuelMonoExemplar,  -- hand-proved fuel-monotonicity exemplar (Route B: completion predicate; structural-declare slice)
     `Test_functions, `Test_functions_auxiliary,
     `Test_indreln, `Test_indreln_auxiliary,
     `Test_instances, `Test_instances_auxiliary,
