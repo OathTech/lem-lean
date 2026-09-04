@@ -1,6 +1,8 @@
 import P_supply_shapes
 -- Lean driver: each shape is supply-lifted (seed) (unit) → (string, final);
--- print exactly the reference driver's line.
+-- print exactly the reference driver's line. The fuel'd shapes are
+-- fuel-lifted: the driver (a test harness) instantiates the ambient once.
+instance : LemFuel := ⟨1000⟩
 def shape (name : String) (seed : Nat) (f : Nat → Unit → String × Nat) : IO Unit :=
   let (v, s) := f seed ()
   IO.println s!"{name} {seed} = {v} @ {s}"
@@ -39,4 +41,3 @@ def main : IO Unit := do
   shape "mk_just" 40 s_mk_just
   shape "fuel_draws" 60 s_fuel_draws
   shape "uses_fuel_draws" 60 s_uses_fuel_draws
-  shape "fuel_draws_b2" 60 s_fuel_draws_b2

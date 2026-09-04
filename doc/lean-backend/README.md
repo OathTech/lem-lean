@@ -65,16 +65,21 @@ the negative/panic test legs — is `tests/comprehensive/`:
   function-carrying type — it fails **at generation time** with an
   error naming the type and the escape hatches, or emits a loud,
   greppable runtime failure (`failwithI`), never a silent default.
-- **Totality on demand.** By default, recursive Lem functions emit as
-  Lean `partial def` (executable, but opaque to the kernel). Marking
-  a function ``declare {lean} fuel val f = `sentinel` `` emits a
-  total worker that recurses structurally on an explicit fuel
-  argument, plus a wrapper applying the library default fuel
-  (`lemDefaultFuel`, 10^6) — fully kernel-transparent. The backtick
-  payload is the expression returned when fuel runs out; write it as
-  `fuelExhausted <witness>` to make exhaustion a loud panic. Cerberus
-  applies fuel declares across its whole execution path and checks
-  that slice is total in its own build.
+- **Totality on demand; the fuel is yours.** By default, recursive
+  Lem functions emit as Lean `partial def` (executable, but opaque to
+  the kernel). Marking a function ``declare {lean} fuel val f =
+  `sentinel` `` emits a total worker that recurses structurally on an
+  explicit fuel counter, plus a wrapper `f [LemFuel] := f_lemFuel
+  LemFuel.fuel` that starts the counter from the AMBIENT fuel — a
+  parameter of the generated code (an instance-implicit `[LemFuel]`
+  binder on `f` and on everything that reaches it), never a numeral:
+  no default exists in the library or the output; the entry point
+  chooses (`@f ⟨n⟩ …`), a theorem quantifies (`∀ [LemFuel]`), and
+  `f_lemFuel_zero` states the exhaustion case by `rfl`. The backtick
+  payload is the expression returned when the counter runs out; write
+  it as `fuelExhausted <witness>` to make exhaustion a loud panic.
+  Cerberus applies fuel declares across its whole execution path and
+  checks that slice is total in its own build.
 - **Zero axioms; effects are explicit state.** Neither the library
   nor generated code declares any axiom: everything in a downstream
   proof's axiom set comes from Lean itself. Ambient counters are

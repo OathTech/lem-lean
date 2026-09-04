@@ -840,7 +840,7 @@ declare_def :: 'Decl_' ::=
   | declare targets_opt reader_seed val id                                                         :: :: reader_seed_decl
   | declare targets_opt supply val id                                                              :: :: supply_decl
   | declare targets_opt reader_consumer val id                                                     :: :: reader_consumer_decl
-  | declare targets_opt fuel val id = num                                                          :: :: fuel_budget_decl
+  | declare targets_opt fuel_consumer val id                                                       :: :: fuel_consumer_decl
 
 val_def :: '' ::= 
   {{ com Value definitions }}

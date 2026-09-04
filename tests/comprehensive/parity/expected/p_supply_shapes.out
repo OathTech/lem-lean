@@ -32,4 +32,3 @@ destructure_once 30 = [31; 30; 32] @ 33
 mk_just 40 = Just ((41, 40)) @ 42
 fuel_draws 60 = [61; 60] @ 62
 uses_fuel_draws 60 = [62; 61; 60] @ 63
-fuel_draws_b2 60 = [61; 60] @ 62

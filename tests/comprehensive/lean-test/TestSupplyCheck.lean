@@ -22,7 +22,7 @@ import Test_supply_multi
 example : Nat → Unit → (Nat × Nat) × Nat := draw_two
 example : Nat → Nat → Unit → Nat × Nat := both        -- reader THEN supply
 example : Nat → Nat → Nat → Nat × Nat := seeded       -- supply then seed arg
-example : Nat → Nat → List Nat × Nat := fuel_draws    -- wrapper: supply then arg
+example : Nat → Nat → List Nat × Nat := @fuel_draws ⟨100⟩    -- wrapper (at a caller fuel): supply then arg
 example : Nat → Nat → Unit → (Nat × Nat × Nat) × Nat × Nat := two_streams
 
 /- === draw-sequence pins (kernel-checked, exact numbering) === -/
@@ -105,22 +105,23 @@ example : uses_seeded 40 3 = (85, 41) := rfl
    decremented self-call; `tick () :: fuel_draws (n - 1)` evaluates the
    recursive call FIRST (OCaml: cons arguments right-to-left), so the
    draws come out descending -/
-example : fuel_draws 60 2 = ([61, 60], 62) := rfl              -- OCaml: fuel_draws 60 = [61; 60] @ 62
-example : uses_fuel_draws 60 2 = ([62, 61, 60], 63) := rfl    -- OCaml: uses_fuel_draws 60 = [62; 61; 60] @ 63
+example : @fuel_draws ⟨100⟩ 60 2 = ([61, 60], 62) := rfl              -- OCaml: fuel_draws 60 = [61; 60] @ 62
+example : @uses_fuel_draws ⟨100⟩ 60 2 = ([62, 61, 60], 63) := rfl    -- OCaml: uses_fuel_draws 60 = [62; 61; 60] @ 63
+/- the fuel is the caller's ([LemFuel], fuel-parameter arc): the wrapper
+   is the worker at the ambient, and the lifted caller carries the same
+   instance -/
+example : Nat → Nat → List Nat × Nat := @fuel_draws ⟨100⟩
+example : @fuel_draws ⟨100⟩ = fuel_draws_lemFuel 100 := rfl
+example : @fuel_draws ⟨7⟩ 60 2 = @fuel_draws ⟨100⟩ 60 2 := rfl
 /- fuel exhaustion returns the sentinel with the supply UNCONSUMED at
    the exhaustion point (one draw happened before fuel ran out) -/
 example : fuel_draws_lemFuel 1 60 2 = ([60], 61) := rfl
-
-/- fuel BUDGET × supply: wrapper at budget 3 — within budget identical
-   to the default-fuel sibling; beyond it the cut returns the partial
-   draw list with the supply at the cut point -/
-example : Nat → Nat → List Nat × Nat := fuel_draws_b
-example : fuel_draws_b 60 2 = ([61, 60], 62) := rfl           -- OCaml: fuel_draws_b2 60 = [61; 60] @ 62
-/- the budget cut is a Lean-only construct (no OCaml counterpart): the
+/- exhaustion mid-stream at an INSUFFICIENT caller fuel (3) on depth 5
+   (a Lean-only observation — the OCaml reference has no fuel): the
    worker exhausts after descending 3 levels, returns the sentinel []
    with the supply unconsumed (60), then the 3 pending conses draw on
    the way back up — 60, 61, 62 — in the OCaml cons order -/
-example : fuel_draws_b 60 5 = ([62, 61, 60], 63) := rfl
+example : @fuel_draws ⟨3⟩ 60 5 = ([62, 61, 60], 63) := rfl
 
 /- === multi-supply ordering (test_supply_multi.lem): binders sorted
    by name (tick before tock); each draw advances only its own

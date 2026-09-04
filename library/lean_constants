@@ -227,6 +227,7 @@ lcProof
 lcUnreachable
 lcVoid
 LE
+LemFuel
 lemma
 leOfOrd
 let

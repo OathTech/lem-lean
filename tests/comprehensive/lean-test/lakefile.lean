@@ -36,7 +36,9 @@ lean_lib LemComprehensiveTest where
     `Test_name_capture, `Test_name_capture_auxiliary,
     `Test_failwith_threading, `Test_failwith_threading_auxiliary,
     `TestFailwithThreadingCheck,  -- hand-written arc-8 S2 signature-shape checks
-    `Test_fuel_budget, `Test_fuel_budget_auxiliary,
+    `Test_fuel_param, `Test_fuel_param_auxiliary,
+    `TestFuelConsumerImpl,  -- hand-written fuel_consumer implementation ([LemFuel])
+    `TestFuelParamCheck,  -- hand-written fuel-parameter kernel pins (fuel-parameter arc)
     `Test_functions, `Test_functions_auxiliary,
     `Test_indreln, `Test_indreln_auxiliary,
     `Test_instances, `Test_instances_auxiliary,
@@ -90,9 +92,10 @@ lean_exe «test-supply-draws» where
 lean_exe «test-reader-consumer» where
   root := `TestReaderConsumerExec
 
--- Effect-retirement L1: compiled-binary behavioral test of
--- per-declaration fuel budgets (budgeted cut at N, unannotated
--- sibling at the exact lemDefaultFuel boundary, reader composition;
--- suite phase lean-fuel-budget).
-lean_exe «test-fuel-budget» where
-  root := `TestFuelBudgetExec
+-- Fuel-parameter arc (2026-09-04): compiled-binary behavioral test of
+-- the quantified fuel (two sufficient fuels agree; the declared sentinel
+-- at an insufficient one; a callee starts from the full ambient; the
+-- loud-exhaustion leg under LEAN_ABORT_ON_PANIC=1; suite phase
+-- lean-fuel-param).
+lean_exe «test-fuel-param» where
+  root := `TestFuelParamExec

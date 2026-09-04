@@ -268,8 +268,10 @@ and const_descr =
     (** Per-target fuel sentinel: when set, the backend emits the function
         as a fuel-threaded total worker (recursion decrements an explicit
         Nat) whose zero-fuel result is the given target-syntax expression,
-        plus a wrapper at the default fuel so call sites are unchanged.
-        Currently implemented by the Lean backend only. *)
+        plus a wrapper starting the counter from the AMBIENT fuel (Lean:
+        the instance-implicit `[LemFuel]` parameter; no default exists) so
+        call sites are unchanged. Currently implemented by the Lean backend
+        only. *)
 
     ground_rep : string Target.Targetmap.t;
     (** Per-target GROUND-SITE alternative head: at call sites whose
@@ -305,14 +307,15 @@ and const_descr =
         representation declares the matching leading parameters
         explicitly. Lean backend only. *)
 
-    fuel_budget : string Target.Targetmap.t;
-    (** Per-declaration fuel BUDGET (declare {targets} fuel val f = N,
-        numeric form): the fuel-wrapper's budget literal, replacing
-        the library default (lemDefaultFuel) for exactly this
-        declaration. OPT-IN ONLY: declarations without a budget keep
-        lemDefaultFuel semantics byte-for-byte. Requires the fuel
-        SENTINEL declare (the backtick form) on the same val. Lean
-        backend only. *)
+    fuel_consumer : Target.Targetset.t;
+    (** Targets on which this constant is declared a FUEL CONSUMER
+        (declare {targets} fuel_consumer val f): its hand-written target
+        representation reads the ambient fuel (Lean: `LemFuel.fuel`), so
+        every definition that calls it is fuel-lifted — takes the
+        `[LemFuel]` binder — by the ordinary fuel fixpoint. Requires a
+        target_rep on the same val. Lean backend only (fuel-parameter
+        arc, 2026-09-04; replaces the deleted per-declaration numeric
+        fuel budget). *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -565,7 +568,7 @@ type declare_def =  (** Declarations *)
  | Decl_reader_seed           of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_supply                of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_reader_consumer       of lskips * targets_opt * lskips * lskips * const_descr_ref id
- | Decl_fuel_budget           of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
+ | Decl_fuel_consumer         of lskips * targets_opt * lskips * lskips * const_descr_ref id
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

@@ -135,3 +135,109 @@ design's own test.
 [USER 2026-09-03]: the ruling (§1). [AGENT] (orchestrator): the
 measurement (§2), the target structure, the design questions, the
 sequencing. Nothing merged or pushed.
+
+## R1 (2026-09-04) — what changed from the draft, and the consumer input
+
+Revision by the lem-lean worker [AGENT] after the consumer requirements
+arrived (refined-cerberus, `refined-cerberus/docs/2026-09-03_request-lem-lean-pmap-laws-and-fuel-scheme.md`,
+relayed by the orchestrator) and three further rulings. The record of
+what was built is `2026-09-04_fuel-parameter-record.md`; this section
+only states the deltas against §3–§5 above.
+
+1. **Mechanism (§4.1 settled): the ambient fuel is a LemLib CLASS, not a
+   reader-style explicit binder.** `class LemFuel where fuel : Nat`;
+   every fuel'd function and every definition that (transitively)
+   reaches one takes an instance-implicit `[LemFuel]` binder (the
+   reader-lifting fixpoint decides WHICH definitions — that part of §3
+   stands); call sites are textually unchanged (instance resolution
+   passes the binder), bare/HOF references need no repair; the wrapper is
+   `def f [LemFuel] : T := f_lemFuel LemFuel.fuel`; the entry point is
+   `@f ⟨n⟩ …` or `letI : LemFuel := ⟨n⟩`; theorems quantify `∀ [LemFuel]`
+   or over `n` via `⟨n⟩` (`@f ⟨n⟩ = f_lemFuel n` by rfl). This is the
+   consumer's first requirement ("a single parameter — module-level or a
+   typeclass-style instance argument — not per-signature threading");
+   the draft's explicit `(fuel : Nat)` binder threaded at every call site
+   was built first and rejected (reasons in the record §2). OCaml output
+   is byte-identical either way (measured).
+2. **A worker takes `[LemFuel]` only if it passes the ambient on** (a
+   fuel'd callee, a fuel_consumer, a fuel-lifted def outside its own
+   `let rec` block — all-or-none per block, like the counter); a leaf
+   worker's only fuel is its counter, so leaf theorems carry no instance.
+   Every fuel'd callee starts from the FULL ambient, never from the
+   caller's remaining counter (§3's "each call of f starts its structural
+   recursion from the full ambient fuel" — kept, and pinned:
+   `TestFuelParamCheck` (5)).
+3. **New declare `declare {lean} fuel_consumer val f`** for a hand-written
+   Lean rep that reads `LemFuel.fuel`: its callers are fuel-lifted; call
+   sites unchanged. This is §4.2's answer for the cerberus seams
+   (`CerbMem` consumers declare it beside `reader_consumer`; the
+   implementation adds `[LemFuel]` and replaces `lemDefaultFuel` by
+   `LemFuel.fuel` — mechanical). The draft's alternative ("the memory
+   model's ambient record carries it") was rejected: it makes two fuels.
+4. **Exhaustion lemmas are generated** (consumer requirement 2):
+   `theorem f_lemFuel_zero … : f_lemFuel 0 … = <sentinel> := rfl` for
+   every fuel'd function whose parameters are variables/wildcards (lem's
+   pattern compiler makes them so; the "not generated" comment path is a
+   backstop). Fuel MONOTONICITY is NOT generated: it is not a property of
+   the scheme but of how each body consumes exhaustion (a body may absorb
+   a sub-call's sentinel and change value at a larger fuel), and with the
+   panic payload `fuelExhausted x` — opaque — "≠ payload" is not even
+   statable. What it requires is stated in the record §5.
+5. **LemLib (§4.5) under the third-form ruling** ([USER 2026-09-03] "my aim
+   here is to forbid values that limit the semantics or limit the ways the
+   customer can reason about the semantics"): structural recursion on a
+   DATA MEASURE (the AVL height stored in a node, an element count, the
+   finite square of a relation's endpoints) is admissible — nothing is
+   chosen, nothing bounds the semantics, a proof unfolds it. So the
+   height-fuelled `unionGo/interGo/diffGo/subsetGo/mergeGo` and the
+   count-fuelled `compareAux/equalAux` STAY in that form (documented as
+   such), `Pset.join`/`Pmap.join` MOVE from well-founded recursion to it
+   (kernel computability for the consumer's closed-term `rfl`s, request
+   §2; `join_eq` against the old definition), `Pset.tc`'s
+   `(2|r|)^2 + 1` is classified a data measure (the closure lives in the
+   finite square of r's endpoints — flagged for the operator: the
+   alternative, a caller-fuelled `tc`, was built and withdrawn), and
+   `lfpGo` is the caller-fuelled primitive. `lemDefaultFuel` is deleted.
+   `lemLeastFixedPoint`'s silent `| 0 => x` is lem's own
+   `Set.leastFixedPoint` (set.lem:709) — kept, flagged for the operator.
+6. **Deleted forms**: the numeric budget `declare {lean} fuel val f = N`
+   (refused with its reason), `lemDefaultFuel`, the `lemDefaultFuel`
+   reserved-name guard (the name is ordinary again; `LemFuel` joins
+   `lean_constants`).
+7. **Fail-closed scope**: a fuel-lifted definition referenced with no
+   `[LemFuel]` in scope (lem `assert`, indreln rule, instance method) is a
+   generation-time error naming the site; a LIBRARY assert renders as a
+   removed-comment (the library's auxiliary files are never built).
+8. **Gate** (§3's last bullet): `tests/comprehensive/check_no_fuel_numerals.sh`
+   (suite phase `lean-no-fuel-numerals`; comments stripped; four shapes;
+   plant-tested). The CLI default named in §3 is the cerberus half's.
+
+### Consumer assessment (relayed by the operator; verbatim)
+
+> Refinement 1: it is broader than the driver. I measured the pinned
+> port. The generated tree seals at least six fuelled recursions behind
+> fixed wrappers: the scheduler loop, the single-thread loop, the exit
+> routine, a printing helper, and the nondeterminism monad's own bind.
+> And there are two constants, not one. The driver family uses 10^8,
+> while LemLib's default of 10^6 sits behind the expression-step
+> recursions. Our own adequacy exports already carry hypotheses bounding
+> an expression's potential by that second constant, so we have baked
+> the same defect into 60 sites of our statements. The request should be
+> about the port's fuel discipline as a whole, not about drive.
+>
+> Refinement 2: classify it as an interface defect, not a mirror
+> discrepancy. The cerberus-lean team's standing rule is zero execution
+> discrepancies against the OCaml oracle. On that axis, fuel is
+> invisible: OCaml diverges where Lean exhausts, and nothing observable
+> differs below the bound. The defect is in the port's interface for
+> reasoning, which is a different category under their rules. Framing it
+> that way avoids a pointless argument about whether Lean "computes what
+> OCaml computes", and puts it where it belongs, in the lem-lean
+> backend's fuel scheme.
+
+Both are how the arc is scoped (the orchestrator's response is in
+cerberus-lean `lean_frontend/docs/2026-09-03_fuel-parameter-consumer-assessment.md`);
+the six sealed recursions are named, with their new shape, in the
+record's cerberus dry-run section, and the restatement of a
+`potential e ≤ lemDefaultFuel` hypothesis is given there for the
+cerberus change manifest.

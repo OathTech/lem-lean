@@ -172,7 +172,7 @@ let mk_pre_x_l sk1 (sk2,id) sk3 l =
 %token <Ast.terminal * Ulib.Text.t> IN MEM MinusMinusGt
 %token <Ast.terminal> Class_ Do LeftArrow
 %token <Ast.terminal> Inst Inst_default
-%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep ReaderSeed Supply ReaderConsumer
+%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep ReaderSeed Supply ReaderConsumer FuelConsumer
 %token <Ast.terminal> RightAssoc LeftAssoc NonAssoc Infix Special TargetRep TargetSorts
 
 %start file
@@ -213,6 +213,8 @@ x:
     { X_l(($1, r"supply"), loc ()) }
   | ReaderConsumer
     { X_l(($1, r"reader_consumer"), loc ()) }
+  | FuelConsumer
+    { X_l(($1, r"fuel_consumer"), loc ()) }
   | Lparen Eq Rparen
     { mk_pre_x_l $1 $2 $3 (loc ()) }
   | Lparen IN Rparen
@@ -1053,7 +1055,11 @@ declaration :
   | Declare targets_opt Fuel Val id Eq BacktickString
     { Decl_fuel_decl($1, $2, $3, $4, $5, fst $6, $7) }
   | Declare targets_opt Fuel Val id Eq Num
-    { Decl_fuel_budget_decl($1, $2, $3, $4, $5, fst $6, snd $7) }
+    { (* The numeric per-declaration fuel-BUDGET form was DELETED by the
+         fuel-parameter arc (2026-09-04): a fuel literal minted per
+         declaration is a magic value. The production is kept only so the
+         form is refused with its reason instead of a bare syntax error. *)
+      raise (Parse_error_locn(loc (), "the numeric fuel-budget form 'declare {lean} fuel val f = N' was removed (fuel-parameter arc, 2026-09-04): a per-declaration fuel literal is a magic value -- [USER 2026-09-03] \"any and all magic values that are hardcoded and can't be quantified over are definitionally bugs\"; fuel is a parameter of the generated code (the [LemFuel] instance), chosen by the caller at the entry point. Keep only the sentinel form: declare {lean} fuel val f = `sentinel`")) }
   | Declare targets_opt GroundRep Val id Eq BacktickString
     { Decl_ground_rep_decl($1, $2, $3, $4, $5, fst $6, $7) }
   | Declare targets_opt ReaderSeed Val id
@@ -1062,6 +1068,8 @@ declaration :
     { Decl_supply_decl($1, $2, $3, $4, $5) }
   | Declare targets_opt ReaderConsumer Val id
     { Decl_reader_consumer_decl($1, $2, $3, $4, $5) }
+  | Declare targets_opt FuelConsumer Val id
+    { Decl_fuel_consumer_decl($1, $2, $3, $4, $5) }
 
 lemma_typ:
   | Lemma

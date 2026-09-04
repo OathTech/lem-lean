@@ -36,42 +36,64 @@ def double (x : Nat) : Nat := x * 2
 Recursive functions default to `partial def`. With a fuel declare
 (``declare {lean} fuel val fuel_countdown = `fuelExhausted n` `` —
 the backtick payload is the expression returned at fuel exhaustion)
-the emission is a total, kernel-transparent pair:
+the emission is a total, kernel-transparent triple:
 
 ```lean
 def fuel_countdown_lemFuel (lemFuel : Nat) (n : Nat) : Nat :=
-  match lemFuel with ...     -- structural recursion on the fuel
-def fuel_countdown : Nat → Nat := fuel_countdown_lemFuel lemDefaultFuel
--- with 'declare {lean} fuel val fuel_countdown = 500' (numeric form):
--- def fuel_countdown : Nat → Nat := fuel_countdown_lemFuel 500
+  match lemFuel with ...     -- structural recursion on the fuel COUNTER
+def fuel_countdown [LemFuel] : Nat → Nat := fuel_countdown_lemFuel LemFuel.fuel
+theorem fuel_countdown_lemFuel_zero (n : Nat) :
+    fuel_countdown_lemFuel 0 n = (fuelExhausted n) := rfl
+-- a caller: def uses_countdown [LemFuel] (k : Nat) : Nat := fuel_countdown k + 1
 ```
 
 ## Load-bearing design choices
 
-**Totality is opt-in, and structural when opted.** Lean's `partial
-def` is executable but invisible to the kernel — any proof about a
-`partial` function's cone is blocked. Rather than attempt general
-termination proofs (fragile at generated-code scale), the backend
-lets the model author mark functions with a fuel declare: the worker
-recurses structurally on an explicit fuel argument, so the kernel
-sees a total function, and the wrapper applies the library default
-fuel (`lemDefaultFuel = 10^6` — a bound on recursion *depth* at the
-declared points, never on value size). At zero fuel the worker
-returns the declared sentinel expression; the convention is
-`fuelExhausted <witness>`, a loud panic, so an inadequate budget is
-a visible failure rather than a silent wrong answer. A
-PER-DECLARATION BUDGET (the numeric declare form,
-`declare {lean} fuel val f = N`, alongside the sentinel form)
-replaces `lemDefaultFuel` in `f`'s wrapper with the literal `N` —
-strictly OPT-IN: declarations without a budget keep `lemDefaultFuel`
-semantics byte-for-byte (the effect-retirement charter's
-consumer-ratified constraint, §8.3), and the compiled suite pins both
-the budgeted cut and the exact 10^6 default boundary of an
-unannotated sibling (`tests/comprehensive/test_fuel_budget.lem`,
-phase `lean-fuel-budget`). A budget without a sentinel, and a
-non-positive budget, are fail-closed generation-time errors. Cerberus
-applies fuel declares across its entire execution path and checks
-that slice's totality in its own build.
+**Totality is opt-in, and structural when opted; the fuel is the
+caller's.** Lean's `partial def` is executable but invisible to the
+kernel — any proof about a `partial` function's cone is blocked. Rather
+than attempt general termination proofs (fragile at generated-code
+scale), the backend lets the model author mark functions with a fuel
+declare: the worker recurses structurally on an explicit fuel COUNTER,
+so the kernel sees a total function, and the wrapper starts the counter
+from the AMBIENT fuel — `LemFuel.fuel`, the one field of the LemLib class
+`LemFuel`, which every fuel'd function and every definition that
+(transitively) reaches one takes as an instance-implicit `[LemFuel]`
+binder (the FUEL LIFTING: the reader-lifting fixpoint with an
+instance-implicit binder, so call sites are textually unchanged and
+bare/higher-order references need no repair). A worker takes `[LemFuel]`
+only when it passes the ambient on (every fuel'd callee starts its own
+counter from the FULL ambient, never from the caller's remaining
+counter); a leaf worker's only fuel is its counter. No instance exists
+in the library or in generated code, by design: the entry point supplies
+it once (`@f ⟨n⟩ …`, `letI : LemFuel := ⟨n⟩` at a CLI parse) and a
+theorem quantifies over it — `@f ⟨n⟩ = f_lemFuel n` by rfl, and above
+the depth a program needs its value does not depend on the fuel
+(`tests/comprehensive/lean-test/TestFuelParamCheck.lean`
+`spin_fuel_irrelevant`). The fuel bounds recursion *depth* at the
+declared points, never value size. At counter zero the worker returns
+the declared sentinel expression; the convention is `fuelExhausted
+<witness>`, a loud panic, so an inadequate fuel is a visible failure
+rather than a silent wrong answer; the backend also emits the
+kernel-transparent exhaustion lemma `f_lemFuel_zero` (`f_lemFuel 0 … =
+sentinel := rfl`) per fuel'd function. A hand-written Lean rep that
+reads the ambient declares `{lean} fuel_consumer` so its callers are
+lifted (the library's `Relation.transitiveClosureByCmp` is the one
+library case: `Pset.tc` runs pset.ml's unbounded `lfp` on the caller's
+fuel). Fail-closed: a fuel'd/fuel-lifted definition referenced where no
+instance is in scope (a lem `assert`, an indreln rule, an instance
+method) is a generation-time error — there is no default to inject. The
+former per-declaration numeric budget (`declare {lean} fuel val f = N`)
+and the library default `lemDefaultFuel = 10^6` were DELETED by the
+fuel-parameter arc as magic values (below); the numeric form is refused
+with its reason. Tests: `tests/comprehensive/test_fuel_param.lem`, the
+kernel pins `lean-test/TestFuelParamCheck.lean`, the compiled phase
+`lean-fuel-param` (two sufficient fuels agree; loud exhaustion
+fail-stops), the two-target probe `parity/probes/p_fuel.lem` (Lean at two
+fuels vs the fuel-free OCaml reference), the gate
+`check_no_fuel_numerals.sh`, and the `neg_fuel_*` probes. Cerberus
+applies fuel declares across its entire execution path and checks that
+slice's totality in its own build.
 
 **The effect boundary is RETIRED: zero axioms, effects as explicit
 state.** Lem's model allows target-representation functions with pure
@@ -333,7 +355,16 @@ design choices)". A recursion bound COMPUTED inside a definition (even
 from the data, e.g. a tree height) is hardcoded in that sense, unless it
 is passed in by the calling context or eliminated by a termination proof. Any
 mechanism that mints such numerals per declaration is itself the
-defect. Record: `2026-09-03_fuel-parameter-design.md`.
+defect. The operator's test for a candidate value [USER 2026-09-03],
+verbatim: "my aim here is to forbid values that limit the semantics or
+limit the ways the customer can reason about the semantics" — so a
+recursion index that is structurally recursive on a DATA measure (the
+AVL height stored in a `Pset`/`Pmap` node) is admissible: nothing is
+chosen, nothing bounds the semantics, a proof can unfold it; the three
+admissible forms are a caller parameter, a termination proof, and
+data-measure structural recursion. Record:
+`2026-09-03_fuel-parameter-design.md` (+ R1) and
+`2026-09-04_fuel-parameter-record.md`.
 
 ## The declare vocabulary
 
@@ -346,8 +377,8 @@ unaffected:
 | ``declare lean target_rep type t = `Lean.Type` `` | map a Lem type to a hand-written Lean type |
 | `declare {lean} skip_instances type t` | suppress all instance generation for `t` (pair with hand-written instances) |
 | `declare {lean} rename module = Name` | rename the generated module |
-| ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total fuel-indexed worker (returning `sentinel` at zero fuel) + a wrapper at the library default fuel |
-| `declare {lean} fuel val f = N` | per-declaration fuel BUDGET: `f`'s wrapper uses the literal `N` instead of `lemDefaultFuel` (opt-in; requires the sentinel declare on the same val) |
+| ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total worker recursing on a fuel counter (returning `sentinel` at zero) + a wrapper `f [LemFuel] := f_lemFuel LemFuel.fuel` starting the counter from the ambient fuel + the exhaustion lemma `f_lemFuel_zero`; `f` and everything reaching it take `[LemFuel]` (the fuel lifting). The numeric form `= N` is refused (a magic value) |
+| `declare {lean} fuel_consumer val f` | `f`'s hand-written Lean implementation reads the ambient fuel (`LemFuel.fuel`): its callers are fuel-lifted; call sites unchanged (requires a Lean target_rep) |
 | `declare {lean} effectful val f` | RETIRED (effect-retirement arc): refused fail-closed with an error naming supply lifting as the migration path; the annotation is retained in the grammar for other targets' potential use |
 | `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
 | `declare {lean} reader_seed val f` | do not lift `f`; its first argument supplies the reader value to lifted callees in its body |

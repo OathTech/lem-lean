@@ -45,9 +45,6 @@ let mk_just (u : unit) : maybe (nat * nat) = Just (tick (), tick ())
 let rec fuel_draws (n : nat) : list nat = if n = 0 then [] else tick () :: fuel_draws (n - 1)
 declare {lean} fuel val fuel_draws = `[]`
 let uses_fuel_draws (k : nat) : list nat = fuel_draws (k + 1)
-let rec fuel_draws_b (n : nat) : list nat = if n = 0 then [] else tick () :: fuel_draws_b (n - 1)
-declare {lean} fuel val fuel_draws_b = `[]`
-declare {lean} fuel val fuel_draws_b = 3
 let wrap_s (w : wrapped) : string = match w with Wrap a b -> "Wrap " ^ show a ^ " " ^ show b end
 
 (* one string per shape: value rendered by lem `show` on both targets *)
@@ -79,4 +76,3 @@ let s_destructure_once (u : unit) : string = let (a, b, c) = destructure_once ()
 let s_mk_just (u : unit) : string = show (mk_just ())
 let s_fuel_draws (u : unit) : string = show (fuel_draws 2)
 let s_uses_fuel_draws (u : unit) : string = show (uses_fuel_draws 2)
-let s_fuel_draws_b2 (u : unit) : string = show (fuel_draws_b 2)

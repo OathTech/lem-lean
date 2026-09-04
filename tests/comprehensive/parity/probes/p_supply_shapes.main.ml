@@ -40,4 +40,3 @@ let () =
   shape "mk_just" 40 s_mk_just;
   shape "fuel_draws" 60 s_fuel_draws;
   shape "uses_fuel_draws" 60 s_uses_fuel_draws;
-  shape "fuel_draws_b2" 60 s_fuel_draws_b2;

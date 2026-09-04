@@ -10,7 +10,7 @@ LAKE = $(CAPPED) lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity check-capped clean
+.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-no-fuel-numerals check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -19,7 +19,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-fuel-budget lean-negative lean-invariance lean-parity
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-fuel-param lean-no-fuel-numerals lean-negative lean-invariance lean-parity
 
 # Two-target parity (parity-fix slice 2026-09-03; [USER] ruling: the OCaml
 # target is the reference semantics of a lem program, the Lean target
@@ -34,22 +34,49 @@ lean-parity:
 	@echo "=== Two-target parity (OCaml reference vs Lean, compiled) ==="
 	@./parity/run.sh
 
-# Per-declaration fuel-budget compiled behavioral test
-# (effect-retirement L1, charter §8.3): the budgeted declaration cuts
-# at exactly its budget while the UNANNOTATED sibling runs to the
-# exact lemDefaultFuel (10^6) boundary — the opt-in constraint
-# witnessed in a real binary.
-lean-fuel-budget:
-	@echo "=== Per-declaration fuel budget pin (compiled) ==="
-	@cd lean-test && $(LAKE) build test-fuel-budget > /dev/null
-	@out=$$(cd lean-test && ./.lake/build/bin/test-fuel-budget 2>&1); st=$$?; \
+# Fuel as a quantified parameter (fuel-parameter arc, 2026-09-04;
+# [USER 2026-09-03] "fuel is an execution parameter that 'doesn't
+# matter'"): compiled witnesses that two different sufficient fuels give
+# identical results, that an insufficient fuel gives exactly the declared
+# sentinel, that a fuel'd callee starts from the FULL ambient, that a
+# fuel_consumer reads the same ambient, and (leg 2, under
+# LEAN_ABORT_ON_PANIC=1) that a loud sentinel at an insufficient RUNTIME
+# fuel fail-stops the process at the program point.
+lean-fuel-param:
+	@echo "=== Fuel as a quantified parameter (compiled): sufficient fuels agree; exhaustion is loud ==="
+	@cd lean-test && $(LAKE) build test-fuel-param > /dev/null
+	@out=$$(cd lean-test && ./.lake/build/bin/test-fuel-param 2>&1); st=$$?; \
 	if [ $$st -ne 0 ]; then \
-		echo "  FAIL (exit $$st):"; echo "$$out"; exit 1; \
-	elif ! echo "$$out" | grep -q "fuel budget: OK"; then \
-		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
+		echo "  FAIL (leg 1, exit $$st):"; echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "fuel param: OK"; then \
+		echo "  FAIL (leg 1): no OK line"; echo "$$out"; exit 1; \
 	else \
-		echo "  OK: budgeted cut at 5; unannotated at the exact lemDefaultFuel boundary"; \
+		echo "  OK (leg 1): two sufficient fuels agree; insufficient gives the declared sentinel; callee starts from the full ambient"; \
 	fi
+	@out=$$(cd lean-test && LEAN_ABORT_ON_PANIC=1 ./.lake/build/bin/test-fuel-param --exhaust 2>&1); st=$$?; \
+	if [ $$st -eq 0 ]; then \
+		echo "  FAIL (leg 2): exited 0 under LEAN_ABORT_ON_PANIC=1 (exhaustion did not fail-stop)"; \
+		echo "$$out"; exit 1; \
+	elif echo "$$out" | grep -q "survived:"; then \
+		echo "  FAIL (leg 2): execution continued past the exhaustion under LEAN_ABORT_ON_PANIC=1"; \
+		echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "fuel exhausted"; then \
+		echo "  FAIL (leg 2): fail-stopped without the fuel-exhausted message"; \
+		echo "$$out"; exit 1; \
+	else \
+		echo "  OK (leg 2): loud exhaustion at an insufficient runtime fuel fail-stops (exit $$st)"; \
+	fi
+
+# No fuel numeral anywhere it could be magic (fuel-parameter arc gate;
+# plant-tested, see check_no_fuel_numerals.sh): LemLib, the generated
+# library, every generated test module — no `lemDefaultFuel`, no
+# `instance … : LemFuel`, no worker applied to a positive numeral, no
+# `LemFuel := ⟨N⟩`. The only permitted shape of a fuel is a caller's
+# parameter; test harnesses (hand-written *Exec/*Check/Run_* drivers)
+# choose theirs and are outside the scan by design.
+lean-no-fuel-numerals:
+	@echo "=== No fuel numerals in LemLib or generated code (gate) ==="
+	@./check_no_fuel_numerals.sh
 
 # reader_consumer compiled behavioral test (effect-retirement L1,
 # charter §4.2): consumer call sites must receive the reader value in

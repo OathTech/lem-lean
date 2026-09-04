@@ -287,13 +287,25 @@ module St = struct
   let inhabited_binder : string list ref = ref []
   (* [render] Fuel emission (declare {lean} fuel val f = `sentinel`):
      the sentinel text while rendering a fuel'd def's clause (consumed
-     by funcl_aux: rename to worker, add the Nat binder, wrap the body). *)
+     by funcl_aux: rename to worker, add the Nat counter binder, wrap the
+     body). *)
   let fuel_emit : string option ref = ref None
   (* [render] All fuel'd defs of the block being rendered (one entry for
      a plain fuel'd def; every member for a fuel'd mutual block —
      all-or-none, arc 3 B2). Self- and cross-member calls rewrite to
      '(worker lemFuel)'. *)
   let fuel_workers : (Types.const_descr_ref * string) list ref = ref []
+  (* [invocation] Fuel lifting (fuel-parameter arc, 2026-09-04): the set of
+     defs that (transitively) reach a fuel'd constant or a
+     `declare {lean} fuel_consumer val` — every one takes the ambient fuel
+     as an instance-implicit `[LemFuel]` binder. Grown to a fixpoint by
+     lean_fuel_prepass; persists across modules (the reader_lifted
+     precedent). *)
+  let fuel_lifted : Types.Cdset.t ref = ref Types.Cdset.empty
+  (* [render] Set while rendering a fuel-lifted def (incl. every fuel'd
+     worker/wrapper), so the def-assembly sites emit `[LemFuel]` and
+     references to fuel-lifted constants are in scope (fuel_scope_check). *)
+  let fuel_binder : bool ref = ref false
   (* [render] reader_seed (declare {lean} reader_seed val f): while
      rendering a seed-marked def's body, the name of its first argument,
      which OVERRIDES the injected reader parameter name at every
@@ -377,6 +389,8 @@ module St = struct
     inhabited_binder := [];
     fuel_emit := None;
     fuel_workers := [];
+    fuel_lifted := Types.Cdset.empty;
+    fuel_binder := false;
     reader_seed_param := None;
     reader_params_cache := None;
     supply_lifted := Types.Cdset.empty;
@@ -559,63 +573,108 @@ let lean_reader_get_params env =
    emission. Nested modules collect at Val_def granularity (the arc-2
    audit fix; this comment previously still claimed the pre-fix coarse
    all-defs-together lifting — corrected arc-14 S2 B6, be:N3). *)
-(* Per-declaration fuel-budget guards (effect-retirement L1, charter
-   §8.3): a numeric 'declare {lean} fuel val f = N' replaces
-   lemDefaultFuel in f's WRAPPER only — strictly opt-in (unannotated
-   declarations keep lemDefaultFuel byte-for-byte). Fail-closed sweep,
-   run at every pre-pass entry for every budget-marked constant even if
-   unused: a budget requires the fuel SENTINEL declare (without it the
-   budget would silently do nothing), and must be a positive literal
-   (a zero budget makes the wrapper the constant sentinel). *)
-let lean_fuel_budget_check env =
-  let target = Target.Target_no_ident Target.Target_lean in
-  List.iter (fun cref ->
-      let cd = c_env_lookup Ast.Unknown env.c_env cref in
-      match Target.Targetmap.apply_target cd.fuel_budget target with
-      | None -> ()
-      | Some budget ->
-        let cname = Name.to_string (Path.get_name cd.const_binding) in
-        if Target.Targetmap.apply_target cd.fuel_sentinel target = None then
-          raise (Reporting_basic.err_general true cd.spec_l
-            (Printf.sprintf
-              "Lean backend: fuel budget on val %s without a fuel sentinel (a numeric 'declare {lean} fuel val %s = N' sets the wrapper's budget and requires the backtick sentinel declare on the same val — the sentinel defines the exhaustion value)"
-              cname cname));
-        if (try int_of_string budget <= 0 with _ -> true) then
-          raise (Reporting_basic.err_general true cd.spec_l
-            (Printf.sprintf
-              "Lean backend: fuel budget on val %s must be a positive integer literal (got '%s'; a zero budget would make the wrapper return the sentinel unconditionally)"
-              cname budget));
-        (* audit minor-3 (rep leg): a target_rep'd val (incl.
-           reader_consumer implementations) renders its lem definition
-           as a block comment — no fuel wrapper is ever emitted, so
-           the budget would be silently inert. *)
-        if Target.Targetmap.apply_target cd.target_rep target <> None then
-          raise (Reporting_basic.err_general true cd.spec_l
-            (Printf.sprintf
-              "Lean backend: fuel budget on val %s, which carries a Lean target_rep (its lem definition renders as a comment and no fuel wrapper is emitted — the budget would be silently inert; budget the hand-written implementation instead)"
-              cname)))
-    (c_env_all_consts env.c_env)
+(* ===== Fuel lifting (fuel-parameter arc, 2026-09-04) =====
 
-(* audit minor-3 (spec-only leg), run ONCE over the whole invocation
-   (lean_analysis_prepass_all sees every module before any emission):
-   a budget-marked constant that no Fun_def defines anywhere never
-   gets a fuel wrapper — the budget would be silently inert. *)
-let lean_fuel_budget_completeness_check env (fun_defined : Types.Cdset.t) =
-  let target = Target.Target_no_ident Target.Target_lean in
+   Classic mechanism name: an instance-implicit READER of the ambient
+   fuel. `declare {lean} fuel val f = `sentinel`` makes `f` a total
+   worker recursing structurally on its own fuel counter (`lemFuel`);
+   the counter STARTS at the ambient fuel, which is a parameter of the
+   generated code — never a numeral ([USER 2026-09-03], "No magic
+   values", doc/lean-backend/DESIGN.md). The ambient is the LemLib class
+   `LemFuel` (one field, `fuel : Nat`): every def that (transitively)
+   reaches a fuel'd constant, a fuel-lifted def, or a
+   `declare {lean} fuel_consumer val` (a hand-written Lean implementation
+   that reads `LemFuel.fuel`) takes an instance-implicit `[LemFuel]`
+   binder; call sites are textually unchanged (Lean's instance
+   resolution passes the binder along); the entry point instantiates it
+   (`@f ⟨n⟩ …` / `letI : LemFuel := ⟨n⟩`), and a theorem quantifies over
+   it. Fail-closed: a reference to a fuel-lifted constant where no
+   `[LemFuel]` is in scope (instance method, indreln rule, lemma/assert)
+   is a generation-time error (fuel_scope_check) — there is no default
+   to fall back on, by design. *)
+
+let lean_fuel_is_fuelled env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  Target.Targetmap.apply_target cd.fuel_sentinel (Target.Target_no_ident Target.Target_lean) <> None
+
+let lean_fuel_is_consumer env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  Targetset.mem Target_lean cd.fuel_consumer
+
+let lean_has_lean_rep env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  Target.Targetmap.apply_target cd.target_rep (Target.Target_no_ident Target.Target_lean) <> None
+
+(* Guards FC-rep / FC-inert, fail-closed for every marked constant even if
+   unused; idempotent; run at every pre-pass entry.
+   - FC-rep: a fuel_consumer IS a hand-written extern boundary, so it
+     must carry a Lean target_rep (a generated definition's fuel needs
+     are computed by the lifting itself; the declare would be
+     meaningless on it).
+   - FC-inert: a fuel SENTINEL on a target_rep'd val is silently inert
+     (its lem definition renders as a comment, no worker/wrapper is ever
+     emitted) — if the hand-written implementation takes the fuel,
+     declare it a fuel_consumer instead. *)
+let lean_fuel_consumer_check env =
   List.iter (fun cref ->
       let cd = c_env_lookup Ast.Unknown env.c_env cref in
-      if Target.Targetmap.apply_target cd.fuel_budget target <> None
-         && not (Types.Cdset.mem cref fun_defined) then
+      let cname = Name.to_string (Path.get_name cd.const_binding) in
+      if lean_fuel_is_consumer env cref && not (lean_has_lean_rep env cref) then
         raise (Reporting_basic.err_general true cd.spec_l
           (Printf.sprintf
-            "Lean backend: fuel budget on val %s, which no let/let rec function definition defines in this invocation (no fuel wrapper is emitted for a spec-only or non-function constant — the budget would be silently inert)"
-            (Name.to_string (Path.get_name cd.const_binding)))))
+            "Lean backend: val %s is declared {lean} fuel_consumer but has no Lean target_rep (FC-rep: the declare marks a hand-written implementation that reads LemFuel.fuel; a generated definition's fuel needs are computed by the fuel lifting — drop the declare)"
+            cname));
+      if lean_fuel_is_fuelled env cref && lean_has_lean_rep env cref then
+        raise (Reporting_basic.err_general true cd.spec_l
+          (Printf.sprintf
+            "Lean backend: 'declare {lean} fuel val %s' on a val that carries a Lean target_rep (FC-inert: its lem definition renders as a comment and no fuel worker is emitted, so the declare is silently inert; if the hand-written implementation reads the ambient fuel, declare it '{lean} fuel_consumer' instead)"
+            cname)))
     (c_env_all_consts env.c_env)
+
+(* Pre-pass over one module's defs: grow St.fuel_lifted to a fixpoint — a
+   def is fuel-lifted if it defines a fuel'd constant, or (transitively)
+   uses a fuel'd constant, a fuel_consumer, or a fuel-lifted def. Val_def
+   granularity, nested modules recursed, instances skipped (fail-closed
+   at emission), the reader_prepass shape. Unlike the reader pre-pass,
+   reader_seed defs ARE liftable (the fuel binder is orthogonal to the
+   seed), and target_rep'd defs are NOT (their bodies are dead text; a
+   hand-written rep that needs the fuel says so with fuel_consumer). *)
+let lean_fuel_prepass env (ds : def list) =
+  lean_fuel_consumer_check env;
+  let target = Target.Target_no_ident Target.Target_lean in
+  let rec def_infos acc (((d_aux, _), _, _) as d : def) =
+    match d_aux with
+    | Instance _ -> acc
+    | Module (_, _, _, _, _, inner_ds, _) -> List.fold_left def_infos acc inner_ds
+    | Val_def _ ->
+      let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
+      if Types.Cdset.exists (lean_has_lean_rep env) defined then acc
+      else
+        let used = (add_def_entities target false empty_used_entities d).used_consts_set in
+        (defined, used) :: acc
+    | _ -> acc in
+  let infos = List.rev (List.fold_left def_infos [] ds) in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    List.iter (fun (defined, used) ->
+        if not (Types.Cdset.subset defined !St.fuel_lifted) then begin
+          let needs =
+            Types.Cdset.exists (lean_fuel_is_fuelled env) defined
+            || Types.Cdset.exists (fun c ->
+                   lean_fuel_is_fuelled env c || lean_fuel_is_consumer env c
+                   || Types.Cdset.mem c !St.fuel_lifted)
+                 used in
+          if needs then begin
+            St.fuel_lifted := Types.Cdset.union defined !St.fuel_lifted;
+            changed := true
+          end
+        end) infos
+  done
 
 let lean_reader_prepass env (ds : def list) =
   lean_effectful_retired_check env;
   lean_reader_consumer_check env;
-  lean_fuel_budget_check env;
   if lean_reader_get_params env <> [] then begin
     let target = Target.Target_no_ident Target.Target_lean in
     (* Collect (defined, used) pairs at Val_def granularity, recursing into
@@ -1487,17 +1546,16 @@ let lean_group_funcls (funcls : funcl_aux list)
 
 (* Reserved GENERATED-NAME contract (top-level definition names; the
    companion of the reserved-BINDER contract at the fuel/reader
-   emission path): 'lemDefaultFuel' is the fuel wrappers' budget
-   reference — a user definition of that name would silently rebind
-   every fuel wrapper's budget in its module (2026-08-31 backend
-   quality review, notes); the 'lemLetRhs_' prefix is the synthesized
+   emission path): the 'lemLetRhs_' prefix is the synthesized
    multi-name destructuring-let RHS family (m7) — a user def there
    would collide with a synthesized definition. Fail closed at
-   generation time, naming the definition. *)
+   generation time, naming the definition. (History: 'lemDefaultFuel'
+   was reserved here while it was the fuel wrappers' budget reference;
+   the fuel-parameter arc deleted that constant — generated code no
+   longer references any fuel numeral — so the name is ordinary again.
+   The class name `LemFuel` is avoided through library/lean_constants
+   like every other root Lean name.) *)
 let lean_check_reserved_def_name l n =
-  if n = "lemDefaultFuel" then
-    raise (Reporting_basic.err_general true l
-      "Lean backend: definition name 'lemDefaultFuel' collides with the reserved fuel-budget reference (a definition of this name silently rebinds every fuel wrapper's budget in the module; the reserved-name contract) — rename it");
   if String.length n >= 10 && String.sub n 0 10 = "lemLetRhs_" then
     raise (Reporting_basic.err_general true l
       (Printf.sprintf "Lean backend: definition name '%s' uses the reserved 'lemLetRhs_' prefix (synthesized destructuring-let RHS definitions; the reserved-name contract) — rename it" n))
@@ -1716,26 +1774,11 @@ let lean_analysis_prepass_all env (mods : checked_module list) =
       St.current_module_name := module_name;
       let (ds, _) = m.typed_ast in
       lean_reader_prepass env ds;
+      lean_fuel_prepass env ds;
       lean_supply_prepass env ds;
       lean_inhabited_prepass env ds;
       lean_failwith_thread_prepass env ds)
     mods;
-  (* audit minor-3 (spec-only leg): collect every Fun_def-defined cref
-     of the whole invocation, then require each fuel-budgeted constant
-     to be among them (see lean_fuel_budget_completeness_check). *)
-  let target = Target.Target_no_ident Target.Target_lean in
-  let rec fun_defined_of acc (((d_aux, _), _, _) as d : def) =
-    match d_aux with
-    | Module (_, _, _, _, _, inner_ds, _) -> List.fold_left fun_defined_of acc inner_ds
-    | Val_def (Fun_def _) ->
-      Types.Cdset.union acc (add_def_entities target true empty_used_entities d).used_consts_set
-    | _ -> acc in
-  let fun_defined =
-    List.fold_left (fun acc m ->
-        let (ds, _) = m.typed_ast in
-        List.fold_left fun_defined_of acc ds)
-      Types.Cdset.empty mods in
-  lean_fuel_budget_completeness_check env fun_defined;
   St.current_module_name := saved
 
 let wrap_lean_comment x = Ulib.Text.(^^^) (Ulib.Text.(^^^) (r"/- ") x) (r" -/")
@@ -2088,6 +2131,38 @@ type pat_style = FunParam | MatchArm
           Output.flat [from_string " "; from_string (reader_inject_name pname)])
         (get_reader_params ()))
 
+    (* --- Fuel lifting helpers (declare {lean} fuel val / fuel_consumer
+       val; the mechanism comment is at lean_fuel_is_fuelled). --- *)
+    let is_fuelled_cref = lean_fuel_is_fuelled A.env
+    let is_fuel_consumer_cref = lean_fuel_is_consumer A.env
+    (* Does this expression force fuel lifting of its enclosing def. *)
+    let exp_needs_fuel (e : exp) : bool =
+      let ue = add_exp_entities empty_used_entities e in
+      List.exists (fun cref ->
+          is_fuelled_cref cref || is_fuel_consumer_cref cref
+          || Types.Cdset.mem cref !St.fuel_lifted)
+        ue.used_consts
+    (* The ambient-fuel binder: instance-implicit, so no call site
+       changes — the ONE place the class name is spelled in a signature. *)
+    let fuel_binder_output () =
+      if !St.fuel_binder then from_string " [LemFuel]" else emp
+    (* THE FAIL-CLOSED FUEL SCOPE NET: a fuel-lifted constant (or a
+       fuel_consumer) rendered where no `[LemFuel]` binder is in scope
+       would leave Lean to fail at build time ("failed to synthesize
+       LemFuel") — or, worse, to pick up a stray global instance. There
+       is no default to inject, by design: generation-time error naming
+       the context. Inert for block comments (dead text). *)
+    let fuel_scope_check (l : Ast.l) (cref : Types.const_descr_ref) (ctx : string) : unit =
+      if not (!St.fuel_binder || !St.rendering_comment)
+         && (Types.Cdset.mem cref !St.fuel_lifted || is_fuel_consumer_cref cref)
+         (* a self/sibling call inside a fuel'd worker is rewritten to pass
+            the decremented COUNTER (`(w lemFuel …)`), needing no instance *)
+         && not (!St.fuel_emit <> None && List.mem_assoc cref !St.fuel_workers) then
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: fuel'd (or fuel-lifted) definition referenced outside a fuel scope — %s — where no [LemFuel] instance is in scope (instance methods, indreln rules, lemmas/asserts cannot take the ambient fuel; fuel is a parameter of the semantics with no default: call the definition from a fuel-lifted definition, or from hand-written Lean that supplies the fuel, e.g. `@f ⟨n⟩ …` or `letI : LemFuel := ⟨n⟩`)"
+            ctx))
+
     (* --- Supply lifting helpers (declare {lean} supply val) ---
        thin wrappers over the top-level env-parameterized versions; the
        pre-pass lives at module-emission level (lean_supply_prepass).
@@ -2108,6 +2183,20 @@ type pat_style = FunParam | MatchArm
       List.exists (fun cref ->
           is_supply_cref cref || Types.Cdset.mem cref !St.supply_lifted)
         ue.used_consts
+
+    (* The zero-fuel arm's value: the declared sentinel; under supply
+       lifting paired with the UNCONSUMED supply binders — fuel exhaustion
+       draws nothing. Shared by the worker's `| 0 =>` arm and the
+       generated `_zero` lemma, so the two agree by construction. *)
+    let fuel_sentinel_output (sentinel : string) =
+      if !St.supply_binder then
+        Output.flat
+          ([from_string "(("; from_string sentinel; from_string ")"]
+           @ List.concat_map (fun (_, pname) ->
+                 [from_string ", "; from_string pname])
+               (get_supply_params ())
+           @ [from_string ")"])
+      else Output.flat [from_string "("; from_string sentinel; from_string ")"]
 
     (* Short-circuit heads (audit MAJOR-1, charter O1): lem constants
        whose Lean rep is the infix Bool operator && / ||. Lean's
@@ -2159,13 +2248,6 @@ type pat_style = FunParam | MatchArm
       let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
       Target.Targetmap.apply_target cd.fuel_sentinel (Target.Target_no_ident Target.Target_lean)
 
-    (* Per-declaration fuel budget (numeric declare form): the wrapper's
-       budget literal, replacing lemDefaultFuel for exactly this
-       declaration. OPT-IN: None = lemDefaultFuel, byte-for-byte. *)
-    let fuel_budget_for cref =
-      let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
-      Target.Targetmap.apply_target cd.fuel_budget (Target.Target_no_ident Target.Target_lean)
-
     (* Ground-site alternative head (declare {lean} ground_rep val f =
        `Ident`): emitted instead of the constant at applications whose
        result type is syntactically ground. See the failwith special case
@@ -2202,6 +2284,21 @@ type pat_style = FunParam | MatchArm
             let name_out = Name.to_output Term_var name in
             let name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip name)) in
             match lemma_typ with
+            | Ast.Lemma_assert _
+              when exp_needs_fuel e && is_library_module !St.current_module_name ->
+              (* A LIBRARY assert on a fuel-lifted definition (none today; it
+                 arises the moment a library val is declared fuel_consumer —
+                 measured on relation.lem's withoutTransitiveEdges rows while
+                 that variant was built): there is no fuel to supply and the
+                 library's auxiliary files are never built (`make lean-libs`
+                 deletes them), so render the removal loudly instead of
+                 failing the library build. A USER assert in the same
+                 position is the fail-closed fuel_scope_check error
+                 (negative/neg_fuel_scope_assert.lem). *)
+              Output.flat [
+                ws skips; from_string "/- removed assert "; name_out;
+                from_string ": references a fuel'd definition; a library assert has no [LemFuel] instance to supply (fuel-parameter arc) -/"
+              ]
             | Ast.Lemma_assert _ ->
               Output.flat [
                 ws skips;
@@ -2664,6 +2761,17 @@ type pat_style = FunParam | MatchArm
                     raise (Reporting_basic.err_general true Ast.Unknown
                       "Lean backend: reader-lifted call inside an instance method (unsupported: instance fields cannot take extra parameters)");
                   lifted && not inside_instance in
+                (* Fuel lifting on a Let_def-bound constant: the bound name
+                   takes the `[LemFuel]` binder like any lifted def. *)
+                let let_fuel_lifted =
+                  let lifted =
+                    (not !St.rendering_comment)
+                    && List.exists (fun (_, cref) ->
+                           Types.Cdset.mem cref !St.fuel_lifted) name_map in
+                  if (not !St.rendering_comment) && exp_needs_fuel e && inside_instance then
+                    raise (Reporting_basic.err_general true Ast.Unknown
+                      "Lean backend: fuel'd (or fuel-lifted) call inside an instance method (unsupported: instance fields cannot take the [LemFuel] binder)");
+                  lifted && not inside_instance in
                 (* Supply lifting on a Let_def-bound constant: the bound
                    name becomes a function of the supply (state-passing
                    semantics of a drawing value binding — each use
@@ -2680,11 +2788,14 @@ type pat_style = FunParam | MatchArm
                   lifted && not inside_instance in
                 let saved_reader_binder = !St.reader_binder in
                 let saved_supply_binder = !St.supply_binder in
+                let saved_fuel_binder = !St.fuel_binder in
                 St.reader_binder := let_lifted;
                 St.supply_binder := supply_let_lifted;
+                St.fuel_binder := let_fuel_lifted;
                 Fun.protect ~finally:(fun () ->
                     St.reader_binder := saved_reader_binder;
-                    St.supply_binder := saved_supply_binder) @@ fun () ->
+                    St.supply_binder := saved_supply_binder;
+                    St.fuel_binder := saved_fuel_binder) @@ fun () ->
                 let exp_out =
                   if supply_let_lifted then supply_block inside_instance e
                   else exp inside_instance e in
@@ -2733,7 +2844,7 @@ type pat_style = FunParam | MatchArm
                     Some (rhs_def_name, Output.flat [
                       from_string "\n";
                       from_string "private def "; from_string rhs_def_name;
-                      reader_binder_output (); supply_binder_output (); constraints; rhs_thread;
+                      fuel_binder_output (); reader_binder_output (); supply_binder_output (); constraints; rhs_thread;
                       from_string "  : "; rhs_typ;
                       from_string " :="; exp_out
                     ]) in
@@ -2768,7 +2879,7 @@ type pat_style = FunParam | MatchArm
                         [from_string ", "; from_string s]) states) in
                     Output.flat [
                       from_string "\n"; defn; from_string name_str;
-                      reader_binder_output (); supply_binder_output (); constraints; thread_out;
+                      fuel_binder_output (); reader_binder_output (); supply_binder_output (); constraints; thread_out;
                       from_string "  : (("; var_type; from_string ")";
                       supply_pair_suffix (); from_string ")";
                       from_string " :=\n  let (("; pat_out; type_out; from_string ")";
@@ -2779,7 +2890,7 @@ type pat_style = FunParam | MatchArm
                   end else
                   Output.flat [
                     from_string "\n"; defn; from_string name_str;
-                    reader_binder_output (); constraints; thread_out;
+                    fuel_binder_output (); reader_binder_output (); constraints; thread_out;
                     from_string "  : "; var_type;
                     from_string " :=\n  let "; pat_out; type_out;
                     ws sk; from_string " :="; body_out;
@@ -2935,7 +3046,7 @@ type pat_style = FunParam | MatchArm
                     let equations = Output.flat (List.map render_equation (first_clause :: rest_clauses)) in
                     Output.flat [
                       ws name_skips; from_string " "; name; tv_set_out; constraints_sep; constraints;
-                      inhabited_binder_output (); reader_binder_output ();
+                      fuel_binder_output (); inhabited_binder_output (); reader_binder_output ();
                       from_string " : "; full_type; equations
                     ]
                 in
@@ -2959,6 +3070,28 @@ type pat_style = FunParam | MatchArm
                    && List.length fuel_plan <> List.length groups then
                   raise (Reporting_basic.err_general true (locn_of_clause_group (List.concat groups))
                     "Lean backend: fuel in a mutual block requires EVERY member to carry a 'declare {lean} fuel val' (all-or-none)");
+                (* Does any body of this block reach the ambient fuel OUTSIDE
+                   the block (a fuel'd callee, a fuel_consumer, a fuel-lifted
+                   def)? Then the block's workers take the `[LemFuel]` binder
+                   (they pass the ambient on — every fuel'd callee starts its
+                   counter from the FULL ambient, never from the caller's
+                   remaining counter); a leaf worker takes none (its wrapper
+                   alone applies the ambient) — the reader-binder discipline
+                   applied to fuel. Self/sibling calls pass the counter and
+                   are excluded from the test. *)
+                let block_crefs =
+                  List.filter_map (fun g -> match g with
+                    | (_, c, _, _, _, _) :: _ -> Some c | [] -> None) groups in
+                let workers_need_fuel =
+                  (not !St.rendering_comment)
+                  && List.exists (fun g ->
+                       List.exists (fun (_, _, _, _, _, e) ->
+                           let ue = add_exp_entities empty_used_entities e in
+                           List.exists (fun cref ->
+                               not (List.mem cref block_crefs)
+                               && (is_fuelled_cref cref || is_fuel_consumer_cref cref
+                                   || Types.Cdset.mem cref !St.fuel_lifted))
+                             ue.used_consts) g) groups in
                 let saved_plan = !St.fuel_workers in
                 St.fuel_workers := fuel_plan;
                 Fun.protect ~finally:(fun () -> St.fuel_workers := saved_plan) @@ fun () ->
@@ -3077,6 +3210,17 @@ type pat_style = FunParam | MatchArm
                               Types.Cdset.mem cr !St.reader_lifted
                               || Types.Cdset.mem cr !St.supply_lifted) g then reserved_binder_check ());
                     let lifted = register_group g in
+                    (* Fuel lifting: membership computed by lean_fuel_prepass
+                       (a fuel'd def is always a member: its wrapper takes the
+                       ambient). Inert for block comments. *)
+                    let fuel_lifted_g =
+                      (not !St.rendering_comment)
+                      && List.exists (fun (_, c, _, _, _, _) ->
+                             Types.Cdset.mem c !St.fuel_lifted) g in
+                    if (not !St.rendering_comment) && inside_instance
+                       && List.exists (fun (_, _, _, _, _, e) -> exp_needs_fuel e) g then
+                      raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                        "Lean backend: fuel'd (or fuel-lifted) call inside an instance method (unsupported: instance fields cannot take the [LemFuel] binder)");
                     (match seed_info with
                      | Some _ when lifted ->
                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
@@ -3094,8 +3238,8 @@ type pat_style = FunParam | MatchArm
                          "Lean backend: 'declare {lean} fuel val' in a mutual block combined with reader lifting (unsupported; extend when needed)")
                      | _ -> ());
                     (* fuel x reader composes (arc 3, B1): the worker's fuel
-                       binder is emitted BEFORE the reader binders, so the
-                       point-free wrapper 'worker lemDefaultFuel' has the
+                       counter is emitted BEFORE the reader binders, so the
+                       point-free wrapper 'worker LemFuel.fuel' has the
                        reader-prefixed type and lifted callers inject into
                        the wrapper as for any lifted def. *)
                     (* Arc-8 S2: [Inhabited tv] binders for this group,
@@ -3115,11 +3259,14 @@ type pat_style = FunParam | MatchArm
                     | None ->
                       let saved = !St.reader_binder in
                       let saved_sb = !St.supply_binder in
+                      let saved_fb = !St.fuel_binder in
                       St.reader_binder := lifted;
                       St.supply_binder := supply_lifted_g && not inside_instance;
+                      St.fuel_binder := fuel_lifted_g && not inside_instance;
                       Fun.protect ~finally:(fun () ->
                           St.reader_binder := saved;
-                          St.supply_binder := saved_sb)
+                          St.supply_binder := saved_sb;
+                          St.fuel_binder := saved_fb)
                         (fun () -> (def_keyword_for g, render_group g, emp))
                     | Some (n, c, s) ->
                       let base_name = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
@@ -3132,9 +3279,14 @@ type pat_style = FunParam | MatchArm
                       let saved_e = !St.fuel_emit in
                       let saved_rb = !St.reader_binder in
                       let saved_sb = !St.supply_binder in
+                      let saved_fb = !St.fuel_binder in
                       St.fuel_emit := Some s;
                       St.reader_binder := lifted;
                       St.supply_binder := supply_lifted_g && not inside_instance;
+                      (* the wrapper ALWAYS takes the ambient (it starts the
+                         counter from it — emitted literally below); the
+                         worker only when it passes it on (workers_need_fuel) *)
+                      St.fuel_binder := workers_need_fuel && not inside_instance;
                       (* worker name must agree with the block-level plan —
                          a real error, not a bare assert (arc-14 S2 B6,
                          be:N1: `assert` is compiled out under -noassert;
@@ -3146,16 +3298,20 @@ type pat_style = FunParam | MatchArm
                       Fun.protect ~finally:(fun () ->
                           St.fuel_emit := saved_e;
                           St.reader_binder := saved_rb;
-                          St.supply_binder := saved_sb)
+                          St.supply_binder := saved_sb;
+                          St.fuel_binder := saved_fb)
                         (fun () ->
                           let body = render_group g in
-                          (* Point-free wrapper at the default fuel: call sites
-                             are unchanged, and proofs unfold wrapper → worker
-                             definitionally. *)
+                          (* Point-free wrapper at the AMBIENT fuel
+                             (`worker LemFuel.fuel`): call sites are
+                             unchanged, `@f ⟨n⟩ = f_lemFuel n` unfolds
+                             definitionally, and a theorem quantifies over
+                             the instance. No numeral is ever emitted here
+                             ([USER 2026-09-03], "No magic values"). *)
                           (* A lifted worker's wrapper has the reader-prefixed
                              type (arc 3, B1): reader binders sit between the
-                             fuel binder and the original arguments, so
-                             'worker lemDefaultFuel' is reader-first. *)
+                             fuel counter and the original arguments, so
+                             'worker LemFuel.fuel' is reader-first. *)
                           let reader_arrows =
                             if not lifted then emp else
                             Output.flat (List.map (fun (cref, _) ->
@@ -3171,9 +3327,9 @@ type pat_style = FunParam | MatchArm
                             else Output.flat [from_string " "; constraints] in
                           (* A supply-lifted worker's wrapper: the supply
                              binders sit after the readers (fixed order:
-                             fuel, [Inhabited], readers, supply, original
-                             arguments), and the result is the
-                             value×supply pair — 'worker lemDefaultFuel'
+                             [LemFuel], [Inhabited], fuel counter, readers,
+                             supply, original arguments), and the result is
+                             the value×supply pair — 'worker LemFuel.fuel'
                              stays point-free. *)
                           let supply_arrows =
                             if not !St.supply_binder then emp else
@@ -3186,26 +3342,75 @@ type pat_style = FunParam | MatchArm
                                  | (_, _, pats, _, _, _) :: _ -> List.length pats
                                  | [] -> 0)
                             else pat_typ (C.t_to_src_t cd.const_type) in
-                          (* Per-declaration budget (opt-in): an
-                             unannotated declaration emits the literal
-                             ' lemDefaultFuel' unchanged, byte-for-byte
-                             — the consumer-ratified charter constraint
-                             (§8.3). *)
-                          let budget_out = match fuel_budget_for c with
-                            | Some b -> from_string (String.concat "" [" "; b])
-                            | None -> from_string " lemDefaultFuel" in
                           let wrapper = Output.flat [
                             from_string "\n\n";
                             from_string "def "; from_string base_name; tv_out; cons_out;
-                            inhabited_binder_output ();
+                            from_string " [LemFuel]"; inhabited_binder_output ();
                             from_string " : "; reader_arrows; supply_arrows;
                             result_typ_out;
                             from_string " := "; from_string worker;
-                            budget_out; from_string "\n"] in
-                          (* Wrapper is returned separately: in a mutual
-                             block it must be emitted AFTER 'end', or it
-                             would join the recursion set (arc 3, B2). *)
-                          (from_string "def", body, wrapper))
+                            from_string " LemFuel.fuel"; from_string "\n"] in
+                          (* The exhaustion lemma `<worker>_zero`: the
+                             worker at counter 0 IS the sentinel, by rfl —
+                             kernel-transparent, so "exhausted" is
+                             recognisable wherever it arises (consumer
+                             requirement, refined-cerberus request §3).
+                             Generated when every parameter is a plain
+                             variable or a wildcard (the statement needs
+                             names for the arguments); a destructuring
+                             parameter pattern gets an explanatory comment
+                             instead — state that lemma by hand. *)
+                          let zero_lemma =
+                            let pats = match g with
+                              | (_, _, pats, _, _, _) :: _ -> pats
+                              | [] -> [] in
+                            let binders_and_args =
+                              List.mapi (fun i (p : pat) ->
+                                  match p.term with
+                                  | P_var v ->
+                                    let nm = name_var_output v in
+                                    Some (Output.flat [from_string " ("; nm; from_string " : ";
+                                                       pat_typ (C.t_to_src_t p.typ); from_string ")"],
+                                          Output.flat [from_string " "; nm])
+                                  | P_var_annot (v, t) ->
+                                    let nm = name_var_output v in
+                                    Some (Output.flat [from_string " ("; nm; from_string " : ";
+                                                       pat_typ t; from_string ")"],
+                                          Output.flat [from_string " "; nm])
+                                  | P_wild _ ->
+                                    let nm = from_string (Printf.sprintf "_x%d" (i + 1)) in
+                                    Some (Output.flat [from_string " ("; nm; from_string " : ";
+                                                       pat_typ (C.t_to_src_t p.typ); from_string ")"],
+                                          Output.flat [from_string " "; nm])
+                                  | _ -> None) pats in
+                            if List.exists (fun o -> o = None) binders_and_args then
+                              Output.flat [
+                                from_string "/- "; from_string worker;
+                                from_string "_zero not generated: a parameter is a destructuring pattern; state the exhaustion lemma by hand -/\n"]
+                            else begin
+                              let bs = List.filter_map (fun o -> o) binders_and_args in
+                              let supply_names =
+                                if not !St.supply_binder then emp else
+                                Output.flat (List.map (fun (_, pname) ->
+                                    Output.flat [from_string " "; from_string pname])
+                                  (get_supply_params ())) in
+                              Output.flat ([
+                                from_string "theorem "; from_string worker; from_string "_zero";
+                                tv_out; cons_out;
+                                fuel_binder_output (); inhabited_binder_output ();
+                                reader_binder_output (); supply_binder_output ()]
+                                @ List.map fst bs
+                                @ [from_string " :\n    "; from_string worker; from_string " 0";
+                                   (if lifted then reader_args_output () else emp);
+                                   supply_names]
+                                @ List.map snd bs
+                                @ [from_string " = "; fuel_sentinel_output s; from_string " := rfl\n"])
+                            end in
+                          (* Wrapper (and its lemma) are returned separately:
+                             in a mutual block they must be emitted AFTER
+                             'end', or the wrapper would join the recursion
+                             set (arc 3, B2). *)
+                          (from_string "def", body, Output.flat [wrapper; zero_lemma]))
                   ) groups in
                 let rec_skips =
                   if is_recursive && not inside_instance then
@@ -3502,21 +3707,11 @@ type pat_style = FunParam | MatchArm
         let body = if inside_instance then flatten_newlines body else body in
         (match !St.fuel_emit with
          | Some sentinel ->
-           (* under supply lifting the zero-fuel arm returns the sentinel
-              paired with the UNCONSUMED supply binders — fuel exhaustion
-              draws nothing *)
-           let sentinel_out =
-             if !St.supply_binder then
-               Output.flat
-                 ([from_string "(("; from_string sentinel; from_string ")"]
-                  @ List.concat_map (fun (_, pname) ->
-                        [from_string ", "; from_string pname])
-                      (get_supply_params ())
-                  @ [from_string ")"])
-             else Output.flat [from_string "("; from_string sentinel; from_string ")"] in
+           let sentinel_out = fuel_sentinel_output sentinel in
            Output.flat [
              ws name_skips; from_string " "; name; from_string "_lemFuel";
-             tv_set_sep; tv_set; constraints_sep; constraints; inhabited_binder_output ();
+             tv_set_sep; tv_set; constraints_sep; constraints;
+             fuel_binder_output (); inhabited_binder_output ();
              from_string " (lemFuel : Nat)"; reader_binder_output (); supply_binder_output (); pat_skips;
              fun_pattern_list inside_instance pats; ws skips; typ_opt;
              from_string " := match lemFuel with\n  | 0 => ";
@@ -3532,7 +3727,7 @@ type pat_style = FunParam | MatchArm
          | None ->
            Output.flat [
              ws name_skips; from_string " "; name; tv_set_sep; tv_set; constraints_sep; constraints;
-             inhabited_binder_output (); reader_binder_output (); supply_binder_output (); pat_skips;
+             fuel_binder_output (); inhabited_binder_output (); reader_binder_output (); supply_binder_output (); pat_skips;
              fun_pattern_list inside_instance pats; ws skips; typ_opt; from_string " := "; body
            ])
     and reader_binder_output () =
@@ -4097,6 +4292,7 @@ type pat_style = FunParam | MatchArm
                     lean_unsupported_check_cref A.env (Typed_ast.exp_to_locn e) cd.descr;
                     supply_net_check (Typed_ast.exp_to_locn e) cd.descr
                       "an application outside a supply-lifted definition body (instance method, indreln rule, lemma/assert, or another context the pre-pass cannot lift)";
+                    fuel_scope_check (Typed_ast.exp_to_locn e) cd.descr "an application";
                     (* In indreln antecedents (Prop context), == and != applied via
                        App nodes (e.g. from <> decomposition: not (isEqual x y)) must
                        use propositional =/≠ instead of BEq ==/!=. *)
@@ -4231,6 +4427,7 @@ type pat_style = FunParam | MatchArm
               lean_unsupported_check_cref A.env (Typed_ast.exp_to_locn e) const.descr;
               supply_net_check (Typed_ast.exp_to_locn e) const.descr
                 "a bare (unapplied) reference outside a supply-lifted definition body";
+              fuel_scope_check (Typed_ast.exp_to_locn e) const.descr "a bare (unapplied) reference";
               let default_const_output () =
                 Output.concat emp (B.function_application_to_output (exp_to_locn e) (exp inside_instance) false e const [] (use_ascii_rep_for_const const.descr))
               in
@@ -4489,6 +4686,7 @@ type pat_style = FunParam | MatchArm
                       lean_unsupported_check_cref A.env (Typed_ast.exp_to_locn e) cd.descr;
                       supply_net_check (Typed_ast.exp_to_locn e) cd.descr
                         "infix position";
+                      fuel_scope_check (Typed_ast.exp_to_locn e) cd.descr "infix position";
                       (* reader_consumer in infix position: the leading
                          reader arguments have no sound infix placement *)
                       if is_consumer_cref cd.descr && not !St.rendering_comment then
@@ -6561,6 +6759,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
       if is_library then
         St.namespace_stack := [ns_name];
       lean_reader_prepass A.env ds;
+      lean_fuel_prepass A.env ds;
       lean_supply_prepass A.env ds;
       (* Arc-8 S1: compute the Inhabited census + tier-2 plans in
          declaration order before emission (defs is fold_right). *)

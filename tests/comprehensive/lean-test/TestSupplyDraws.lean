@@ -40,8 +40,8 @@ def main : IO UInt32 := do
     (uses_both 9 40 3 == (52, 41))
   let r5 ← check "uses_seeded 40 3 = (85, 41) [reader_seed x supply]"
     (uses_seeded 40 3 == (85, 41))
-  let r6 ← check "fuel_draws 60 2 = ([61, 60], 62) [fuel x supply; OCaml cons order]"
-    (fuel_draws 60 2 == ([61, 60], 62))
+  let r6 ← check "fuel_draws 60 2 at fuel 100 = ([61, 60], 62) [fuel x supply; OCaml cons order]"
+    (@fuel_draws ⟨100⟩ 60 2 == ([61, 60], 62))
   let r7 ← check "fuel_draws_lemFuel 1 60 2 = ([60], 61) [exhaustion leaves supply at cut]"
     (fuel_draws_lemFuel 1 60 2 == ([60], 61))
   let r8 ← check "two_streams 10 100 () = ((10, 100, 11), 12, 101) [independent streams]"

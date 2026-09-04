@@ -58,4 +58,6 @@ let rec count_down (n : nat) : nat =
   end
 declare {lean} fuel val count_down = `100`
 
-assert ctx_kw_declare_ok : (count_down 5 = (0:nat))
+(* count_down is fuel-lifted (takes [LemFuel]), so it is not assertable
+   from lem — the pin is lean-test/TestFuelParamCheck.lean (10):
+   `@count_down ⟨100⟩ 5 = 0` (fuel-parameter arc, 2026-09-04). *)

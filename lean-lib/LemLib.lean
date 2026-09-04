@@ -43,18 +43,28 @@ comparator. Functions without `By` use Lean's `BEq` or `Ord` type classes.
    gate on a zero-axiom LemLib census (charter: cerberus-lean
    lean_frontend/docs/2026-08-31_effect-retirement-design.md §7.1/§7.2). -/
 
-/- Default fuel for 'declare {lean} fuel val' wrappers: bounds recursion
-   DEPTH at declared non-structural points only (never value size), so any
-   well-formed input stays far under it. Proof-side statements carry
-   "fuel large enough" side conditions on the worker instead.
-   PROVENANCE (be:N10): 10^6 chosen at the arc-3 totality sweep as
-   "orders of magnitude above any observed depth" (deepest measured
-   consumer recursion at the time: cerberus Core-typing/pp descents,
-   O(10^2-10^3)); it is a per-consumer empirical margin, not a theorem —
-   exhaustion is LOUD (fuelExhausted panics), so an inadequate budget is
-   a visible failure, never a wrong value. Consumers needing more thread
-   their own fuel via the worker. -/
-def lemDefaultFuel : Nat := 1000000
+/- THE AMBIENT FUEL (fuel-parameter arc, 2026-09-04). `declare {lean}
+   fuel val f = `sentinel`` makes `f` a total worker recursing
+   structurally on its own counter (`f_lemFuel (lemFuel : Nat) …`); the
+   counter STARTS at the ambient fuel, and the ambient fuel is a
+   PARAMETER of the generated code: this class, taken as an
+   instance-implicit `[LemFuel]` binder by every fuel'd function and by
+   every definition that (transitively) reaches one (the backend's fuel
+   lifting). The wrapper is `def f [LemFuel] : … := f_lemFuel LemFuel.fuel`,
+   so `@f ⟨n⟩ = f_lemFuel n` by rfl, a theorem quantifies `∀ [LemFuel]`
+   (or over `n` via `⟨n⟩`), and the executable entry point instantiates it
+   once (`letI : LemFuel := ⟨n⟩` at the CLI). NO INSTANCE IS DECLARED
+   HERE OR IN ANY GENERATED CODE, by design: [USER 2026-09-03] "fuel is an
+   execution parameter that 'doesn't matter' — any fuel value can be
+   chosen […] All similar such magic values should be removed and replaced
+   by quantified parameters"; a global instance would silently give every
+   fuel'd function a default, which is exactly the forbidden magic value
+   (tests/comprehensive/check_no_fuel_numerals.sh gates its absence).
+   HISTORY: `def lemDefaultFuel : Nat := 1000000` lived here until this arc
+   as the wrappers' budget (with a per-declaration numeric override in the
+   backend); both were deleted by the ruling above. -/
+class LemFuel where
+  fuel : Nat
 
 /- Supply threading ('declare {lean} supply val', the state-passing
    analog of the reader lifting): a DRAW splits the current supply into
@@ -647,7 +657,10 @@ def cross (cmp : (α × β) → (α × β) → LemOrdering) (xs : Pset α) (ys :
   sigma cmp xs (fun _ => ys)
 
 /-- pset.ml:488 `lfp s f = let s' = f s in if subset s' s then s else lfp (union s' s) f`
-    — the OCaml may loop forever; the port takes a fuel and fails loudly. -/
+    — the OCaml may loop forever for an arbitrary `f`; the port is the
+    CALLER-FUELLED primitive (option (a) of the fuel-parameter design
+    note): its one caller, `tc` below, supplies a data measure; at zero
+    it fails LOUDLY (never a value that looks like a result). -/
 def lfpGo (cmp : α → α → LemOrdering) (f : Pset α → Pset α) : Nat → Pset α → Pset α
   | 0, s => fuelExhaustedWith "Pset.lfp: fuel exhausted" s
   | fuel + 1, s =>
@@ -656,9 +669,23 @@ def lfpGo (cmp : α → α → LemOrdering) (f : Pset α → Pset α) : Nat → 
 
 /-- pset.ml:494 `tc` — transitive closure of a relation given as a set of
     pairs; `one_step` adds (x,z) for every (x,y),(y',z) with y ~ y' under
-    the pair comparator's diagonal. Converges within (2|r|)^2 + 1 steps
-    (every productive step adds a pair drawn from the finite square of
-    r's endpoints), which bounds the fuel. -/
+    the pair comparator's diagonal. The OCaml iterates `lfp` with no
+    bound. Here the iteration count is a DATA MEASURE, not a chosen value:
+    every productive step adds at least one pair drawn from the finite
+    square of r's endpoints (at most (2|r|)^2 of them), so the closure is
+    reached within (2|r|)^2 + 1 steps for any comparator that is a total
+    preorder (every generated comparator is); the form is the admissible
+    third form of the no-magic-values rule ([USER 2026-09-03] "my aim here
+    is to forbid values that limit the semantics or limit the ways the
+    customer can reason about the semantics" — nothing is chosen here and a
+    proof can unfold it), the same form as the height-indexed set/map
+    recursions above. On an ill-behaved comparator the OCaml loops; the
+    port's `lfpGo` exhausts LOUDLY instead (the accepted direction).
+    Decision record: doc/lean-backend/2026-09-04_fuel-parameter-record.md
+    (the alternative — a caller-fuelled `tc` via `{lean} fuel_consumer` on
+    `Relation.transitiveClosureByCmp` — was built and withdrawn: it puts a
+    `[LemFuel]` binder on every relation function for no semantic reason
+    and edits the library source). -/
 def tc (cmp : (α × α) → (α × α) → LemOrdering) (r : Pset (α × α)) : Pset (α × α) :=
   let oneStep (r : Pset (α × α)) : Pset (α × α) :=
     fold (fun (x, y) xs =>
