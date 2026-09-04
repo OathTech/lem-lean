@@ -661,3 +661,33 @@ make lean  238.07s user 24.62s system 98% cpu 4:27.39 total
 EXIT 0
 nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
 ```
+
+
+## 11. Orchestrator boundary review [AGENT, orchestrator, 2026-09-04]
+
+Two independent re-verifications in this worktree. (1) On `82b14e4`
+(before the audit): lem rebuilt from source; `lean-lib` `Build completed
+successfully (37 jobs)`; `grep -rn "^axiom " lean-lib/` → 0;
+`tests/comprehensive` `make lean` rc 0 with the three registered XFAILs
+only; `tests/nonlean-regress/run.sh` FAILED order-only in my locale —
+`diff <(sort golden.exitcodes) <(sort .scratch/exitcodes)` IDENTICAL,
+sha manifest unchanged — fixed by `dfd1a63` (LC_ALL=C sort, order-only
+rebaseline). (2) On `220b31e` (audit response `ca50ffd` + the audit
+document `b3d084e` cherry-picked), verbatim:
+
+```
+Lem 220b31e
+=== Generation: 47 passed, 0 failed, 0 skipped ===
+Build completed successfully (136 jobs).
+  OK: 219 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make-lean-rc=0
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+```
+
+(the three `FAIL` lines in the run are the registered XFAILs: the ruled
+`f_int_of_big_num` OCaml-target deviation and the two F2 strings rows.)
+Pre-merge audit: `2026-09-04_fuel-parameter-audit-premerge.md`
+(MERGE-WITH-FIXES, no MAJOR → fixed in `ca50ffd`, §10). Merge ask goes to
+the operator on this head, conditional on the consumer's review of the
+design note (R1) and the D2/D4 rulings (D4, if ruled "wrap", is one more
+commit on this branch before the merge).
