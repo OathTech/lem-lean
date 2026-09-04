@@ -318,16 +318,23 @@ def sort_by_ordering (cmp : α → α → LemOrdering) (l : List α) : List α :
    input) the port fails loudly with failwithI (exception class (a)).
 
    Termination: structural where the OCaml is structural on one tree.
-   `join` is well-founded on the two subtree sizes. The mutually
-   descending functions of the OCaml (union/inter/diff/subset on two
-   trees via `split`, merge on two maps, compare on two enumerations,
-   the lfp loop of `tc`) recurse on results of `split`/`join`, whose
-   size relation to the inputs is not structural; they take an explicit
-   FUEL bounded by the stored AVL heights (each level of the recursion
-   strictly decreases height s1 + height s2; split never increases a
-   height) or, for compare/tc, by the element counts — the established
-   LemLib pattern (set_tc_go): kernel-total, and the exhaustion arm is
-   the loud `fuelExhaustedWith` sentinel, never a silent truncation.
+   The functions whose OCaml recursion is not structural on one argument
+   (`join`; union/inter/diff/subset on two trees via `split`; merge on
+   two maps; compare/equal on two enumerations; the closure loop of `tc`)
+   are STRUCTURAL RECURSIONS ON A DATA MEASURE — an index computed from
+   the arguments that bounds the recursion exactly: the stored AVL
+   heights (`height s1 + height s2 + 1`: each level strictly decreases
+   the sum; split never increases a height), the element counts, the
+   finite square of a relation's endpoints. This is the admissible third
+   form of the no-magic-values rule ([USER 2026-09-03] "my aim here is to
+   forbid values that limit the semantics or limit the ways the customer
+   can reason about the semantics"): nothing is chosen, the kernel
+   unfolds it (unlike well-founded recursion, which blocks closed-term
+   `rfl`/`decide` — `join` was moved off WF recursion for exactly that
+   reason, fuel-parameter arc 2026-09-04), and the exhaustion arm —
+   unreachable on well-formed input — is the loud `fuelExhaustedWith`
+   sentinel, never a silent truncation. The one CALLER-FUELLED primitive
+   is `lfpGo` (option (a): its caller `tc` supplies the data measure).
 
    Two-target pins: tests/comprehensive/parity/probes/p_set_ops.lem,
    p_map_ops.lem, p_map_beq.lem, p_cmp_order.lem, p_show.lem. -/
@@ -388,17 +395,43 @@ def add (cmp : α → α → LemOrdering) (x : α) : Pset α → Pset α
     | .LT => bal (add cmp x l) v r
     | .GT => bal l v (add cmp x r)
 
-/-- pset.ml:86 `join` -/
+/-- Heights consistent with the shape (`h = max hl hr + 1` at every node):
+    the part of the AVL invariant the height-indexed recursions below
+    rely on for their index to be exact. Computable (`Bool`), so a proof
+    can `decide` it on a closed tree; the well-formedness predicate the
+    consumer's Pmap laws will build on (refined-cerberus request §1). -/
+def heightsOk : Pset α → Bool
+  | Empty => true
+  | Node l _ r h =>
+    let hl := height l
+    let hr := height r
+    h == (if hl >= hr then hl + 1 else hr + 1) && heightsOk l && heightsOk r
+
+/-- pset.ml:86 `join` — STRUCTURAL recursion on the DATA MEASURE
+    `height l + height r + 1` (the recursion descends into a child of the
+    taller side, whose stored height is smaller when heights are
+    consistent). Until the fuel-parameter arc this was well-founded
+    recursion on `sizeOf l + sizeOf r`, which the kernel cannot unfold —
+    every closed-term `rfl`/`decide` through `union`/`remove`/`fmapUnionBy`
+    stopped here (the consumer measured 17 broken proofs, request §2). The
+    index is not a chosen value ([USER 2026-09-03] third form: "nothing is
+    chosen, nothing bounds the semantics, a proof can unfold it"); its
+    exhaustion arm is unreachable on heights-consistent trees and LOUD
+    otherwise. `LemLibTheorems.PsetJoin.join_eq` proves it equal to the
+    well-founded definition under `heightsOk`. -/
+def joinGo (cmp : α → α → LemOrdering) : Nat → Pset α → α → Pset α → Pset α
+  | 0, l, _, _ => fuelExhaustedWith "Pset.join: height index exhausted (unreachable: AVL heights bound the recursion)" l
+  | h + 1, l, v, r =>
+    match l, r with
+    | Empty, _ => add cmp v r
+    | _, Empty => add cmp v l
+    | Node ll lv lr lh, Node rl rv rr rh =>
+      if lh > rh + 2 then bal ll lv (joinGo cmp h lr v (Node rl rv rr rh))
+      else if rh > lh + 2 then bal (joinGo cmp h (Node ll lv lr lh) v rl) rv rr
+      else create l v r
+
 def join (cmp : α → α → LemOrdering) (l : Pset α) (v : α) (r : Pset α) : Pset α :=
-  match l, r with
-  | Empty, _ => add cmp v r
-  | _, Empty => add cmp v l
-  | Node ll lv lr lh, Node rl rv rr rh =>
-    if lh > rh + 2 then bal ll lv (join cmp lr v (Node rl rv rr rh))
-    else if rh > lh + 2 then bal (join cmp (Node ll lv lr lh) v rl) rv rr
-    else create l v r
-termination_by sizeOf l + sizeOf r
-decreasing_by all_goals simp_wf <;> omega
+  joinGo cmp (height l + height r + 1) l v r
 
 /-- pset.ml:97 `min_elt` (raises Not_found on Empty — the callers decide:
     `choose` fails loudly, `min_elt_opt` yields none). -/
@@ -939,17 +972,30 @@ def partitionAux (cmp : α → α → LemOrdering) (p : α → β → Bool) : Pm
 def partition (cmp : α → α → LemOrdering) (p : α → β → Bool) (s : Pmap α β) : Pmap α β × Pmap α β :=
   partitionAux cmp p (Empty, Empty) s
 
-/-- pmap.ml:185 `join` -/
+/-- Heights consistent with the shape (see `Pset.heightsOk`). -/
+def heightsOk : Pmap α β → Bool
+  | Empty => true
+  | Node l _ _ r h =>
+    let hl := height l
+    let hr := height r
+    h == (if hl >= hr then hl + 1 else hr + 1) && heightsOk l && heightsOk r
+
+/-- pmap.ml:185 `join` — height-indexed structural recursion (see
+    `Pset.joinGo` for the rationale; `LemLibTheorems.PmapJoin.join_eq` is the
+    equality to the former well-founded definition under `heightsOk`). -/
+def joinGo (cmp : α → α → LemOrdering) : Nat → Pmap α β → α → β → Pmap α β → Pmap α β
+  | 0, l, _, _, _ => fuelExhaustedWith "Pmap.join: height index exhausted (unreachable: AVL heights bound the recursion)" l
+  | h + 1, l, v, d, r =>
+    match l, r with
+    | Empty, _ => add cmp v d r
+    | _, Empty => add cmp v d l
+    | Node ll lv ld lr lh, Node rl rv rd rr rh =>
+      if lh > rh + 2 then bal ll lv ld (joinGo cmp h lr v d (Node rl rv rd rr rh))
+      else if rh > lh + 2 then bal (joinGo cmp h (Node ll lv ld lr lh) v d rl) rv rd rr
+      else create l v d r
+
 def join (cmp : α → α → LemOrdering) (l : Pmap α β) (v : α) (d : β) (r : Pmap α β) : Pmap α β :=
-  match l, r with
-  | Empty, _ => add cmp v d r
-  | _, Empty => add cmp v d l
-  | Node ll lv ld lr lh, Node rl rv rd rr rh =>
-    if lh > rh + 2 then bal ll lv ld (join cmp lr v d (Node rl rv rd rr rh))
-    else if rh > lh + 2 then bal (join cmp (Node ll lv ld lr lh) v d rl) rv rd rr
-    else create l v d r
-termination_by sizeOf l + sizeOf r
-decreasing_by all_goals simp_wf <;> omega
+  joinGo cmp (height l + height r + 1) l v d r
 
 /-- pmap.ml:196 `concat` -/
 def concat (cmp : α → α → LemOrdering) (t1 t2 : Pmap α β) : Pmap α β :=

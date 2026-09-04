@@ -248,8 +248,136 @@ theorem lemShowListAux_eq (showX : α → String) (xs : List α) :
   rw [show lemStringJoin "; " (xs.map showX) = lemStringConcat "; " (xs.map showX) from rfl,
       lemStringConcat_eq, concatSpec_map]
 
+/- ---- Pset.join / Pmap.join: height-indexed structural recursion vs the
+        former well-founded definition (fuel-parameter arc, 2026-09-04) ----
+   `joinSpec` is the pre-arc text verbatim (WF on `sizeOf l + sizeOf r`).
+   The two agree on every pair of heights-consistent trees (`heightsOk`):
+   the index `height l + height r + 1` then exceeds the recursion depth,
+   because each step descends into a child of the taller side whose stored
+   height is strictly smaller. Without `heightsOk` the stored heights may
+   lie and the indexed version reaches its (loud) exhaustion arm where the
+   WF version keeps going — so the hypothesis is exactly the invariant
+   every constructor path preserves (the consumer's Pmap-laws slice will
+   prove that preservation against these same definitions). -/
+namespace PsetJoin
+open Pset
+variable {α : Type}
+
+def joinSpec (cmp : α → α → LemOrdering) (l : Pset α) (v : α) (r : Pset α) : Pset α :=
+  match l, r with
+  | .Empty, _ => add cmp v r
+  | _, .Empty => add cmp v l
+  | .Node ll lv lr lh, .Node rl rv rr rh =>
+    if lh > rh + 2 then bal ll lv (joinSpec cmp lr v (.Node rl rv rr rh))
+    else if rh > lh + 2 then bal (joinSpec cmp (.Node ll lv lr lh) v rl) rv rr
+    else create l v r
+termination_by sizeOf l + sizeOf r
+decreasing_by all_goals simp_wf <;> omega
+
+theorem heightsOk_node {l r : Pset α} {v : α} {h : Nat} (hk : heightsOk (.Node l v r h) = true) :
+    h = (if height l >= height r then height l + 1 else height r + 1) ∧
+    heightsOk l = true ∧ heightsOk r = true := by
+  simp only [heightsOk, Bool.and_eq_true, beq_iff_eq] at hk
+  exact ⟨hk.1.1, hk.1.2, hk.2⟩
+
+theorem joinGo_eq (cmp : α → α → LemOrdering) (v : α) :
+    ∀ (n : Nat) (l r : Pset α), heightsOk l = true → heightsOk r = true →
+      height l + height r < n → joinGo cmp n l v r = joinSpec cmp l v r := by
+  intro n
+  induction n with
+  | zero => intro l r _ _ hn; omega
+  | succ n ih =>
+    intro l r hl hr hn
+    cases l with
+    | Empty => cases r <;> simp [joinGo, joinSpec]
+    | Node ll lv lr lh =>
+      cases r with
+      | Empty => simp [joinGo, joinSpec]
+      | Node rl rv rr rh =>
+        obtain ⟨hlh, hll, hlr⟩ := heightsOk_node hl
+        obtain ⟨hrh, hrl, hrr⟩ := heightsOk_node hr
+        simp only [joinGo, joinSpec]
+        simp only [height] at hn
+        split
+        · -- lh > rh + 2: descend into lr (its stored height is below lh)
+          rw [ih lr (.Node rl rv rr rh) hlr hr]
+          have h1 : height lr < lh := by rw [hlh]; split <;> omega
+          show height lr + rh < n; omega
+        · split
+          · -- rh > lh + 2: descend into rl
+            rw [ih (.Node ll lv lr lh) rl hl hrl]
+            have h1 : height rl < rh := by rw [hrh]; split <;> omega
+            show lh + height rl < n; omega
+          · rfl
+
+theorem join_eq (cmp : α → α → LemOrdering) (l : Pset α) (v : α) (r : Pset α)
+    (hl : heightsOk l = true) (hr : heightsOk r = true) :
+    join cmp l v r = joinSpec cmp l v r :=
+  joinGo_eq cmp v _ l r hl hr (by omega)
+
+end PsetJoin
+
+namespace PmapJoin
+open Pmap
+variable {α β : Type}
+
+def joinSpec (cmp : α → α → LemOrdering) (l : Pmap α β) (v : α) (d : β) (r : Pmap α β) : Pmap α β :=
+  match l, r with
+  | .Empty, _ => add cmp v d r
+  | _, .Empty => add cmp v d l
+  | .Node ll lv ld lr lh, .Node rl rv rd rr rh =>
+    if lh > rh + 2 then bal ll lv ld (joinSpec cmp lr v d (.Node rl rv rd rr rh))
+    else if rh > lh + 2 then bal (joinSpec cmp (.Node ll lv ld lr lh) v d rl) rv rd rr
+    else create l v d r
+termination_by sizeOf l + sizeOf r
+decreasing_by all_goals simp_wf <;> omega
+
+theorem heightsOk_node {l r : Pmap α β} {v : α} {d : β} {h : Nat}
+    (hk : heightsOk (.Node l v d r h) = true) :
+    h = (if height l >= height r then height l + 1 else height r + 1) ∧
+    heightsOk l = true ∧ heightsOk r = true := by
+  simp only [heightsOk, Bool.and_eq_true, beq_iff_eq] at hk
+  exact ⟨hk.1.1, hk.1.2, hk.2⟩
+
+theorem joinGo_eq (cmp : α → α → LemOrdering) (v : α) (d : β) :
+    ∀ (n : Nat) (l r : Pmap α β), heightsOk l = true → heightsOk r = true →
+      height l + height r < n → joinGo cmp n l v d r = joinSpec cmp l v d r := by
+  intro n
+  induction n with
+  | zero => intro l r _ _ hn; omega
+  | succ n ih =>
+    intro l r hl hr hn
+    cases l with
+    | Empty => cases r <;> simp [joinGo, joinSpec]
+    | Node ll lv ld lr lh =>
+      cases r with
+      | Empty => simp [joinGo, joinSpec]
+      | Node rl rv rd rr rh =>
+        obtain ⟨hlh, hll, hlr⟩ := heightsOk_node hl
+        obtain ⟨hrh, hrl, hrr⟩ := heightsOk_node hr
+        simp only [joinGo, joinSpec]
+        simp only [height] at hn
+        split
+        · rw [ih lr (.Node rl rv rd rr rh) hlr hr]
+          have h1 : height lr < lh := by rw [hlh]; split <;> omega
+          show height lr + rh < n; omega
+        · split
+          · rw [ih (.Node ll lv ld lr lh) rl hl hrl]
+            have h1 : height rl < rh := by rw [hrh]; split <;> omega
+            show lh + height rl < n; omega
+          · rfl
+
+theorem join_eq (cmp : α → α → LemOrdering) (l : Pmap α β) (v : α) (d : β) (r : Pmap α β)
+    (hl : heightsOk l = true) (hr : heightsOk r = true) :
+    join cmp l v d r = joinSpec cmp l v d r :=
+  joinGo_eq cmp v d _ l r hl hr (by omega)
+
+end PmapJoin
+
 end LemLibTheorems
 
+#print axioms LemLibTheorems.PsetJoin.join_eq
+#print axioms LemLibTheorems.PmapJoin.join_eq
 #print axioms LemLibTheorems.lemListZip_eq
 #print axioms LemLibTheorems.lemListUnzip_eq
 #print axioms LemLibTheorems.lemListFoldr_eq

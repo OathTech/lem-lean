@@ -159,6 +159,31 @@ example : fmapEqualBy (fun (a b : K2) => a == b) (fun a b => a == b)
 example : Pset.setCase (Pset.fromList cNat [5]) "e" (fun _ => "s") "m" = "s" := by decide
 example : Pset.setCase (Pset.fromList cNat [5, 6]) "e" (fun _ => "s") "m" = "m" := by decide
 
+/-! ## Kernel computability through `join` (fuel-parameter arc, 2026-09-04)
+    `Pset.join`/`Pmap.join` are height-indexed structural recursions (they
+    were well-founded, which the kernel cannot unfold — the consumer
+    measured 17 closed-term `rfl` proofs blocked at `join`). Every closed
+    term below reaches `join` (`union` → `unionGo` → `join`; `concat`;
+    `Pmap.merge`/`union`; `remove` reaches `bal`/`merge`) and is decided by
+    the KERNEL (`decide`), not by evaluation. -/
+example : Pset.elements (Pset.union cNat (Pset.fromList cNat [1, 2, 3, 9]) (Pset.fromList cNat [3, 4, 5, 6, 7, 8])) =
+    [1, 2, 3, 4, 5, 6, 7, 8, 9] := by decide
+example : Pset.elements (Pset.inter cNat (Pset.fromList cNat [1, 2, 3, 4, 5]) (Pset.fromList cNat [4, 5, 6, 7])) =
+    [4, 5] := by decide
+example : Pset.elements (Pset.diff cNat (Pset.fromList cNat [1, 2, 3, 4, 5]) (Pset.fromList cNat [2, 4])) =
+    [1, 3, 5] := by decide
+example : Pset.elements (Pset.remove cNat 3 (Pset.fromList cNat [1, 2, 3, 4, 5, 6, 7])) = [1, 2, 4, 5, 6, 7] := by decide
+example : Pset.heightsOk (Pset.union cNat (Pset.fromList cNat [1, 2, 3, 9]) (Pset.fromList cNat [3, 4, 5, 6, 7, 8])) = true := by decide
+def pmapOf (l : List (Nat × String)) : Pmap Nat String := l.foldl (fun m (k, v) => Pmap.add cNat k v m) .Empty
+example : Pmap.bindings (Pmap.union cNat (pmapOf [(1, "a"), (2, "b"), (5, "e")]) (pmapOf [(2, "B"), (3, "c"), (4, "d")])) =
+    [(1, "a"), (2, "B"), (3, "c"), (4, "d"), (5, "e")] := by decide
+example : Pmap.bindings (Pmap.remove cNat 2 (pmapOf [(1, "a"), (2, "b"), (3, "c"), (4, "d")])) =
+    [(1, "a"), (3, "c"), (4, "d")] := by decide
+example : fmapElements (fmapUnionBy cNat (fmapAddBy cNat 1 10 (fmapAddBy cNat 3 30 fmapEmpty))
+    (fmapAddBy cNat 2 20 (fmapAddBy cNat 4 40 fmapEmpty))) = [(1, 10), (2, 20), (3, 30), (4, 40)] := by decide
+example : fmapElements (fmapDeleteBy cNat 3 (fmapAddBy cNat 1 10 (fmapAddBy cNat 3 30 (fmapAddBy cNat 5 50 fmapEmpty)))) =
+    [(1, 10), (5, 50)] := by decide
+
 /-- `lean_box(0)` ABI: the empty set / map is the first nullary constructor. -/
 example : (setEmpty : Pset Nat) = Pset.Empty := rfl
 example : (fmapEmpty : Fmap Nat Nat) = Fmap.empty := rfl
