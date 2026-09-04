@@ -1418,8 +1418,15 @@ def lemInt64Mod (i n : Int64) : Int64 :=
    * Int32.of_int / Int64.of_int (int32FromInt, int32FromNat, ...): the
      argument is taken modulo 2^32 / 2^64 — Int32.ofInt / Int64.ofInt;
    * Nat_big_num.to_int32 / to_int64 (…FromInteger, …FromNatural,
-     …FromNumeral): zarith raises Overflow outside the range — the
-     Lean side fails loudly;
+     …FromNumeral): on the OCaml target zarith raises Overflow outside
+     the range; lem's OWN semantics of these conversions is MODULAR —
+     the prover-side reps are `word_of_int` (Isabelle) / `n2w` (HOL),
+     library/num.lem:831-832, :1040-1041, :2378-2470 — so the Lean side
+     wraps (Int32.ofInt / Int32.ofNat, Int64 likewise). The raise is an
+     OCaml-execution artifact of the X3 kind, not mirrored ([USER
+     2026-09-04] adopting the record's D4 recommendation:
+     doc/lean-backend/2026-09-03_exception-case-rulings.md, D4 addendum;
+     parity row f_int32_overflow is a registered OCaml-target deviation);
    * Int64.to_int32 (int32FromInt64): the low 32 bits — Int64.toInt32
      (signExtend to the smaller width truncates); Int64.of_int32
      (int64FromInt32): sign extension — Int32.toInt64;
@@ -1438,11 +1445,8 @@ def lemInt32Gtb (a b : Int32) : Bool := decide (b < a)
 def lemInt32Gteb (a b : Int32) : Bool := decide (b <= a)
 def lemInt32OfNat (n : Nat) : Int32 := Int32.ofNat n
 def lemInt32OfInt (i : Int) : Int32 := Int32.ofInt i
-def lemInt32OfIntegerExact (i : Int) : Int32 :=
-  if Int32.minValue.toInt <= i && i <= Int32.maxValue.toInt then Int32.ofInt i
-  else failwithI s!"Nat_big_num.to_int32: Overflow ({i})"
-def lemInt32OfNaturalExact (n : Nat) : Int32 := lemInt32OfIntegerExact (Int.ofNat n)
-def lemInt32FromNumeral (n : Nat) : Int32 := lemInt32OfIntegerExact (Int.ofNat n)
+/- int32FromNumeral: lem's `n2w`/`word_of_int` — modular (D4, above). -/
+def lemInt32FromNumeral (n : Nat) : Int32 := Int32.ofNat n
 def lemInt32ToInt (n : Int32) : Int := n.toInt
 def lemInt32FromInt64 (n : Int64) : Int32 := n.toInt32
 
@@ -1452,11 +1456,8 @@ def lemInt64Gtb (a b : Int64) : Bool := decide (b < a)
 def lemInt64Gteb (a b : Int64) : Bool := decide (b <= a)
 def lemInt64OfNat (n : Nat) : Int64 := Int64.ofNat n
 def lemInt64OfInt (i : Int) : Int64 := Int64.ofInt i
-def lemInt64OfIntegerExact (i : Int) : Int64 :=
-  if Int64.minValue.toInt <= i && i <= Int64.maxValue.toInt then Int64.ofInt i
-  else failwithI s!"Nat_big_num.to_int64: Overflow ({i})"
-def lemInt64OfNaturalExact (n : Nat) : Int64 := lemInt64OfIntegerExact (Int.ofNat n)
-def lemInt64FromNumeral (n : Nat) : Int64 := lemInt64OfIntegerExact (Int.ofNat n)
+/- int64FromNumeral: lem's `n2w`/`word_of_int` — modular (D4, above). -/
+def lemInt64FromNumeral (n : Nat) : Int64 := Int64.ofNat n
 def lemInt64ToInt (n : Int64) : Int := n.toInt
 def lemInt64FromInt32 (n : Int32) : Int64 := n.toInt64
 

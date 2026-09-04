@@ -268,9 +268,12 @@ included.** The Lean reps of lem's numeric library mirror
 slice 2026-09-03): `int`/`int32`/`int64` division and remainder are
 `Nat_num.int_div`/`int_mod` (truncating with the sign adjustment — NOT
 Euclidean for a negative divisor; `integer` stays Euclidean), `int32`/
-`int64` are Lean's `Int32`/`Int64` and WRAP like OCaml's, the checked
-conversions (`…FromInteger`, numerals) fail on overflow exactly where
-zarith raises, every division by zero fails loudly instead of
+`int64` are Lean's `Int32`/`Int64` and WRAP like OCaml's — and so do the
+conversions INTO them (`…FromInteger`/`…FromNatural`/numerals are
+`Int32.ofInt`/`Int32.ofNat`): lem's own reps are `word_of_int`/`n2w`,
+modular, and zarith's `Overflow` raise at those conversions is an
+OCaml-execution artifact not mirrored ([USER 2026-09-04], D4 below) —
+every division by zero fails loudly instead of
 totalising to 0, `integerSqrt` of a negative fails, and
 `integerOfString`/`naturalOfString` parse zarith's `Z.of_string`
 grammar (signs, `0x`/`0o`/`0b`, underscores). Failure parity is the
@@ -298,7 +301,9 @@ compromise; the conversions `natFromNatural`/`intFromInteger` are the
 identity — the 63-bit checks that once mirrored `Nat_big_num.to_int`'s
 raise were removed as an OCaml-execution limit, [USER 2026-09-03] "the
 real thing is the logical semantics"; the parity row `f_int_of_big_num`
-is a registered OCaml-target deviation), and structural `BEq`/`Ord` on values
+is a registered OCaml-target deviation; likewise the `int32`/`int64`
+conversions wrap where `Nat_big_num.to_int32/to_int64` raise `Overflow`
+— D4, [USER 2026-09-04], parity row `f_int32_overflow`), and structural `BEq`/`Ord` on values
 containing a `Pset`/`Pmap` compute where OCaml's polymorphic compare
 raises on the comparator closure (`lean-lib/LemLib.lean:741-748`).
 

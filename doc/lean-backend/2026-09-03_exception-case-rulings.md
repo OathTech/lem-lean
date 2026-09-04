@@ -116,6 +116,32 @@ classes (a)–(c) and do not widen them.
   X3 (the prover-side reading is `word_of_int`, i.e. wrap) and is put to
   the operator in the record's decisions section, unchanged here.
 
+  **D4 addendum 2026-09-04 (structural-declare slice, commit on branch
+  `arc/structural-declare`) — the `int32FromInteger`-family Overflow
+  raise: RULED, WRAP.** The fuel-parameter record §9 D4 found that lem's
+  prover-side reps of `int32FromInteger`/`int32FromNatural`/
+  `int32FromNumeral` and the `int64` trio are `word_of_int` (Isabelle) /
+  `n2w` (HOL) — MODULAR (`library/num.lem:831-832`, `:1040-1041`,
+  `:2378-2470`); the `Nat_big_num.to_int32/to_int64: Overflow` raise is
+  the OCaml backend's, an OCaml-execution artifact of the X3 kind under
+  [USER 2026-09-03] "the real thing is the logical semantics"; the
+  record recommended that the Lean reps become the modular conversions.
+  [USER 2026-09-04], adopting the orchestrator's recommendations
+  verbatim: "go ahead with the merges as proposed, then work on this as
+  you suggest" — D4 = WRAP. Done: the Lean reps are `lemInt32OfInt`
+  (`Int32.ofInt`) / `lemInt32OfNat` (`Int32.ofNat`) and the `Int64`
+  pair; `lemInt32FromNumeral`/`lemInt64FromNumeral` are `Int32.ofNat`/
+  `Int64.ofNat`; `lemInt32OfIntegerExact`, `lemInt32OfNaturalExact`,
+  `lemInt64OfIntegerExact`, `lemInt64OfNaturalExact` are DELETED (no
+  other user). Parity: `f_int32_overflow` is a registered OCaml-target
+  deviation (`tests/comprehensive/parity/expected_failures.txt`, entry
+  class 2, citing this addendum: the runner requires it to fail parity —
+  Lean wraps where the OCaml reference raises — and reports XFAIL);
+  `p_int_wrap` (the in-range and `Int32.of_int` wrapping rows) is
+  unchanged and still byte-identical. This closes TODO row 11. The
+  classification of the remaining LemLib behaviours in the paragraph
+  above (failure parity for raises that are not limits) stands.
+
 ### X1 — polymorphic compare on values containing a set or map
 
 - OCaml `compare`/`=` on a `Pset`/`Pmap` value raises

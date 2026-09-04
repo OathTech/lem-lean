@@ -2379,7 +2379,7 @@ declare hol      target_rep function int32FromNatural n = ((`n2w` n) : int32)
 declare ocaml    target_rep function int32FromNatural = `Nat_big_num.to_int32`
 declare coq      target_rep function int32FromNatural n = (`Z.pred` (`Z.pos` (`P_of_succ_nat` n))) (* TODO check *)
 declare isabelle target_rep function int32FromNatural n = ((`word_of_int` (`int` n)):int32)
-declare lean     target_rep function int32FromNatural = `lemInt32OfNaturalExact`
+declare lean     target_rep function int32FromNatural = `lemInt32OfNat`
 
 assert int32_from_natural_0: int32FromNatural 0 = 0
 assert int32_from_natural_1: int32FromNatural 1 = 1
@@ -2393,7 +2393,7 @@ let int32FromInteger i = (
 
 declare ocaml    target_rep function int32FromInteger = `Nat_big_num.to_int32`
 declare isabelle target_rep function int32FromInteger i = ((`word_of_int` i) : int32)
-declare lean     target_rep function int32FromInteger = `lemInt32OfIntegerExact`
+declare lean     target_rep function int32FromInteger = `lemInt32OfInt`
 
 assert int32_from_integer_0: int32FromInteger 0 = 0
 assert int32_from_integer_1: int32FromInteger 1 = 1
@@ -2453,7 +2453,7 @@ declare hol      target_rep function int64FromNatural n = ((`n2w` n) : int64)
 declare ocaml    target_rep function int64FromNatural = `Nat_big_num.to_int64`
 declare coq      target_rep function int64FromNatural n = (`Z.pred` (`Z.pos` (`P_of_succ_nat` n))) (* TODO check *)
 declare isabelle target_rep function int64FromNatural n = ((`word_of_int` (`int` n)):int64)
-declare lean     target_rep function int64FromNatural = `lemInt64OfNaturalExact`
+declare lean     target_rep function int64FromNatural = `lemInt64OfNat`
 
 assert int64_from_natural_0: int64FromNatural 0 = 0
 assert int64_from_natural_1: int64FromNatural 1 = 1
@@ -2467,7 +2467,7 @@ let int64FromInteger i = (
 
 declare ocaml    target_rep function int64FromInteger = `Nat_big_num.to_int64`
 declare isabelle target_rep function int64FromInteger i = ((`word_of_int` i) : int64)
-declare lean     target_rep function int64FromInteger = `lemInt64OfIntegerExact`
+declare lean     target_rep function int64FromInteger = `lemInt64OfInt`
 
 assert int64_from_integer_0: int64FromInteger 0 = 0
 assert int64_from_integer_1: int64FromInteger 1 = 1
