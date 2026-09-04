@@ -123,7 +123,16 @@ y`), a function type, a sibling under an unsupported head (`set t`, a user
 type applied to `t` — NOT counted: a recursion through such a field is not
 bounded by this size, and the sufficiency obligation is where that shows;
 cross-block/nested-head counting was NOT built — no consumer needs it; noted
-in TODO row 15). A list field therefore contributes `length + Σ element
+in TODO row 15). Stated precisely (audit NOTE-2, §8): a leaf's WEIGHT is
+never what makes a derived size insufficient — a lem `let rec` is
+monomorphic, so one recursion cannot descend into an `'a` field; the one
+insufficiency class is an unsupported-head field that the SAME recursion
+descends into (the auditor's `type tc = TCL | TC of list tc * box tc`
+walked on both sides: `tc.lemSize (TC [] (Box [TCL])) = 1`, the wrapper
+exhausts loudly inside the box), and there the obligation is unprovable
+with the opaque sentinel — the backstop by design. A type recursive ONLY
+through such heads gets no size and is refused with that reason (§8
+MINOR-1). A list field therefore contributes `length + Σ element
 sizes`, so a measure over the parent also bounds a walk along the list
 (`ctypeEqual`'s `List.all … (zip params1 params2)` descends one fuel per
 element and per child).
@@ -141,8 +150,12 @@ the block (a non-recursive member of a recursive block still gets its
 constant-size function: `impl_floating_value.lemSize`). Measured on
 cerberus's tree (derived, `grep`/python over `.tmp/cerb/lean-gen`, 170
 files): **81 types (27 blocks) of 290 inductives get a size function; 66
-container helpers; 1052 lines = 2.7% of the tree's 39110 lines, 55205 bytes
-= 1.6% of 3553252 bytes.** Not derived: library modules (their regeneration
+container helpers; 1052 lines = 2.69% of the tree's 39110 lines, 55229 bytes
+= 1.55% of 3566329 bytes** (CORRECTED per pre-merge audit NOTE-3, §8: the
+first version of this sentence said 55205 bytes of 3553252 = 1.6% — those
+were Python CHARACTER counts of the UTF-8 text (`→`, `×` are multi-byte),
+and the block count stopped before the `end` line; `wc -c` and a
+byte-exact recount agree with the auditor's figures.) Not derived: library modules (their regeneration
 is out of scope and no library type is a measure target), target_rep'd types
 (abbrevs), opaque types, heterogeneous (Type 1, indexed) mutual blocks.
 
@@ -269,7 +282,16 @@ untouched (§5 invariance).
   | `frontend/model/defacto_memory_aux.lem:469` | ``declare {lean} fuel_measure val fake_mem_value_eq = `lemSize mval1` `` |
 
   (`c` is `ctypeEqual`'s first parameter AFTER lem's pattern compilation —
-  the source binds `(Ctype _ ty1)`; the fuel-measure record §2.1's rule.)
+  the source binds `(Ctype _ ty1)`; the fuel-measure record §2.1's rule.
+  Line numbers are those of the INSERTION described — directly after the
+  val's sentinel declare, which in `defacto_memory_aux.lem` is line 468,
+  followed by `simplify_integer_value_base`'s sentinel at 469 in the
+  original; so the new line is 469 and the file grows to 470. The auditor
+  APPENDED the same line after the last line and got `:470` (NOTE-3);
+  either placement is a Lean-only declare and the OCaml output is
+  byte-identical in both — re-verified on a fresh copy, `.tmp/cerb2`: the
+  three declares at `ctype.lem:428`, `core.lem:473`,
+  `defacto_memory_aux.lem:469`.)
 - Baseline lem: `git archive 3c88f0d` built in `.tmp/cerb/lem-base`
   (`make build-lem`); its `-v` prints `Lem 742506d` because the version
   target reads the ENCLOSING worktree's git HEAD (the archive is not a
@@ -368,8 +390,10 @@ cerberus half's).
    `member_shift_ptrval`, `eff_array_shift_ptrval`, `eff_member_shift_ptrval`,
    `memcpy`, `memcmp`, `realloc`, `copy_alloc_id`, `offsetof_ival`,
    `sizeof_ival`, `alignof_ival`.
-3. The three `fuel_measure` lines of §4.1 (NEW; `frontend-c1d` has them at
-   `ctype.lem:428`, `core.lem:473`, `defacto_memory_aux.lem:469`).
+3. The three `fuel_measure` lines of §4.1 (NEW; inserted directly after
+   each val's sentinel declare they sit at `ctype.lem:428`, `core.lem:473`,
+   `defacto_memory_aux.lem:469`; appended at end of file the third is
+   `:470` — either is fine).
 4. Nothing for `monStep`/`monTrace`: the backend emits `inductive monTrace
    [LemFuel]` from the unchanged source.
 5. Then: the three obligation proofs modules `Ctype_lemMeasureProofs.lean`,
@@ -501,3 +525,118 @@ as declared)` (72 + 6; derived count).
 - `.tmp/` (baseline lem, the cerberus copies and trees, the probe package,
   logs) is ephemeral and deleted at slice end; everything load-bearing is
   quoted above.
+
+## 8. Audit response (pre-merge audit `2026-09-04_d2-enablers-audit-premerge.md` @ `145f453`, verdict MERGEABLE, no MAJOR)
+
+One commit on `arc/d2-enablers` (this section's), on top of the
+orchestrator's TODO-row-18 commit `f258c2c`. Each item, what changed, and
+the evidence (verbatim from this worktree).
+
+- **MINOR-1 (recursive only through an unsupported head refused as
+  "non-recursive").** `lean_size_block` now distinguishes three cases: some
+  field reaches a sibling through tuples/`list`/`maybe`/`either` (a size is
+  derived); no field references a sibling at all ("a non-recursive type …",
+  unchanged); a sibling is referenced but only under heads the derivation
+  cannot count — NEW reason with the remedy. Probe
+  `neg_lem_size_unsupported_head` (the auditor's `box tb`), verbatim:
+  ```
+  Error: Lean backend: the fuel measure of tbcount uses `lemSize t`, but the type of t (Neg_lem_size_unsupported_head.tb) has no derived size function (FM-size-type: it is a type recursive ONLY through an unsupported container head (a `set`, a `map`, a user type applied to the recursive type, a function type — the derivation counts siblings only through tuples, `list`, `maybe` and `either`), so no derived size bounds its recursion; write a hand-written computable size in a Lean module the generated module imports (`declare {lean} extra_import`) and name it qualified in the measure); a size is derived for every recursive block of generated inductive types in a user module (`t.lemSize`)
+  ```
+  (`neg_lem_size_nonrec` still reads "it is a non-recursive type (its size
+  is the constant 1 …)".)
+- **MINOR-2 (target_rep'd type's reason unreachable).** Cause found: a type
+  with a Lean target_rep reaches the backend as a `Comment`-wrapped
+  `Type_def` (the target's def_trans comments it out; the emitter renders
+  the abbrev from the `Comment` case), and `lean_size_prepass` did not walk
+  into `Comment` — so the census had no entry and the generic "not a
+  generated inductive type of this invocation" fired. The prepass now walks
+  `Comment c`. Probe `neg_lem_size_reptype` (the auditor's `rt`), verbatim:
+  ```
+  Error: Lean backend: the fuel measure of rspin uses `lemSize r`, but the type of r (Neg_lem_size_reptype.rt) has no derived size function (FM-size-type: it is a type with a Lean target_rep (rendered as an abbrev of a hand-written type)); a size is derived for every recursive block of generated inductive types in a user module (`t.lemSize`)
+  ```
+  The docs' sentence is now true as written. (The library reason stays
+  unreachable by construction — a library type is never a user module's
+  `Type_def`; a `list nat` parameter is the "not a generated inductive
+  type" message, correct for it.)
+- **MINOR-3 (manual: a `lemma` referencing fuel "is refused").** False, as
+  measured by the auditor: every lem `lemma`/`theorem` renders as `/-
+  removed theorem … -/` (pre-existing). The manual's sentence now says so
+  and lists the real fuel-scope sites (an `assert`; instance methods;
+  relations take the binder).
+- **NOTE-1 (a parameter named `lemSize` listed as usable).** The
+  FM-size-param message now filters it out and names the cause. Probe
+  `neg_lem_size_param_named`, verbatim:
+  ```
+  Error: Lean backend: `lemSize` in the fuel measure of spin must be applied directly to one of the parameters n (FM-size-param: `lemSize x` — the backend resolves x's type to its derived size function `t.lemSize`; any other argument shape is refused; `lemSize` is a reserved word inside a measure, so the PARAMETER named `lemSize` cannot be mentioned there — rename it)
+  ```
+  The manual's derived-sizes paragraph gains the reserved-word clause.
+- **NOTE-2 (the insufficiency class).** Stated in DESIGN.md's totality
+  paragraph and in §2.1 above: leaf weight is irrelevant; the one
+  insufficiency class is an unsupported-head field the same recursion
+  descends into; the obligation is the backstop (unprovable with the opaque
+  sentinel).
+- **NOTE-3 (tallies; line number).** Recounted byte-exactly on a fresh
+  regeneration (`.tmp/cerb2`, this lem, the C1 sources + 3 declares, 170
+  files): `wc -c` **3566329 bytes**, 39110 lines; size blocks 27 (20
+  `mutual`), **55229 bytes = 1.55%**, 1052 lines = 2.69%; 81 `.lemSize`
+  defs, 66 helpers. The auditor is right: my 3553252 / 55205 were Python
+  CHARACTER counts (`len(str)` of UTF-8 text with `→`/`×`) and my block
+  regex stopped before the `end` line; §2.1 corrected and labelled. The
+  line number: `:469` is right for the placement the record describes
+  (inserted directly after the sentinel declare at 468); the auditor's
+  appended variant is `:470`; §4.1/§4.5 now say both.
+- **NOTE-6 (invariance harness false-positive shape).** Noted in the
+  `lean-invariance` header of `tests/comprehensive/Makefile`: an `assert`
+  after a stripped declare shifts its OCaml `run_test` location string;
+  keep asserts before the declares (none of the six witnesses has one).
+- NOTE-4/5/7/8: no action (verified checklist; pre-existing limitations;
+  the version-stamp caveat already in §4.1; relation gathering order).
+
+Negative probes after this commit: 81 `OK (rejected as declared)` (78 + 3;
+derived — `neg_lem_size_param_named`, `neg_lem_size_reptype`,
+`neg_lem_size_unsupported_head` among them). Gates on this tree, each run
+ALONE on the box (a first pair of runs overlapped each other — a background
+suite run I believed dead was still going when I started its replacement,
+and the two non-Lean-net runs shared `.scratch` (one tripped the vacuity
+guard, the other showed duplicated exit rows) — discarded, not evidence;
+the solo re-runs are the ones quoted). `make clean` then `make lean`
+(`.tmp/gate-suite-5.log`), verbatim:
+```
+=== Generation: 52 passed, 0 failed, 0 skipped ===
+info: Test_lem_size_lemMeasureProofs.lean:211:0: 'Test_lem_size_lemMeasureProofs.tm_sum_measure_sufficient' depends on axioms: [propext, Quot.sound]
+info: Test_lem_size_lemMeasureProofs.lean:212:0: 'Test_lem_size_lemMeasureProofs.tm_eq_measure_sufficient' depends on axioms: [propext, Quot.sound]
+info: Test_lem_size_lemMeasureProofs.lean:213:0: 'Test_lem_size_lemMeasureProofs.mcount_measure_sufficient' depends on axioms: [propext, Quot.sound]
+info: Test_lem_size_lemMeasureProofs.lean:214:0: 'Test_lem_size_lemMeasureProofs.sb_count_measure_sufficient' depends on axioms: [propext, Quot.sound]
+info: TestLemSizeCheck.lean:30:0: 'tm.lemSize' does not depend on any axioms
+info: TestLemSizeCheck.lean:31:0: 'r1.lemSize' does not depend on any axioms
+info: TestLemSizeCheck.lean:32:0: 'sbox.lemSize' does not depend on any axioms
+info: TestLemSizeCheck.lean:33:0: 'mtree.lemSize' does not depend on any axioms
+Build completed successfully (156 jobs).
+  OK (leg 1): panic prints the Incomplete Pattern message, then continues with default
+  OK (leg 2): fail-stops (exit 134) under LEAN_ABORT_ON_PANIC=1
+single-evaluation: OK
+  OK: compiled draw sequences hold
+  OK: compiled consumer injection holds
+  OK (leg 1): two sufficient fuels agree; insufficient gives the declared sentinel; callee starts from the full ambient
+  OK (leg 2): loud exhaustion at an insufficient runtime fuel fail-stops (exit 134)
+  [81 × "OK (rejected as declared)" — derived count]
+  OK: inv_fuel.lem (7 artifacts byte-identical across ocaml/hol/isa/coq)
+  OK: inv_fuel_measure.lem (7 artifacts byte-identical across ocaml/hol/isa/coq)
+  OK: inv_lem_size.lem (7 artifacts byte-identical across ocaml/hol/isa/coq)
+  OK: inv_reader_consumer.lem (5 artifacts byte-identical across ocaml/hol/isa/coq)
+  OK: inv_structural.lem (7 artifacts byte-identical across ocaml/hol/isa/coq)
+  OK: inv_supply.lem (5 artifacts byte-identical across ocaml/hol/isa/coq)
+  [parity: 24 × "OK: parity", 6 × "OK: both fail", 4 × XFAIL (the registered four) — derived counts]
+  OK: 6 proofs modules scanned; no sorry/admit/axiom/native_decide/bv_decide token
+  OK: 242 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make lean  315.67s user 37.34s system 121% cpu 4:50.65 total
+EXIT 0
+```
+`tests/nonlean-regress/run.sh` (`.tmp/nonlean-4.log`), verbatim:
+```
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+./tests/nonlean-regress/run.sh  205.89s user 8.95s system 83% cpu 4:16.91 total
+EXIT 0
+```
+No rebaseline; the diff touches only `src/lean_backend.ml` (Lean target),
+three negative probes, docs and a Makefile comment.

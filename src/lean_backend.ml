@@ -797,10 +797,15 @@ let lean_render_measure (d : Types.type_defs) (l : Ast.l) (fname : string)
                 "Lean backend: the fuel measure of %s uses `lemSize %s`, but %s is not of a generated inductive type (FM-size-type: `lemSize` is the backend-derived structural size, defined for the recursive blocks of generated inductives; for a list use `List.length %s`, for a nat the parameter itself)"
                 fname x x x)))
       | _ ->
+        let usable = List.filter (fun (n, _) -> n <> "lemSize") params in
+        let usable_names = String.concat ", " (List.map fst usable) in
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: `lemSize` in the fuel measure of %s must be applied directly to one of the parameters %s (FM-size-param: `lemSize x` — the backend resolves x's type to its derived size function `t.lemSize`; any other argument shape is refused)"
-            fname (if params = [] then "(none)" else param_names)))
+            "Lean backend: `lemSize` in the fuel measure of %s must be applied directly to one of the parameters %s (FM-size-param: `lemSize x` — the backend resolves x's type to its derived size function `t.lemSize`; any other argument shape is refused%s)"
+            fname (if usable = [] then "(none)" else usable_names)
+            (if List.mem_assoc "lemSize" params
+             then "; `lemSize` is a reserved word inside a measure, so the PARAMETER named `lemSize` cannot be mentioned there — rename it"
+             else "")))
   in
   let rec render acc = function
     | [] -> acc
@@ -2085,13 +2090,19 @@ let lean_size_block (env : env) (module_name : string)
         | Error e -> Error e
         | Ok members ->
           let siblings = List.map (fun (p, nm, _, _) -> (p, nm)) members in
-          let recursive = List.exists (fun (_, _, _, ctors) ->
-              List.exists (fun (_, args) ->
-                  List.exists (fun ty -> lean_size_shape env.t_env siblings ty <> CSleaf) args) ctors)
-              members in
-          if not recursive then
-            Error "a non-recursive type (its size is the constant 1 — a measure over it would be a magic value; measure the data that actually decreases)"
-          else Ok members
+          let paths = List.map fst siblings in
+          let fields = List.concat_map (fun (_, _, _, ctors) -> List.concat_map snd ctors) members in
+          let recursive = List.exists (fun ty -> lean_size_shape env.t_env siblings ty <> CSleaf) fields in
+          (* pre-merge audit MINOR-1: a block whose only sibling references
+             sit under heads the derivation cannot count (`set t`, a user
+             type applied to `t`) IS recursive — say so, and say why no size
+             is derived, instead of calling it non-recursive *)
+          let refs_sibling = List.exists (lean_typ_refs_paths env.t_env paths) fields in
+          if recursive then Ok members
+          else if refs_sibling then
+            Error "a type recursive ONLY through an unsupported container head (a `set`, a `map`, a user type applied to the recursive type, a function type — the derivation counts siblings only through tuples, `list`, `maybe` and `either`), so no derived size bounds its recursion; write a hand-written computable size in a Lean module the generated module imports (`declare {lean} extra_import`) and name it qualified in the measure"
+          else
+            Error "a non-recursive type (its size is the constant 1 — a measure over it would be a magic value; measure the data that actually decreases)" 
     end
   end
 
@@ -2102,6 +2113,12 @@ let lean_size_block (env : env) (module_name : string)
 let lean_size_prepass env (ds : def list) =
   let rec walk (ns : string list) (((d_aux, _), _, _) : def) =
     match d_aux with
+      (* pre-merge audit MINOR-2: a type with a Lean target_rep reaches the
+         backend as a Comment-wrapped Type_def (the target's def_trans
+         comments it out; the emitter renders the abbrev from the Comment
+         case) — walk into it so the census carries the target_rep reason
+         instead of "not a generated inductive type of this invocation" *)
+      | Comment c -> walk ns c
       | Module (_, (name, _), _, _, _, inner, _) ->
         let n = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip name)) in
         List.iter (walk (ns @ [n])) inner

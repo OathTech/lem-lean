@@ -124,7 +124,11 @@ inductive types in a user module the backend emits, right after the block,
 computable `t.lemSize : t → Nat` functions (one mutual block per type
 block, list/option/sum helpers, `termination_by structural`; 1 per
 constructor node and per non-nullary container constructor, tuples
-transparent, every other field a leaf 0) — the same-module case (cerberus
+transparent, every other field a leaf 0 — a leaf's weight never affects
+the bound: what makes a derived size INSUFFICIENT is a field under an
+unsupported head (`set t`, a user type applied to `t`) that the same
+recursion descends into; there the sufficiency obligation is the backstop,
+unprovable with the opaque sentinel) — the same-module case (cerberus
 `ctypeEqual`/`eq_core_base_type`) cannot be served by a hand-written size
 (import cycle) and Lean's `sizeOf` is noncomputable; non-recursive types
 get none (constant size; a measure over it is refused), and the emission

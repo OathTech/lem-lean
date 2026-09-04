@@ -132,7 +132,13 @@ lean-supply-draws:
 # without them and byte-compare. Vacuity-guarded: the strip must
 # actually remove lines and outputs must exist. (The echoing/human
 # targets — lem, ident, tex, html — deliberately re-render declare
-# lines; they are covered by the nonlean-regress golden net.)
+# lines; they are covered by the nonlean-regress golden net.) Known
+# false-positive SHAPE (D2-enablers audit NOTE-6): stripping a declare
+# line shifts the source LINE of everything after it, and the OCaml
+# auxiliary records an assert's location as a string (`run_test "x"
+# "File …, line N …"`) — so a witness with an `assert` AFTER a declare
+# would diff on that string alone. Keep asserts before the declares (or
+# out of the witnesses; none of the current six has one).
 lean-invariance:
 	@echo "=== Non-Lean invariance ({lean} declares are no-ops for ocaml/hol/isa/coq) ==="
 	@fail=0; \
