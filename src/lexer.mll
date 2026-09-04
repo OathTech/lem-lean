@@ -140,6 +140,7 @@ let kw_table =
      ("reader_seed"),            (fun x -> ReaderSeed(x));
      ("reader_consumer"),        (fun x -> ReaderConsumer(x));
      ("fuel_consumer"),          (fun x -> FuelConsumer(x));
+     ("structural"),             (fun x -> Structural(x));
      ("supply"),                 (fun x -> Supply(x));
      ("pattern_match"),          (fun x -> PatternMatch(x));
      ("right_assoc"),            (fun x -> RightAssoc(x));

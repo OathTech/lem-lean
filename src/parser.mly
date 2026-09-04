@@ -172,7 +172,7 @@ let mk_pre_x_l sk1 (sk2,id) sk3 l =
 %token <Ast.terminal * Ulib.Text.t> IN MEM MinusMinusGt
 %token <Ast.terminal> Class_ Do LeftArrow
 %token <Ast.terminal> Inst Inst_default
-%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep ReaderSeed Supply ReaderConsumer FuelConsumer
+%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep ReaderSeed Supply ReaderConsumer FuelConsumer Structural
 %token <Ast.terminal> RightAssoc LeftAssoc NonAssoc Infix Special TargetRep TargetSorts
 
 %start file
@@ -215,6 +215,8 @@ x:
     { X_l(($1, r"reader_consumer"), loc ()) }
   | FuelConsumer
     { X_l(($1, r"fuel_consumer"), loc ()) }
+  | Structural
+    { X_l(($1, r"structural"), loc ()) }
   | Lparen Eq Rparen
     { mk_pre_x_l $1 $2 $3 (loc ()) }
   | Lparen IN Rparen
@@ -1070,6 +1072,8 @@ declaration :
     { Decl_reader_consumer_decl($1, $2, $3, $4, $5) }
   | Declare targets_opt FuelConsumer Val id
     { Decl_fuel_consumer_decl($1, $2, $3, $4, $5) }
+  | Declare targets_opt Structural Val id
+    { Decl_structural_decl($1, $2, $3, $4, $5) }
 
 lemma_typ:
   | Lemma

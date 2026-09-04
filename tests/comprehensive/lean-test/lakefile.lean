@@ -60,6 +60,8 @@ lean_lib LemComprehensiveTest where
     `Test_target_specific, `Test_target_specific_auxiliary,
     `Test_termination, `Test_termination_auxiliary,
     `Test_stress, `Test_stress_auxiliary,
+    `Test_structural, `Test_structural_auxiliary,
+    `TestStructuralCheck,  -- hand-written structural-declare kernel pins (decide/rfl through structural defs)
     `Test_supply, `Test_supply_auxiliary,
     `Test_supply_multi, `Test_supply_multi_auxiliary,
     `TestSupplyCheck,  -- hand-written supply draw-order/signature pins (effect-retirement L1)

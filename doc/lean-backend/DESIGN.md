@@ -33,7 +33,20 @@ import LemLib
 def double (x : Nat) : Nat := x * 2
 ```
 
-Recursive functions default to `partial def`. With a fuel declare
+Recursive functions default to `partial def`. Two declares make them
+total, one per admissible shape of a recursion. A structural declare
+(`declare {lean} structural val len`) emits an ordinary `def` whose
+termination Lean proves by structural recursion on the parameter the
+backend designates — the well-founded fallback is forbidden, so the
+kernel computes through it (`decide`/`rfl` on closed terms):
+
+```lean
+def len (l : List Nat) : Nat :=
+  match l with | [] => 0 | _ :: xs => 1 + len xs
+termination_by structural l
+```
+
+With a fuel declare
 (``declare {lean} fuel val fuel_countdown = `fuelExhausted n` `` —
 the backtick payload is the expression returned at fuel exhaustion)
 the emission is a total, kernel-transparent triple:
@@ -53,8 +66,18 @@ theorem fuel_countdown_lemFuel_zero (n : Nat) :
 caller's.** Lean's `partial def` is executable but invisible to the
 kernel — any proof about a `partial` function's cone is blocked. Rather
 than attempt general termination proofs (fragile at generated-code
-scale), the backend lets the model author mark functions with a fuel
-declare: the worker recurses structurally on an explicit fuel COUNTER,
+scale), the backend offers two declared shapes. `declare {lean}
+structural val f` marks a recursion that IS structural on its data: the
+def is emitted with `termination_by structural <param>`, the parameter
+chosen by the backend's syntactic analysis (at every recursive call the
+designated argument is a variable bound by a constructor pattern on that
+parameter; mutual blocks all-or-none; a recursive function passed as a
+value to a higher-order function, an n+k pattern, a record pattern or a
+computed argument is refused at generation with the reason), and Lean's
+checker is the build-time backstop — the well-founded fallback is
+forbidden because it would silently trade kernel computability for a
+`def` keyword. `declare {lean} fuel val` marks everything else: the
+worker recurses structurally on an explicit fuel COUNTER,
 so the kernel sees a total function, and the wrapper starts the counter
 from the AMBIENT fuel — `LemFuel.fuel`, the one field of the LemLib class
 `LemFuel`, which every fuel'd function and every definition that
@@ -363,7 +386,10 @@ generated code and in a target_rep:
 - **(b) a termination proof** — well-founded recursion, no bound exists
   (admissible, but the kernel cannot unfold it: closed-term `rfl`/`decide`
   stop there);
-- **(c) structural recursion on a DATA measure** — an index computed
+- **(c) structural recursion on the data, or on a DATA measure** —
+  structural recursion on the argument itself (`declare {lean}
+  structural val`: the generated def carries `termination_by structural
+  <param>`, so the kernel computes through it), or an index computed
   from the arguments that bounds the recursion exactly (the AVL height
   stored in a `Pset`/`Pmap` node for `join`/`union`/`inter`/`diff`/`subset`/
   `merge`, the element count for `compare`/`equal`): nothing is chosen,
@@ -396,6 +422,8 @@ unaffected:
 | `declare {lean} rename module = Name` | rename the generated module |
 | ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total worker recursing on a fuel counter (returning `sentinel` at zero) + a wrapper `f [LemFuel] := f_lemFuel LemFuel.fuel` starting the counter from the ambient fuel + the exhaustion lemma `f_lemFuel_zero`; `f` and everything reaching it take `[LemFuel]` (the fuel lifting). The numeric form `= N` is refused (a magic value) |
 | `declare {lean} fuel_consumer val f` | `f`'s hand-written Lean implementation reads the ambient fuel (`LemFuel.fuel`): its callers are fuel-lifted; call sites unchanged (requires a Lean target_rep) |
+| `declare {lean} structural val f` | emit the recursive `f` as an ordinary `def` with `termination_by structural <param>` (the parameter designated by the backend's analysis; Lean's checker is the build-time backstop; the well-founded fallback is forbidden, so the kernel computes through `f`). Refused with `fuel`, with `termination_argument`, on a rep'd val, on a non-recursive or multi-clause def, on part of a mutual block |
+| `declare {lean} termination_argument f = automatic` | lem's upstream termination vocabulary, honoured: a plain `def` with no clause (Lean tries structural, then well-founded recursion — total either way, kernel computability not promised) |
 | `declare {lean} effectful val f` | RETIRED (effect-retirement arc): refused fail-closed with an error naming supply lifting as the migration path; the annotation is retained in the grammar for other targets' potential use |
 | `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
 | `declare {lean} reader_seed val f` | do not lift `f`; its first argument supplies the reader value to lifted callees in its body |

@@ -67,8 +67,13 @@ the negative/panic test legs — is `tests/comprehensive/`:
   greppable runtime failure (`failwithI`), never a silent default.
 - **Totality on demand; the fuel is yours.** By default, recursive
   Lem functions emit as Lean `partial def` (executable, but opaque to
-  the kernel). Marking a function ``declare {lean} fuel val f =
-  `sentinel` `` emits a total worker that recurses structurally on an
+  the kernel). A recursion that is structural on its data is marked
+  `declare {lean} structural val f` and emits an ordinary `def` with
+  `termination_by structural <param>` — Lean proves termination, the
+  well-founded fallback is forbidden, and the kernel computes through
+  it (`decide`/`rfl` on closed terms). Anything else is marked
+  ``declare {lean} fuel val f = `sentinel` ``, which emits a total worker
+  that recurses structurally on an
   explicit fuel counter, plus a wrapper `f [LemFuel] := f_lemFuel
   LemFuel.fuel` that starts the counter from the AMBIENT fuel — a
   parameter of the generated code (an instance-implicit `[LemFuel]`

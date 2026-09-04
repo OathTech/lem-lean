@@ -631,6 +631,72 @@ let lean_fuel_consumer_check env =
             cname)))
     (c_env_all_consts env.c_env)
 
+(* ===== Structural recursion (declare {lean} structural val;
+   structural-declare slice, 2026-09-04) =====
+
+   Classic mechanism name: STRUCTURAL RECURSION, checked by Lean's own
+   termination checker — the admissible form (c) of DESIGN.md's "No magic
+   values" (nothing chosen, no bound, a proof unfolds it). A recursive lem
+   definition marked `declare {lean} structural val f` is emitted as an
+   ORDINARY `def` (no `partial`, no fuel worker, no `[LemFuel]`) with an
+   explicit `termination_by structural <param>` clause, so Lean must
+   prove termination by structural recursion on the named parameter and
+   may NOT fall back to well-founded recursion (form (b): admissible, but
+   the kernel cannot compute through it — the consumer's `join` finding).
+   The parameter is chosen by lean_structural_assign (below): the syntactic
+   analysis that Lean's checker also performs — at every self/sibling call
+   the designated argument must be a variable bound by a constructor
+   pattern (transitively) on the designated parameter. Where the analysis
+   finds no such parameter, generation refuses with the lem location and
+   the offending call; where it finds one and Lean's checker still
+   disagrees, the Lean BUILD fails (`failed to infer structural
+   recursion` / `Cannot use parameter …`) — that is the fail-closed
+   backstop, exactly as for `fuel_consumer` (N1). Contrast
+   `declare {lean} termination_argument f = automatic` (lem's upstream
+   vocabulary, honoured by this backend as a plain `def` with NO clause):
+   Lean tries structural recursion and then well-founded recursion — a
+   `def` either way, but kernel computability is not promised. *)
+
+let lean_is_structural env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  Targetset.mem Target_lean cd.structural
+
+(* Guards ST-fuel / ST-inert / ST-term, fail-closed for every marked
+   constant even if unused; idempotent; run at every pre-pass entry.
+   - ST-fuel: fuel and structural are the two admissible shapes of a
+     recursion ((B) and (A)); one definition carries one of them.
+   - ST-inert: a target_rep'd val renders as a comment — the declare
+     would be silently inert (the FC-inert rule).
+   - ST-term: `termination_argument` already decides the keyword for the
+     Lean target; two termination declares on one val contradict
+     (`automatic` permits the well-founded fallback that `structural`
+     forbids). *)
+let lean_structural_check env =
+  List.iter (fun cref ->
+      let cd = c_env_lookup Ast.Unknown env.c_env cref in
+      if Targetset.mem Target_lean cd.structural then begin
+        let cname = Name.to_string (Path.get_name cd.const_binding) in
+        if lean_fuel_is_fuelled env cref then
+          raise (Reporting_basic.err_general true cd.spec_l
+            (Printf.sprintf
+              "Lean backend: val %s carries both 'declare {lean} fuel val' and 'declare {lean} structural val' (ST-fuel: a recursion is emitted either as a fuel worker or as a structural def — declare exactly one)"
+              cname));
+        if lean_has_lean_rep env cref then
+          raise (Reporting_basic.err_general true cd.spec_l
+            (Printf.sprintf
+              "Lean backend: 'declare {lean} structural val %s' on a val that carries a Lean target_rep (ST-inert: its lem definition renders as a comment, so the declare is silently inert — drop it)"
+              cname));
+        (match Target.Targetmap.apply_target cd.termination_setting
+                 (Target.Target_no_ident Target.Target_lean) with
+         | Some _ ->
+           raise (Reporting_basic.err_general true cd.spec_l
+             (Printf.sprintf
+               "Lean backend: val %s carries both 'declare termination_argument' and 'declare {lean} structural val' (ST-term: 'automatic' lets Lean fall back to well-founded recursion, which 'structural' forbids — declare exactly one)"
+               cname))
+         | None -> ())
+      end)
+    (c_env_all_consts env.c_env)
+
 (* Pre-pass over one module's defs: grow St.fuel_lifted to a fixpoint — a
    def is fuel-lifted if it defines a fuel'd constant, or (transitively)
    uses a fuel'd constant, a fuel_consumer, or a fuel-lifted def. Val_def
@@ -641,6 +707,7 @@ let lean_fuel_consumer_check env =
    hand-written rep that needs the fuel says so with fuel_consumer). *)
 let lean_fuel_prepass env (ds : def list) =
   lean_fuel_consumer_check env;
+  lean_structural_check env;
   let target = Target.Target_no_ident Target.Target_lean in
   let rec def_infos acc (((d_aux, _), _, _) as d : def) =
     match d_aux with
@@ -1202,6 +1269,276 @@ and qb_bound_names = function
     List.map (fun a -> Name.to_string (Name.strip_lskip a.term))
       (Pattern_syntax.pat_vars_src p) @ exp_bound_names e
 
+
+(* ===== The structural-parameter analysis (declare {lean} structural val;
+   mechanism comment at lean_is_structural) =====
+
+   A variable's LEVEL relative to the definition's parameters: SL_exact i
+   = the i-th parameter itself (or an alias of it); SL_strict i = bound by
+   a constructor pattern (P_const/P_cons/P_list/P_record/P_num_add, or a
+   tuple INSIDE one of those) in a match whose scrutinee is at level
+   exact/strict i — a strict structural subterm of parameter i. A tuple
+   pattern at the top of a match on a tuple-typed variable does NOT
+   descend (its components are of other types; Lean's checker agrees), but
+   a match on a tuple OF variables binds component-wise (the renderer
+   emits it as a multi-discriminant match); a record-field projection is
+   NOT tracked (see `level`). Shadowing removes a name;
+   `let x = y` aliases a tracked variable. Every application whose head is
+   a member of the block is a CALL (callee, argument levels, location); a
+   member referenced in any other position (passed to a higher-order
+   function, partially applied under a lambda) is refused outright —
+   Lean's structural checker cannot eliminate such a recursive
+   application either ("failed to eliminate recursive application"). *)
+type struct_level = SL_exact of int | SL_strict of int
+
+(* the status of one argument at a recursive call *)
+type struct_arg =
+  | SA_nonvar                      (* not a variable (an application, a literal, …) *)
+  | SA_untracked of string         (* a variable bound outside the structural chain *)
+  | SA_level of struct_level
+
+type struct_call = {
+  sc_callee : Types.const_descr_ref;
+  sc_args : struct_arg list;
+  sc_locn : Ast.l;
+}
+
+exception Structural_refused of Ast.l * string
+
+let struct_level_idx = function SL_exact i | SL_strict i -> i
+
+let rec lean_strip_pat (p : pat) : pat_aux =
+  match p.term with
+  | P_paren (_, p', _) | P_typ (_, p', _, _, _) -> lean_strip_pat p'
+  | t -> t
+
+let lean_structural_calls (members : (Types.const_descr_ref * string) list)
+    (env0 : (string * struct_level) list) (body : exp) : struct_call list =
+  let calls = ref [] in
+  let nm n = Name.to_string (Name.strip_lskip n) in
+  let pat_names p =
+    List.map (fun a -> nm a.term) (Pattern_syntax.pat_vars_src p) in
+  let remove names env = List.filter (fun (n, _) -> not (List.mem n names)) env in
+  let rec strip e = match ExpW.exp_to_term e with
+    | Paren (_, e', _) | Typed (_, e', _, _, _) | Begin (_, e', _) -> strip e'
+    | _ -> e in
+  (* NOT tracked: a record-field projection `c.tail` of a tracked variable.
+     lem compiles a record pattern into a match on the projections
+     (`match c.head, c.tail with | _, Just c' -> …`), and Lean's structural
+     checker cannot eliminate a recursive application through a projection
+     — measured (structural-declare record §3): with a permissive rule
+     here the Lean build refused `failed to infer structural recursion:
+     Cannot use parameter c: failed to eliminate recursive application
+     chain_len c'`. The analysis mirrors the checker. *)
+  let level env e = match ExpW.exp_to_term (strip e) with
+    | Var v -> List.assoc_opt (nm v) env
+    | _ -> None in
+  let arg_status env e = match ExpW.exp_to_term (strip e) with
+    | Var v -> (match List.assoc_opt (nm v) env with
+        | Some l -> SA_level l
+        | None -> SA_untracked (nm v))
+    | _ -> SA_nonvar in
+  let rec bind_pat top l env (p : pat) =
+    let under = if top then l else SL_strict (struct_level_idx l) in
+    match p.term with
+    | P_var n | P_var_annot (n, _) -> (nm n, under) :: env
+    | P_wild _ | P_lit _ -> env
+    | P_num_add ((n, _), _, _, _) -> (nm n, SL_strict (struct_level_idx l)) :: env
+    | P_as (_, p', _, (n, _), _) -> bind_pat top l ((nm n, under) :: env) p'
+    | P_typ (_, p', _, _, _) | P_paren (_, p', _) -> bind_pat top l env p'
+    | P_tup (_, ps, _) ->
+      if top then env
+      else List.fold_left (bind_pat false l) env (Seplist.to_list ps)
+    | P_const (_, ps) | P_backend (_, _, _, ps) | P_vectorC (_, ps, _) ->
+      List.fold_left (bind_pat false l) env ps
+    | P_record (_, fps, _) ->
+      List.fold_left (fun env (_, _, p') -> bind_pat false l env p') env (Seplist.to_list fps)
+    | P_vector (_, ps, _) | P_list (_, ps, _) ->
+      List.fold_left (bind_pat false l) env (Seplist.to_list ps)
+    | P_cons (p1, _, p2) -> bind_pat false l (bind_pat false l env p1) p2 in
+  let qb_names = function
+    | Qb_var n -> [nm n.term]
+    | Qb_restr (_, _, p, _, _, _) -> pat_names p in
+  let is_member e = match ExpW.exp_to_term e with
+    | Constant c -> List.mem_assoc c.descr members
+    | _ -> false in
+  let member_name e = match ExpW.exp_to_term e with
+    | Constant c -> List.assoc c.descr members
+    | _ -> "" in
+  let member_of e = match ExpW.exp_to_term e with
+    | Constant c -> c.descr
+    | _ -> assert false in
+  let rec walk env (e : exp) : unit =
+    match ExpW.exp_to_term e with
+    | Var _ | Lit _ | Nvar_e _ | Backend _ -> ()
+    | Constant _ when is_member e ->
+      raise (Structural_refused (Typed_ast.exp_to_locn e,
+        Printf.sprintf "a self-reference to %s in non-call position (passed as a value, e.g. to a higher-order function such as List.map/List.all): Lean's structural checker cannot eliminate such a recursive application — write the traversal as an explicit recursion (a list-walking sibling in the same mutual block)" (member_name e)))
+    | Constant _ -> ()
+    | App _ ->
+      let (head, args) = Typed_ast_syntax.strip_app_exp e in
+      if is_member head then
+        calls := { sc_callee = member_of head;
+                   sc_args = List.map (arg_status env) args;
+                   sc_locn = Typed_ast.exp_to_locn e } :: !calls
+      else walk env head;
+      List.iter (walk env) args
+    | Infix (e1, op, e2) ->
+      if is_member op then
+        calls := { sc_callee = member_of op;
+                   sc_args = [arg_status env e1; arg_status env e2];
+                   sc_locn = Typed_ast.exp_to_locn e } :: !calls
+      else walk env op;
+      walk env e1; walk env e2
+    | Fun (_, ps, _, body) -> walk (remove (List.concat_map pat_names ps) env) body
+    | Function (_, arms, _) ->
+      List.iter (fun (p, _, body, _) -> walk (remove (pat_names p) env) body)
+        (Seplist.to_list arms)
+    | Case (_, _, scrut, _, arms, _) ->
+      walk env scrut;
+      let scrut' = strip scrut in
+      let tup_levels = match ExpW.exp_to_term scrut' with
+        | Tup (_, es, _) -> Some (List.map (level env) (Seplist.to_list es))
+        | _ -> None in
+      let one_level = level env scrut' in
+      List.iter (fun (p, _, body, _) ->
+          let env0 = remove (pat_names p) env in
+          let env1 = match tup_levels, one_level with
+            | Some ls, _ ->
+              (match lean_strip_pat p with
+               | P_tup (_, ps, _) when List.length ls = Seplist.length ps ->
+                 List.fold_left2 (fun env l p' ->
+                     match l with Some l -> bind_pat true l env p' | None -> env)
+                   env0 ls (Seplist.to_list ps)
+               | _ -> env0)
+            | None, Some l -> bind_pat true l env0 p
+            | None, None -> env0 in
+          walk env1 body)
+        (Seplist.to_list arms)
+    | Typed (_, e', _, _, _) | Paren (_, e', _) | Begin (_, e', _) -> walk env e'
+    | Let (_, (lb, _), _, body) ->
+      (match lb with
+       | Let_val (p, _, _, rhs) ->
+         walk env rhs;
+         let env0 = remove (pat_names p) env in
+         let env1 = match lean_strip_pat p, level env rhs with
+           | (P_var n | P_var_annot (n, _)), Some l -> (nm n, l) :: env0
+           | _ -> env0 in
+         walk env1 body
+       | Let_fun (n, ps, _, _, rhs) ->
+         let fname = nm n.term in
+         walk (remove (fname :: List.concat_map pat_names ps) env) rhs;
+         walk (remove [fname] env) body)
+    | Tup (_, es, _) | List (_, es, _) | Vector (_, es, _) | Set (_, es, _) ->
+      List.iter (walk env) (Seplist.to_list es)
+    | Record (_, fes, _) ->
+      List.iter (fun (_, _, e', _) -> walk env e') (Seplist.to_list fes)
+    | Recup (_, e0, _, fes, _) ->
+      walk env e0;
+      List.iter (fun (_, _, e', _) -> walk env e') (Seplist.to_list fes)
+    | Field (e', _, _) -> walk env e'
+    | VectorSub (e', _, _, _, _, _) | VectorAcc (e', _, _, _) -> walk env e'
+    | If (_, e1, _, e2, _, e3) -> walk env e1; walk env e2; walk env e3
+    | Setcomp (_, e1, _, e2, _, ns) ->
+      let env' = remove (NameSet.fold (fun n acc -> Name.to_string n :: acc) ns []) env in
+      walk env' e1; walk env' e2
+    | Comp_binding (_, _, e1, _, _, qbs, _, e2, _) ->
+      let env' = remove (List.concat_map qb_names qbs) env in
+      walk env' e1; walk env' e2
+    | Quant (_, qbs, _, e1) -> walk (remove (List.concat_map qb_names qbs) env) e1
+    | Do (_, _, dls, _, e1, _, _) ->
+      let env' = List.fold_left (fun env (Do_line (p, _, rhs, _)) ->
+          walk env rhs; remove (pat_names p) env) env dls in
+      walk env' e1 in
+  walk env0 body;
+  List.rev !calls
+
+(* The designated structural parameter of every member of a block (a
+   single self-recursive definition, or every member of a truly mutual
+   block): an assignment member -> parameter position such that at every
+   call from member f to member g, g's designated argument is at level
+   SL_strict (f's designated position). The search is exhaustive over the
+   named parameters (blocks are small); the first assignment in
+   parameter order wins — Lean's own inference tries parameters in the
+   same order. On failure the refusal names, for each named parameter of
+   the first member, the first call that breaks it. *)
+let lean_structural_assign
+    (members : (Types.const_descr_ref * string * pat list * exp * Ast.l) list)
+    : (Types.const_descr_ref * int) list =
+  let param_name pats i = match List.nth_opt pats i with
+    | Some p -> (match lean_strip_pat p with
+        | P_var n | P_var_annot (n, _) -> Some (Name.to_string (Name.strip_lskip n))
+        | _ -> None)
+    | None -> None in
+  let crefs = List.map (fun (c, name, _, _, _) -> (c, name)) members in
+  let infos = List.map (fun (c, name, pats, body, l) ->
+      let env = List.concat (List.mapi (fun i _ ->
+          match param_name pats i with
+          | Some n -> [(n, SL_exact i)]
+          | None -> []) pats) in
+      let calls = lean_structural_calls crefs env body in
+      (c, name, pats, calls, l)) members in
+  let cands (_, _, pats, _, _) =
+    List.filter (fun i -> param_name pats i <> None)
+      (List.init (List.length pats) (fun i -> i)) in
+  let call_ok assign pc sc =
+    match List.assoc_opt sc.sc_callee assign with
+    | None -> false
+    | Some pg ->
+      (match List.nth_opt sc.sc_args pg with
+       | Some (SA_level (SL_strict i)) -> i = pc
+       | _ -> false) in
+  let ok assign =
+    List.for_all (fun (c, _, _, calls, _) ->
+        let pc = List.assoc c assign in
+        List.for_all (call_ok assign pc) calls) infos in
+  let rec search acc = function
+    | [] -> let a = List.rev acc in if ok a then Some a else None
+    | ((c, _, _, _, _) as m) :: rest ->
+      List.fold_left (fun found i ->
+          match found with
+          | Some _ -> found
+          | None -> search ((c, i) :: acc) rest)
+        None (cands m) in
+  match search [] infos with
+  | Some a -> a
+  | None ->
+    let (c0, name0, pats0, calls0, l0) = List.hd infos in
+    let describe_arg pats_of_callee pc pg sc =
+      match List.nth_opt sc.sc_args pg with
+      | None -> Printf.sprintf "the call supplies fewer than %d arguments" (pg + 1)
+      | Some SA_nonvar -> "the argument is not a variable"
+      | Some (SA_untracked v) ->
+        Printf.sprintf "the argument `%s` is a variable that is not bound by a constructor pattern on that parameter (bound by a lambda or let, or by a match on a computed scrutinee — note that lem compiles a record pattern into a match on field projections, which Lean's structural checker cannot see through)" v
+      | Some (SA_level (SL_exact i)) when i = pc -> "the argument is the parameter itself (not a strict subterm)"
+      | Some (SA_level (SL_exact i)) | Some (SA_level (SL_strict i)) ->
+        Printf.sprintf "the argument is (a subterm of) parameter %s, not of this one"
+          (match param_name pats_of_callee i with Some n -> n | None -> string_of_int i) in
+    let per_param = List.filter_map (fun i ->
+        match param_name pats0 i with
+        | None -> None
+        | Some pname ->
+          (* the assignment that designates position i for the first
+             member and its own position for every sibling call *)
+          let first_bad = List.find_opt (fun sc ->
+              not (call_ok [(c0, i)] i sc) || sc.sc_callee <> c0) calls0 in
+          (match first_bad with
+           | None when calls0 = [] -> Some (Printf.sprintf "  parameter %s: the definition makes no call to itself" pname)
+           | None -> None
+           | Some sc when sc.sc_callee <> c0 ->
+             Some (Printf.sprintf "  parameter %s: a call to a mutual sibling at %s has no structural position consistent with the block"
+                     pname (Reporting_basic.loc_to_string true sc.sc_locn))
+           | Some sc ->
+             Some (Printf.sprintf "  parameter %s: at the self-call %s, %s" pname
+                     (Reporting_basic.loc_to_string true sc.sc_locn)
+                     (describe_arg pats0 i i sc))))
+        (List.init (List.length pats0) (fun i -> i)) in
+    let plural = if List.length members > 1 then " (mutual block: every member must recurse structurally on one of its parameters, and every cross-call must pass a strict subterm)" else "" in
+    raise (Structural_refused (l0,
+      Printf.sprintf "no parameter of %s is passed a strict structural subterm (a variable bound by a constructor pattern on that parameter) at every recursive call%s:\n%s"
+        name0 plural
+        (if per_param = [] then "  (no parameter of this definition is a plain variable)"
+         else String.concat "\n" per_param)))
 
 (* Types.t analog of derive_field_bounds: which tyvars must carry an
    [Inhabited tv] bound for the type to be synthesizable from the S1
@@ -2135,6 +2472,8 @@ type pat_style = FunParam | MatchArm
        val; the mechanism comment is at lean_fuel_is_fuelled). --- *)
     let is_fuelled_cref = lean_fuel_is_fuelled A.env
     let is_fuel_consumer_cref = lean_fuel_is_consumer A.env
+    (* declare {lean} structural val (mechanism comment at lean_is_structural) *)
+    let is_structural_cref = lean_is_structural A.env
     (* Does this expression force fuel lifting of its enclosing def. *)
     let exp_needs_fuel (e : exp) : bool =
       let ue = add_exp_entities empty_used_entities e in
@@ -2979,8 +3318,78 @@ type pat_style = FunParam | MatchArm
                      | Some (Ast.Termination_setting_automatic _) -> true
                      | _ -> false)
                   | None -> false in
+                (* declare {lean} structural val: ordinary `def` +
+                   `termination_by structural <param>` (mechanism comment
+                   at lean_is_structural). Guards, fail-closed: not inside
+                   an instance (a method has no def keyword or clause to
+                   attach to), single-clause only (the equation-compiler
+                   form has no named parameter to designate), and never
+                   inert — the definition must actually recurse; in a truly
+                   mutual block every member carries the declare (all-or-
+                   none, as for fuel: Lean's mutual structural recursion
+                   needs a clause on each). Inert while rendering block
+                   comments (dead text). *)
+                let structural_for g = match group_cref g with
+                  | Some c -> is_structural_cref c
+                  | None -> false in
+                let any_structural =
+                  (not !St.rendering_comment) && List.exists structural_for groups in
+                if any_structural then begin
+                  List.iter (fun g ->
+                      if structural_for g then begin
+                        if inside_instance then
+                          raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                            "Lean backend: 'declare {lean} structural val' inside an instance (unsupported: define the recursion at top level and reference it from the instance method)");
+                        if List.length g > 1 then
+                          raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                            "Lean backend: 'declare {lean} structural val' on a multi-clause definition (unsupported; write the clauses as a single match so the structural parameter has a name)");
+                        if not is_truly_mutual && not (group_self_recursive g) then
+                          raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                            "Lean backend: 'declare {lean} structural val' on a definition that is not recursive (ST-nonrec: the declare would be inert — a non-recursive definition is already an ordinary def; drop the declare)")
+                      end) groups;
+                  if is_truly_mutual && not (List.for_all structural_for groups) then
+                    raise (Reporting_basic.err_general true (locn_of_clause_group (List.concat groups))
+                      "Lean backend: 'declare {lean} structural val' in a mutual block requires EVERY member to carry it (all-or-none: Lean's mutual structural recursion needs a termination_by clause on each member)")
+                end;
+                (* the designated parameter of each structural member: one
+                   analysis for a truly mutual block (cross-calls count),
+                   one per member otherwise (a de-mutualized sibling is an
+                   ordinary, already-emitted callee) *)
+                let structural_assign =
+                  if not any_structural then [] else begin
+                    let member_of g = match g with
+                      | [({term = n}, c, pats, _, _, e)] ->
+                        (c, Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)),
+                         pats, e, locn_of_clause_group g)
+                      | _ ->
+                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                          "Lean backend: internal error — structural member is not a single clause") in
+                    let run members =
+                      try lean_structural_assign members
+                      with Structural_refused (l, msg) ->
+                        raise (Reporting_basic.err_general true l
+                          (String.concat "" ["Lean backend: 'declare {lean} structural val' refused — "; msg])) in
+                    if is_truly_mutual then run (List.map member_of groups)
+                    else List.concat_map (fun g ->
+                        if structural_for g then run [member_of g] else []) groups
+                  end in
+                let structural_clause g =
+                  match group_cref g with
+                  | Some c when any_structural && structural_for g ->
+                    let i = List.assoc c structural_assign in
+                    let pats = match g with [(_, _, pats, _, _, _)] -> pats | _ -> [] in
+                    let pname = match lean_strip_pat (List.nth pats i) with
+                      | P_var n | P_var_annot (n, _) ->
+                        lean_escape_keyword (Name.to_string (Name.strip_lskip n))
+                      | _ ->
+                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                          "Lean backend: internal error — designated structural parameter is not a variable") in
+                    Output.flat [from_string "\ntermination_by structural "; from_string pname; from_string "\n"]
+                  | _ -> emp in
                 let def_keyword_for g =
                   if inside_instance then emp
+                  else if any_structural && structural_for g then
+                    from_string "def"
                   else if demutualized <> None then
                     (* de-mutualized member: keyword by ITS OWN recursion
                        and ITS OWN termination declare *)
@@ -3267,7 +3676,9 @@ type pat_style = FunParam | MatchArm
                           St.reader_binder := saved;
                           St.supply_binder := saved_sb;
                           St.fuel_binder := saved_fb)
-                        (fun () -> (def_keyword_for g, render_group g, emp))
+                        (fun () ->
+                           (def_keyword_for g,
+                            Output.flat [render_group g; structural_clause g], emp))
                     | Some (n, c, s) ->
                       let base_name = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
                       let worker = String.concat "" [base_name; "_lemFuel"] in

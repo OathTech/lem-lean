@@ -514,6 +514,7 @@ declare_def =  (* declarations *)
  | Decl_supply_decl of terminal * targets option * terminal * terminal * id
  | Decl_reader_consumer_decl of terminal * targets option * terminal * terminal * id
  | Decl_fuel_consumer_decl of terminal * targets option * terminal * terminal * id
+ | Decl_structural_decl of terminal * targets option * terminal * terminal * id
 
 
 type

@@ -316,6 +316,17 @@ and const_descr =
         target_rep on the same val. Lean backend only (fuel-parameter
         arc, 2026-09-04; replaces the deleted per-declaration numeric
         fuel budget). *)
+
+    structural : Target.Targetset.t;
+    (** Targets on which this recursive constant is declared STRUCTURAL
+        (declare {targets} structural val f): emitted as an ordinary
+        total definition whose termination the target's own checker
+        proves by structural recursion on one parameter (Lean:
+        `def … termination_by structural x`; the well-founded fallback
+        is forbidden so the kernel can compute through it). Refused when
+        combined with a fuel sentinel, a termination_argument or a
+        target_rep on the same val. Lean backend only (structural-declare
+        slice, 2026-09-04). *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -569,6 +580,7 @@ type declare_def =  (** Declarations *)
  | Decl_supply                of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_reader_consumer       of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_fuel_consumer         of lskips * targets_opt * lskips * lskips * const_descr_ref id
+ | Decl_structural            of lskips * targets_opt * lskips * lskips * const_descr_ref id
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist
