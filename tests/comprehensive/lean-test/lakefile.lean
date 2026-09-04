@@ -16,6 +16,7 @@ lean_lib LemComprehensiveTest where
     `Test_classes, `Test_classes_auxiliary,
     `Test_collections, `Test_collections_auxiliary,
     `Test_contextual_keywords, `Test_contextual_keywords_auxiliary,
+    `Test_contextual_keywords_lemMeasureProofs,  -- hand-written proof of its measured declare's obligation (fuel-measure slice)
     `Test_cross_field_access,
     `Test_cross_field_access_import,
     `Test_cross_module, `Test_cross_module_auxiliary,
@@ -36,6 +37,13 @@ lean_lib LemComprehensiveTest where
     `Test_name_capture, `Test_name_capture_auxiliary,
     `Test_failwith_threading, `Test_failwith_threading_auxiliary,
     `TestFailwithThreadingCheck,  -- hand-written arc-8 S2 signature-shape checks
+    `Test_fuel_measure, `Test_fuel_measure_auxiliary,  -- the auxiliary file carries the generated fuel_measure OBLIGATIONS (fuel-measure slice)
+    `Test_fuel_measure_lemMeasureProofs,  -- hand-written proofs of those obligations (imported by the auxiliary file; the build fails without it)
+    `Test_fuel_measure_types, `Test_fuel_measure_types_auxiliary,
+    `Test_fuel_measure_tree, `Test_fuel_measure_tree_auxiliary,
+    `Test_fuel_measure_tree_lemMeasureProofs,  -- hand-written proofs (nested inductive, foldl as written)
+    `TestFuelMeasureImpl,  -- hand-written COMPUTABLE structural size of mtree (a measure over a user type)
+    `TestFuelMeasureCheck,  -- hand-written fuel-measure kernel pins (decide/rfl through measured wrappers; consumers binder-free)
     `Test_fuel_param, `Test_fuel_param_auxiliary,
     `TestFuelConsumerImpl,  -- hand-written fuel_consumer implementation ([LemFuel])
     `TestFuelParamCheck,  -- hand-written fuel-parameter kernel pins (fuel-parameter arc)

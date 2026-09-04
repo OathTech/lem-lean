@@ -306,6 +306,14 @@ module St = struct
      worker/wrapper), so the def-assembly sites emit `[LemFuel]` and
      references to fuel-lifted constants are in scope (fuel_scope_check). *)
   let fuel_binder : bool ref = ref false
+  (* [file] Fuel-measure obligations (declare {lean} fuel_measure val;
+     fuel-measure slice, 2026-09-04): the generated `f_measure_sufficient`
+     theorem statements of this module's measured functions, collected
+     while the main body renders (defs folds last-to-first, so in reverse
+     declaration order) and emitted into the module's `_auxiliary.lean`
+     — lem's own home for prover-side obligations — behind an import of
+     the hand-written proofs module `<Module>_lemMeasureProofs`. *)
+  let measure_obligations : Output.t list ref = ref []
   (* [render] reader_seed (declare {lean} reader_seed val f): while
      rendering a seed-marked def's body, the name of its first argument,
      which OVERRIDES the injected reader parameter name at every
@@ -370,7 +378,8 @@ module St = struct
     namespace_stack := [];
     collected_imports := [];
     pending_abbrevs := [];
-    deferred_opens := []
+    deferred_opens := [];
+    measure_obligations := []
 
   (* Full reset — the reentrancy hook (be:G3): a second lem invocation in
      one process starts from a fresh backend. Not called on the normal
@@ -605,6 +614,185 @@ let lean_has_lean_rep env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
   Target.Targetmap.apply_target cd.target_rep (Target.Target_no_ident Target.Target_lean) <> None
 
+(* ===== Fuel measures (declare {lean} fuel_measure val f = `expr`;
+   fuel-measure slice, 2026-09-04) =====
+
+   Classic mechanism name: a DATA MEASURE instantiating the fuel — form
+   (c) of DESIGN.md's "No magic values" for a fuel'd function. The
+   ruling ([USER 2026-09-04]): the lem sources are NOT restructured for
+   Lean's structural checker ("we maintain the lem structure, and we get
+   additional properties we want without any trust decrease"); the fuel
+   worker stays exactly as generated (the OCaml output is untouched by
+   construction), and the WRAPPER of a measured function instantiates the
+   worker's counter from a Lean expression over the function's own
+   parameters instead of the ambient `[LemFuel]`:
+
+       def f (x : T) : R := f_lemFuel (<measure>) x
+
+   so `f` is fuel-FREE for its callers (no `[LemFuel]` binder unless its
+   body passes the ambient on to another fuel'd function; the fuel
+   fixpoint treats a measured constant as a non-fuel'd one). The
+   companion obligation — the measure is a SUFFICIENT fuel — is emitted
+   as a theorem STATEMENT in the module's auxiliary file,
+
+       theorem f_measure_sufficient (x : T) (lemFuel : Nat)
+           (lemMeasureLe : <measure> ≤ lemFuel) :
+           f_lemFuel lemFuel x = f x := <Module>_lemMeasureProofs.f_measure_sufficient x lemFuel lemMeasureLe
+
+   whose proof the consumer supplies in the hand-written module
+   `<Module>_lemMeasureProofs` (imported by the auxiliary file): the Lean
+   build FAILS without it — no measured function ships without its
+   theorem. Fail-closed rules (lean_fuel_measure_check + the emission
+   guards): FM-nofuel (a measure needs the fuel worker), FM-consumer,
+   FM-structural (one shape per definition), FM-free (an unqualified
+   identifier in the measure that is not a parameter — a global Lean name
+   must be qualified), FM-sizeOf (Lean's automatic `SizeOf` instances are
+   noncomputable — measured in this slice: `List._sizeOf_inst … has no
+   executable code`; a measure must execute), FM-ambient
+   (`LemFuel` in a measure), FM-literal / FM-const (a numeral, or any
+   measure mentioning no parameter: not a DATA measure — a magic value),
+   FM-mutual (all-or-none in a truly mutual fuel'd block), FM-supply
+   (unsupported combination), FM-library (a library module's auxiliary
+   file is not built, so its obligation would have no home). *)
+
+let lean_fuel_measure_for env cref =
+  let cd = c_env_lookup Ast.Unknown env.c_env cref in
+  Target.Targetmap.apply_target cd.fuel_measure (Target.Target_no_ident Target.Target_lean)
+
+let lean_fuel_is_measured env cref = lean_fuel_measure_for env cref <> None
+
+(* A fuel'd constant whose wrapper reads the AMBIENT fuel — the one kind
+   that makes its callers fuel-lifted. A measured constant is fuel'd (it
+   has a worker) but not ambient. *)
+let lean_fuel_is_ambient env cref =
+  lean_fuel_is_fuelled env cref && not (lean_fuel_is_measured env cref)
+
+(* Guards FM-consumer / FM-structural / FM-nofuel, fail-closed for every
+   marked constant even if unused; idempotent; run FIRST at every pre-pass
+   entry (so a measure conflict is reported as such, before the FC/ST
+   checks would report the same val for another reason). *)
+let lean_fuel_measure_check env =
+  List.iter (fun cref ->
+      let cd = c_env_lookup Ast.Unknown env.c_env cref in
+      if lean_fuel_is_measured env cref then begin
+        let cname = Name.to_string (Path.get_name cd.const_binding) in
+        if Targetset.mem Target_lean cd.fuel_consumer then
+          raise (Reporting_basic.err_general true cd.spec_l
+            (Printf.sprintf
+              "Lean backend: val %s carries both 'declare {lean} fuel_consumer val' and 'declare {lean} fuel_measure val' (FM-consumer: a fuel_consumer is a hand-written implementation that reads the ambient fuel; a measure instantiates a GENERATED worker's counter — the two exclude each other)"
+              cname));
+        if Targetset.mem Target_lean cd.structural then
+          raise (Reporting_basic.err_general true cd.spec_l
+            (Printf.sprintf
+              "Lean backend: val %s carries both 'declare {lean} structural val' and 'declare {lean} fuel_measure val' (FM-structural: a structural def has no fuel counter to instantiate — declare exactly one shape)"
+              cname));
+        if not (lean_fuel_is_fuelled env cref) then
+          raise (Reporting_basic.err_general true cd.spec_l
+            (Printf.sprintf
+              "Lean backend: 'declare {lean} fuel_measure val %s' without a 'declare {lean} fuel val %s = `sentinel`' on the same val (FM-nofuel: the measure instantiates the fuel WORKER's counter, so the worker must exist)"
+              cname cname))
+      end)
+    (c_env_all_consts env.c_env)
+
+(* The measure is a Lean expression over the function's parameters. Its
+   identifier tokens are classified (fail-closed): a parameter (by its
+   lem name; substituted by the rendered Lean binder — dotted projections
+   `x.1`/`x.length` allowed), a QUALIFIED global (`Ns.f` —
+   Lean's global namespace is not visible at generation, so a global must
+   be spelled with its namespace, which also keeps it from shadowing a
+   parameter), or refused: `LemFuel…` (FM-ambient: a measure that reads
+   the ambient is not a data measure), the reserved `lemFuel`/`_lem…`
+   binders, `sizeOf`/`SizeOf.…` (FM-sizeOf: noncomputable, cannot be the
+   wrapper's runtime counter), and any other unqualified name (FM-free —
+   Lean keywords such as `fun`/`if` included: a measure is a plain
+   expression). A measure
+   mentioning NO parameter is refused (FM-literal for a bare numeral,
+   FM-const otherwise): nothing about the data bounds it — the magic
+   value itself. Tokens: ASCII letters/`_`/non-ASCII bytes start an
+   identifier, continued by those plus digits, `'`, `.`, `!`, `?`;
+   digits start a numeral; everything else passes through unchanged. *)
+type lean_measure_token = LM_ident of string | LM_num of string | LM_other of string
+
+let lean_measure_tokens (m : string) : lean_measure_token list =
+  let n = String.length m in
+  let is_alpha c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_' || Char.code c >= 128 in
+  let is_digit c = c >= '0' && c <= '9' in
+  let is_ident_cont c = is_alpha c || is_digit c || c = '\'' || c = '.' || c = '!' || c = '?' in
+  let rec go i acc =
+    if i >= n then List.rev acc
+    else begin
+      let c = m.[i] in
+      if is_alpha c then begin
+        let j = ref (i + 1) in
+        while !j < n && is_ident_cont m.[!j] do incr j done;
+        go !j (LM_ident (String.sub m i (!j - i)) :: acc)
+      end else if is_digit c then begin
+        let j = ref (i + 1) in
+        while !j < n && is_digit m.[!j] do incr j done;
+        go !j (LM_num (String.sub m i (!j - i)) :: acc)
+      end else
+        go (i + 1) (LM_other (String.make 1 c) :: acc)
+    end in
+  go 0 []
+
+let lean_render_measure (l : Ast.l) (fname : string)
+    (params : (string * string) list) (measure : string) : string =
+  let toks = lean_measure_tokens measure in
+  let param_names = String.concat ", " (List.map fst params) in
+  let mentions = ref 0 in
+  let starts_with pre s =
+    String.length s >= String.length pre && String.sub s 0 (String.length pre) = pre in
+  let render = function
+    | LM_other s | LM_num s -> s
+    | LM_ident t ->
+      let head, rest =
+        match String.index_opt t '.' with
+        | Some i -> String.sub t 0 i, String.sub t i (String.length t - i)
+        | None -> t, "" in
+      if List.mem_assoc head params then begin
+        incr mentions; String.concat "" [List.assoc head params; rest]
+      end
+      else if head = "sizeOf" || head = "SizeOf" then
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: the fuel measure of %s uses `%s` (FM-sizeOf: Lean's automatic `SizeOf` instances are NONCOMPUTABLE — the wrapper must execute, so a measure is a computable expression: `List.length xs + 1`, `n + 1`, or a hand-written structural size function `Ns.size x` in a Lean module the generated module imports via `declare {lean} extra_import`)"
+            fname t))
+      else if head = "LemFuel" then
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: the fuel measure of %s mentions `%s` (FM-ambient: a measure that reads the ambient fuel is not a data measure — it must be an expression over the parameters %s)"
+            fname t param_names))
+      else if head = "lemFuel" || starts_with "_lem" head then
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: the fuel measure of %s mentions the reserved binder `%s` (the backend's synthesized names are not the function's parameters)"
+            fname t))
+      else if rest <> "" then t
+      else
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: free variable `%s` in the fuel measure of %s (FM-free: a measure mentions only the function's parameters — here %s — and QUALIFIED Lean names such as `List.length xs` or `Ns.size x`; Lean's global namespace is not visible at generation, so an unqualified name that is not a parameter is refused)"
+            t fname (if params = [] then "none" else param_names)))
+  in
+  let rendered = String.concat "" (List.map render toks) in
+  if !mentions = 0 then begin
+    let significant = List.filter (function
+        | LM_other s -> not (List.mem s [" "; "\t"; "\n"; "("; ")"])
+        | _ -> true) toks in
+    match significant with
+    | [LM_num _] ->
+      raise (Reporting_basic.err_general true l
+        (Printf.sprintf
+          "Lean backend: the fuel measure of %s is the numeral `%s` (FM-literal: a literal fuel is a magic value — [USER 2026-09-03] \"any and all magic values that are hardcoded and can't be quantified over are definitionally bugs\"; a fuel measure is an expression over the parameters %s, e.g. `List.length xs + 1`)"
+          fname (String.trim measure) (if params = [] then "(none)" else param_names)))
+    | _ ->
+      raise (Reporting_basic.err_general true l
+        (Printf.sprintf
+          "Lean backend: the fuel measure of %s (`%s`) mentions none of its parameters %s (FM-const: a DATA measure is a function of the data; a constant measure is a magic value)"
+          fname (String.trim measure) (if params = [] then "(none)" else param_names)))
+  end;
+  rendered
+
 (* Guards FC-rep / FC-inert, fail-closed for every marked constant even if
    unused; idempotent; run at every pre-pass entry.
    - FC-rep: a fuel_consumer IS a hand-written extern boundary, so it
@@ -706,6 +894,7 @@ let lean_structural_check env =
    seed), and target_rep'd defs are NOT (their bodies are dead text; a
    hand-written rep that needs the fuel says so with fuel_consumer). *)
 let lean_fuel_prepass env (ds : def list) =
+  lean_fuel_measure_check env;
   lean_fuel_consumer_check env;
   lean_structural_check env;
   let target = Target.Target_no_ident Target.Target_lean in
@@ -726,10 +915,13 @@ let lean_fuel_prepass env (ds : def list) =
     changed := false;
     List.iter (fun (defined, used) ->
         if not (Types.Cdset.subset defined !St.fuel_lifted) then begin
+          (* a MEASURED fuel'd constant is fuel-free for its callers (its
+             wrapper's counter comes from the data): it is lifted only if
+             its body reaches the ambient like any other def *)
           let needs =
-            Types.Cdset.exists (lean_fuel_is_fuelled env) defined
+            Types.Cdset.exists (lean_fuel_is_ambient env) defined
             || Types.Cdset.exists (fun c ->
-                   lean_fuel_is_fuelled env c || lean_fuel_is_consumer env c
+                   lean_fuel_is_ambient env c || lean_fuel_is_consumer env c
                    || Types.Cdset.mem c !St.fuel_lifted)
                  used in
           if needs then begin
@@ -2472,13 +2664,16 @@ type pat_style = FunParam | MatchArm
        val; the mechanism comment is at lean_fuel_is_fuelled). --- *)
     let is_fuelled_cref = lean_fuel_is_fuelled A.env
     let is_fuel_consumer_cref = lean_fuel_is_consumer A.env
+    (* declare {lean} fuel_measure val (mechanism comment at lean_fuel_measure_for) *)
+    let fuel_measure_for = lean_fuel_measure_for A.env
+    let is_ambient_fuelled_cref = lean_fuel_is_ambient A.env
     (* declare {lean} structural val (mechanism comment at lean_is_structural) *)
     let is_structural_cref = lean_is_structural A.env
     (* Does this expression force fuel lifting of its enclosing def. *)
     let exp_needs_fuel (e : exp) : bool =
       let ue = add_exp_entities empty_used_entities e in
       List.exists (fun cref ->
-          is_fuelled_cref cref || is_fuel_consumer_cref cref
+          is_ambient_fuelled_cref cref || is_fuel_consumer_cref cref
           || Types.Cdset.mem cref !St.fuel_lifted)
         ue.used_consts
     (* The ambient-fuel binder: instance-implicit, so no call site
@@ -3498,13 +3693,29 @@ type pat_style = FunParam | MatchArm
                            let ue = add_exp_entities empty_used_entities e in
                            List.exists (fun cref ->
                                not (List.mem cref block_crefs)
-                               && (is_fuelled_cref cref || is_fuel_consumer_cref cref
+                               && (is_ambient_fuelled_cref cref || is_fuel_consumer_cref cref
                                    || Types.Cdset.mem cref !St.fuel_lifted))
                              ue.used_consts) g) groups in
+                (* declare {lean} fuel_measure val in a truly mutual fuel'd
+                   block: all-or-none, as for the fuel itself (each member's
+                   wrapper starts the SHARED counter from its own measure;
+                   a member left on the ambient would make the block's
+                   callers fuel-lifted while its siblings are fuel-free) *)
+                if is_truly_mutual && fuel_plan <> []
+                   && List.exists (fun (c, _) -> fuel_measure_for c <> None) fuel_plan
+                   && not (List.for_all (fun (c, _) -> fuel_measure_for c <> None) fuel_plan) then
+                  raise (Reporting_basic.err_general true (locn_of_clause_group (List.concat groups))
+                    "Lean backend: 'declare {lean} fuel_measure val' in a mutual block requires EVERY member to carry it (FM-mutual, all-or-none: the members share one counter)");
                 let saved_plan = !St.fuel_workers in
                 St.fuel_workers := fuel_plan;
                 Fun.protect ~finally:(fun () -> St.fuel_workers := saved_plan) @@ fun () ->
-                let bodies = List.map (fun g ->
+                (* fuel_measure obligations are consed per member while the
+                   block's bodies render (member order) and defs folds the
+                   blocks last-to-first: reverse this block's segment
+                   afterwards so the auxiliary file lists them in
+                   declaration order *)
+                let obligations_before = !St.measure_obligations in
+                let bodies_raw = List.map (fun g ->
                     (* Fuel emission (declare {lean} fuel val): single-clause,
                        non-mutual, non-instance, not reader-lifted (extend on
                        need — fail closed on every unsupported combination). *)
@@ -3583,12 +3794,12 @@ type pat_style = FunParam | MatchArm
                               (Pattern_syntax.pat_vars_src p)) pats
                           @ exp_bound_names e) g in
                       List.iter (fun n ->
-                        if n = "lemFuel"
+                        if n = "lemFuel" || n = "lemMeasureLe"
                            || (String.length n >= 11 && String.sub n 0 11 = "_lemReader_")
                            || (String.length n >= 10 && String.sub n 0 10 = "_lemSupply") then
                           raise (Reporting_basic.err_general true (locn_of_clause_group g)
                             (Printf.sprintf
-                              "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel' and the '_lemReader_'/'_lemSupply' prefixes are the backend's, in parameters AND clause bodies; a shadowed fuel/reader/supply binder is silently wrong) — rename the variable" n)))
+                              "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel', 'lemMeasureLe' and the '_lemReader_'/'_lemSupply' prefixes are the backend's, in parameters AND clause bodies; a shadowed fuel/reader/supply binder is silently wrong) — rename the variable" n)))
                         bound in
                     (* --- Supply lifting: group classification + the
                        fail-closed guards (G-inst; the v1 restrictions
@@ -3713,6 +3924,39 @@ type pat_style = FunParam | MatchArm
                           St.fuel_binder := saved_fb)
                         (fun () ->
                           let body = render_group g in
+                          (* A parameter pattern's binder: a variable (bare,
+                             annotated `(x : t)`, or parenthesised), or a
+                             wildcard (fresh name); anything else has no
+                             name — the `_zero` lemma is then not
+                             generated, a measured wrapper is refused.
+                             Returns (binder, argument, lem name option). *)
+                          let pats = match g with
+                            | (_, _, pats, _, _, _) :: _ -> pats
+                            | [] -> [] in
+                          let rec binder_of i (p : pat) =
+                            let mk nm t lemname =
+                              Some (Output.flat [from_string " ("; nm; from_string " : "; t; from_string ")"],
+                                    Output.flat [from_string " "; nm], lemname) in
+                            let lem_of v = Name.to_string (Name.strip_lskip v) in
+                            match p.term with
+                            | P_var v -> mk (name_var_output v) (pat_typ (C.t_to_src_t p.typ)) (Some (lem_of v))
+                            | P_var_annot (v, t) -> mk (name_var_output v) (pat_typ t) (Some (lem_of v))
+                            | P_wild _ ->
+                              mk (from_string (Printf.sprintf "_x%d" (i + 1))) (pat_typ (C.t_to_src_t p.typ)) None
+                            | P_typ (_, p', _, _, _) | P_paren (_, p', _) -> binder_of i p'
+                            | _ -> None in
+                          let binders_and_args = List.mapi binder_of pats in
+                          let all_named = not (List.exists (fun o -> o = None) binders_and_args) in
+                          let bs = List.filter_map (fun o -> o) binders_and_args in
+                          (* class-constraint binders must be re-emitted on
+                             the wrapper too (arc-3 batch D: [Eq0 a]-style
+                             constrained defs failed to elaborate) *)
+                          let cons_out =
+                            if constraints = emp then emp
+                            else Output.flat [from_string " "; constraints] in
+                          let wrapper_and_obligation =
+                            match fuel_measure_for c with
+                            | None ->
                           (* Point-free wrapper at the AMBIENT fuel
                              (`worker LemFuel.fuel`): call sites are
                              unchanged, `@f ⟨n⟩ = f_lemFuel n` unfolds
@@ -3730,12 +3974,6 @@ type pat_style = FunParam | MatchArm
                                              pat_typ (C.t_to_src_t (reader_value_typ cref));
                                              from_string ") -> "])
                               (get_reader_params ())) in
-                          (* class-constraint binders must be re-emitted on
-                             the wrapper too (arc-3 batch D: [Eq0 a]-style
-                             constrained defs failed to elaborate) *)
-                          let cons_out =
-                            if constraints = emp then emp
-                            else Output.flat [from_string " "; constraints] in
                           (* A supply-lifted worker's wrapper: the supply
                              binders sit after the readers (fixed order:
                              [LemFuel], [Inhabited], fuel counter, readers,
@@ -3753,14 +3991,103 @@ type pat_style = FunParam | MatchArm
                                  | (_, _, pats, _, _, _) :: _ -> List.length pats
                                  | [] -> 0)
                             else pat_typ (C.t_to_src_t cd.const_type) in
-                          let wrapper = Output.flat [
+                          Output.flat [
                             from_string "\n\n";
                             from_string "def "; from_string base_name; tv_out; cons_out;
                             from_string " [LemFuel]"; inhabited_binder_output ();
                             from_string " : "; reader_arrows; supply_arrows;
                             result_typ_out;
                             from_string " := "; from_string worker;
-                            from_string " LemFuel.fuel"; from_string "\n"] in
+                            from_string " LemFuel.fuel"; from_string "\n"]
+                            | Some measure ->
+                          (* declare {lean} fuel_measure val (mechanism
+                             comment at lean_fuel_measure_for): the wrapper
+                             binds the parameters and starts the worker's
+                             counter from the DATA MEASURE — no ambient
+                             fuel is read here; the binder `[LemFuel]`
+                             appears only if the body passes the ambient
+                             on to another fuel'd function (then, and only
+                             then, the def is fuel-lifted — the fixpoint
+                             and workers_need_fuel must agree). *)
+                          let l = locn_of_clause_group g in
+                          if is_library_module !St.current_module_name then
+                            raise (Reporting_basic.err_general true l
+                              (Printf.sprintf
+                                "Lean backend: 'declare {lean} fuel_measure val %s' in a library module (FM-library: the library's auxiliary files are not built, so the sufficiency obligation would have no home)"
+                                base_name));
+                          if !St.supply_binder then
+                            raise (Reporting_basic.err_general true l
+                              (Printf.sprintf
+                                "Lean backend: 'declare {lean} fuel_measure val %s' on a supply-lifted definition (FM-supply: unsupported combination; extend when needed)"
+                                base_name));
+                          if not all_named then
+                            raise (Reporting_basic.err_general true l
+                              (Printf.sprintf
+                                "Lean backend: 'declare {lean} fuel_measure val %s' on a definition whose parameter is a destructuring pattern (the measured wrapper binds every parameter by name — write the destructuring as a match in the body)"
+                                base_name));
+                          if fuel_lifted_g <> workers_need_fuel then
+                            raise (Reporting_basic.err_general true l
+                              "Lean backend: internal error — the fuel fixpoint and the block's ambient-reach test disagree on a measured definition");
+                          let params = List.filter_map (fun (_, _, lemname) ->
+                              match lemname with
+                              | Some ln -> Some (ln, lean_escape_keyword ln)
+                              | None -> None) bs in
+                          let measure_out = lean_render_measure l base_name params measure in
+                          let npats = List.length pats in
+                          let rec codomain n (t : Types.t) =
+                            if n = 0 then t
+                            else match t.Types.t with
+                              | Types.Tfn (_, b) -> codomain (n - 1) b
+                              | _ ->
+                                raise (Reporting_basic.err_general true l
+                                  "Lean backend: internal error — a measured definition has more parameters than its type has arrows") in
+                          let result_out = pat_typ (C.t_to_src_t (codomain npats cd.const_type)) in
+                          let ambient_binder =
+                            if fuel_lifted_g && not inside_instance then from_string " [LemFuel]" else emp in
+                          let arg_binders = Output.flat (List.map (fun (b, _, _) -> b) bs) in
+                          let arg_names = Output.flat (List.map (fun (_, a, _) -> a) bs) in
+                          let reader_binders =
+                            if lifted then reader_binder_output () else emp in
+                          let reader_args = if lifted then reader_args_output () else emp in
+                          let wrapper = Output.flat [
+                            from_string "\n\n";
+                            from_string "def "; from_string base_name; tv_out; cons_out;
+                            ambient_binder; inhabited_binder_output ();
+                            reader_binders; arg_binders;
+                            from_string " : "; result_out;
+                            from_string " := "; from_string worker;
+                            from_string " ("; from_string measure_out; from_string ")";
+                            reader_args; arg_names; from_string "\n"] in
+                          (* The sufficiency OBLIGATION, stated here and
+                             proved in `<Module>_lemMeasureProofs` (a
+                             hand-written module the auxiliary file
+                             imports): at every fuel at or above the
+                             measure the worker equals the wrapper — the
+                             wrapper's value is the fuel-independent value
+                             of the recursion; `f x = f_lemFuel (measure) x`
+                             itself is `rfl`. *)
+                          let proofs_module =
+                            String.concat "" [!St.current_module_name; "_lemMeasureProofs"] in
+                          let thm = String.concat "" [base_name; "_measure_sufficient"] in
+                          let obligation = Output.flat ([
+                            from_string "\n/- fuel_measure obligation for `"; from_string base_name;
+                            from_string "` (generated; declare {lean} fuel_measure val "; from_string base_name;
+                            from_string " = `"; from_string (String.trim measure);
+                            from_string "`): the measure is a sufficient fuel. The proof is hand-written in `";
+                            from_string proofs_module; from_string "." ; from_string thm;
+                            from_string "`, stated with exactly these binders; the build fails without it. -/\n";
+                            from_string "theorem "; from_string thm; tv_out; cons_out;
+                            ambient_binder; inhabited_binder_output ();
+                            reader_binders; arg_binders;
+                            from_string " (lemFuel : Nat) (lemMeasureLe : ("; from_string measure_out;
+                            from_string ") ≤ lemFuel) :\n    "; from_string worker; from_string " lemFuel";
+                            reader_args; arg_names; from_string " = "; from_string base_name;
+                            reader_args; arg_names; from_string " :=\n  ";
+                            from_string proofs_module; from_string "."; from_string thm;
+                            reader_args; arg_names; from_string " lemFuel lemMeasureLe\n"]) in
+                          St.measure_obligations := obligation :: !St.measure_obligations;
+                          wrapper in
+                          let wrapper = wrapper_and_obligation in
                           (* The exhaustion lemma `<worker>_zero`: the
                              worker at counter 0 IS the sentinel, by rfl —
                              kernel-transparent, so "exhausted" is
@@ -3772,31 +4099,11 @@ type pat_style = FunParam | MatchArm
                              parameter pattern gets an explanatory comment
                              instead — state that lemma by hand. *)
                           let zero_lemma =
-                            let pats = match g with
-                              | (_, _, pats, _, _, _) :: _ -> pats
-                              | [] -> [] in
-                            (* a parameter pattern's binder: a variable (bare,
-                               annotated `(x : t)`, or parenthesised), or a
-                               wildcard (fresh name); anything else has no
-                               name to state the lemma with *)
-                            let rec binder_of i (p : pat) =
-                              let mk nm t =
-                                Some (Output.flat [from_string " ("; nm; from_string " : "; t; from_string ")"],
-                                      Output.flat [from_string " "; nm]) in
-                              match p.term with
-                              | P_var v -> mk (name_var_output v) (pat_typ (C.t_to_src_t p.typ))
-                              | P_var_annot (v, t) -> mk (name_var_output v) (pat_typ t)
-                              | P_wild _ ->
-                                mk (from_string (Printf.sprintf "_x%d" (i + 1))) (pat_typ (C.t_to_src_t p.typ))
-                              | P_typ (_, p', _, _, _) | P_paren (_, p', _) -> binder_of i p'
-                              | _ -> None in
-                            let binders_and_args = List.mapi binder_of pats in
-                            if List.exists (fun o -> o = None) binders_and_args then
+                            if not all_named then
                               Output.flat [
                                 from_string "/- "; from_string worker;
                                 from_string "_zero not generated: a parameter is a destructuring pattern; state the exhaustion lemma by hand -/\n"]
                             else begin
-                              let bs = List.filter_map (fun o -> o) binders_and_args in
                               let supply_names =
                                 if not !St.supply_binder then emp else
                                 Output.flat (List.map (fun (_, pname) ->
@@ -3807,11 +4114,11 @@ type pat_style = FunParam | MatchArm
                                 tv_out; cons_out;
                                 fuel_binder_output (); inhabited_binder_output ();
                                 reader_binder_output (); supply_binder_output ()]
-                                @ List.map fst bs
+                                @ List.map (fun (b, _, _) -> b) bs
                                 @ [from_string " :\n    "; from_string worker; from_string " 0";
                                    (if lifted then reader_args_output () else emp);
                                    supply_names]
-                                @ List.map snd bs
+                                @ List.map (fun (_, a, _) -> a) bs
                                 @ [from_string " = "; fuel_sentinel_output s; from_string " := rfl\n"])
                             end in
                           (* Wrapper (and its lemma) are returned separately:
@@ -3820,6 +4127,11 @@ type pat_style = FunParam | MatchArm
                              set (arc 3, B2). *)
                           (from_string "def", body, Output.flat [wrapper; zero_lemma]))
                   ) groups in
+                let bodies =
+                  let n_new = List.length !St.measure_obligations - List.length obligations_before in
+                  let added = List.filteri (fun i _ -> i < n_new) !St.measure_obligations in
+                  St.measure_obligations := List.rev added @ obligations_before;
+                  bodies_raw in
                 let rec_skips =
                   if is_recursive && not inside_instance then
                     ws skips'
@@ -7282,7 +7594,21 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
         from_string (String.concat "" ["open "; name_str; "\n"])
       ) !St.auxiliary_opens in
       let opens_output = Output.flat opens in
+      (* Fuel-measure obligations (mechanism comment at
+         lean_fuel_measure_for): the theorem statements of this module's
+         measured functions go into the auxiliary file — lem's home for
+         prover-side obligations — behind an import of the hand-written
+         proofs module `<Module>_lemMeasureProofs`, which the imports
+         above precede (the transitive-open block may itself start with
+         imports). Declaration order restored (defs folds last-to-first). *)
+      let measure_import, measure_obligations =
+        if !St.measure_obligations = [] then emp, emp
+        else
+          from_string (String.concat "" ["import "; mod_name; "_lemMeasureProofs\n"]),
+          Output.flat (
+            from_string "\n/- ===== fuel_measure obligations (generated statements; proofs in the hand-written module above) ===== -/\n"
+            :: !St.measure_obligations) in
         ((to_rope (r"\"") lex_skip need_space @@ imports_output ^ transitive_opens ^ ns_start ^ lean_defs ^ ns_end ^ ws end_lex_skips),
-          to_rope (r"\"") lex_skip need_space @@ transitive_opens ^ opens_output ^ lean_defs_extra ^ ws end_lex_skips)
+          to_rope (r"\"") lex_skip need_space @@ measure_import ^ transitive_opens ^ opens_output ^ lean_defs_extra ^ measure_obligations ^ ws end_lex_skips)
     ;;
   end

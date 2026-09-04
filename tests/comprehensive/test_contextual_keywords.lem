@@ -3,7 +3,7 @@ open import Pervasives_extra
 (* ================================================================
    The Lean-backend annotation words — fuel, reader, effectful,
    ground_rep, reader_seed, skip_instances, extra_import, supply,
-   reader_consumer, fuel_consumer, structural — are CONTEXTUAL keywords: they act as keywords only inside `declare`
+   reader_consumer, fuel_consumer, structural, fuel_measure — are CONTEXTUAL keywords: they act as keywords only inside `declare`
    forms and must remain usable as ordinary identifiers everywhere
    else, on every target (2026-08-31 backend quality review, M1).
 
@@ -25,11 +25,12 @@ let supply = (8:nat)
 let reader_consumer = (9:nat)
 let fuel_consumer = (10:nat)
 let structural = (11:nat)
+let fuel_measure = (12:nat)
 
 assert ctx_kw_sum_ok :
   (fuel + reader + effectful + ground_rep + reader_seed
      + skip_instances + extra_import + supply + reader_consumer
-     + fuel_consumer + structural = (66:nat))
+     + fuel_consumer + structural + fuel_measure = (78:nat))
 
 (* === As function name and as parameter names === *)
 let add_fuel (fuel : nat) (reader : nat) = fuel + reader
@@ -44,6 +45,10 @@ let add_structural (structural : nat) (fuel : nat) = structural + fuel
 
 assert ctx_kw_param3_ok : (add_structural 40 2 = (42:nat))
 
+let add_fuel_measure (fuel_measure : nat) (structural : nat) = fuel_measure + structural
+
+assert ctx_kw_param4_ok : (add_fuel_measure 41 1 = (42:nat))
+
 (* === As pattern variables (match) === *)
 let match_fuel (x : maybe nat) =
   match x with
@@ -54,14 +59,15 @@ let match_fuel (x : maybe nat) =
 assert ctx_kw_match_ok : (match_fuel (Just 9) = (9:nat))
 
 (* === As record field names === *)
-type engine = <| fuel : nat; effectful : bool; fuel_consumer : nat; structural : bool |>
+type engine = <| fuel : nat; effectful : bool; fuel_consumer : nat; structural : bool; fuel_measure : nat |>
 
-let my_engine = <| fuel = 11; effectful = true; fuel_consumer = 12; structural = false |>
+let my_engine = <| fuel = 11; effectful = true; fuel_consumer = 12; structural = false; fuel_measure = 13 |>
 
 assert ctx_kw_field_ok : (my_engine.fuel = (11:nat))
 assert ctx_kw_field2_ok : (my_engine.effectful = true)
 assert ctx_kw_field3_ok : (my_engine.fuel_consumer = (12:nat))
 assert ctx_kw_field4_ok : (my_engine.structural = false)
+assert ctx_kw_field5_ok : (my_engine.fuel_measure = (13:nat))
 
 (* === The declare forms themselves must keep working alongside === *)
 let rec count_down (n : nat) : nat =
@@ -87,3 +93,18 @@ let rec count_list (l : list nat) : nat =
 declare {lean} structural val count_list
 
 assert ctx_kw_structural_decl_ok : (count_list [1; 2; 3] = (3:nat))
+
+(* the fuel_measure declare beside the identifier of the same name
+   (fuel-measure slice, 2026-09-04); a measured function is fuel-free, so
+   it IS assertable from lem; its obligation is proved in
+   lean-test/Test_contextual_keywords_lemMeasureProofs.lean *)
+val count_list_measured : list nat -> nat
+let rec count_list_measured (l : list nat) : nat =
+  match l with
+    | [] -> 0
+    | _ :: xs -> 1 + count_list_measured xs
+  end
+declare {lean} fuel val count_list_measured = `999`
+declare {lean} fuel_measure val count_list_measured = `List.length l + 1`
+
+assert ctx_kw_fuel_measure_decl_ok : (count_list_measured [1; 2; 3] = (3:nat))

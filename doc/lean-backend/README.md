@@ -82,7 +82,16 @@ the negative/panic test legs — is `tests/comprehensive/`:
   chooses (`@f ⟨n⟩ …`), a theorem quantifies (`∀ [LemFuel]`), and
   `f_lemFuel_zero` states the exhaustion case by `rfl`. The backtick
   payload is the expression returned when the counter runs out; write
-  it as `fuelExhausted <witness>` to make exhaustion a loud panic.
+  it as `fuelExhausted <witness>` to make exhaustion a loud panic. A
+  fuel'd function whose recursion is bounded by its data (but not in the
+  structural checker's shape) adds ``declare {lean} fuel_measure val f =
+  `List.length xs + 1` ``: the wrapper starts the counter from that
+  computable measure of the arguments (`def f (xs : …) := f_lemFuel
+  (<measure>) xs`), so `f` is fuel-free for its callers and the kernel
+  computes through it; the backend emits the per-function sufficiency
+  obligation (`f_measure_sufficient`: worker = wrapper at every fuel at
+  or above the measure) whose proof you write in
+  `<Module>_lemMeasureProofs.lean` — the build fails without it.
   Cerberus applies fuel declares across its whole execution path and
   checks that slice is total in its own build.
 - **Zero axioms; effects are explicit state.** Neither the library

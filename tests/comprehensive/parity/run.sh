@@ -30,7 +30,9 @@
 # Optional per-probe files: <name>.ext.ml (extra OCaml module linked into
 # the OCaml binary, e.g. an impure counter standing for a `supply`),
 # <name>.main.ml / <name>.main.lean (custom drivers replacing the
-# default `print each line of results`).
+# default `print each line of results`), <name>.proofs.lean (the
+# hand-written fuel_measure obligation proofs, installed as
+# <Mod>_lemMeasureProofs.lean and rooted — fuel-measure slice).
 #
 # Vacuity guards: a probe without a pin fails; an empty reference output
 # fails; a Lean exe that did not get built fails. lean-test/lakefile.lean
@@ -75,6 +77,13 @@ if [ $# -eq 0 ]; then echo "  FAIL (vacuous): no probes in $HERE/probes"; exit 1
     n=$(basename "$f" .lem); M=$(echo "$n" | sed 's/^\(.\)/\U\1/')
     [ $first = 1 ] || printf ',\n'; first=0
     printf '    `%s, `%s_auxiliary, `Run_%s' "$M" "$M" "$n"
+    # fuel-measure slice: a probe with measured functions ships its
+    # obligation proofs as probes/<name>.proofs.lean, installed as the
+    # module its auxiliary file imports (a root, so the build gates it)
+    if [ -f "$HERE/probes/$n.proofs.lean" ]; then
+      cp "$HERE/probes/$n.proofs.lean" "$LT/${M}_lemMeasureProofs.lean"
+      printf ', `%s_lemMeasureProofs' "$M"
+    fi
   done
   printf '\n  ]\n'
   for f in "$HERE"/probes/*.lem; do

@@ -281,3 +281,48 @@ merges as proposed, then work on this as you suggest"). Record:
    67 sentinel fuel declares tried as `structural` in a scratch copy,
    mechanically, with the generation-time verdicts and the Lean 4.32.2
    build verdicts.
+
+## R3 (2026-09-04) — fuel instantiated from a data measure
+
+Revision by the lem-lean worker [AGENT] implementing the operator's
+ruling on the (A) census ([USER 2026-09-04], verbatim: "I think sticking
+to our principle that we don't change the lem structure for ocaml is a
+very good design rule. That's available here with (2) right, and the
+effect is that we have to do more work, but it's just bounded kernel
+checked work. [...] we should do the [hard for us in terms of work] but
+[trust=surface preserving] one"; "we maintain the lem structure, and we
+get additional properties we want without any trust decrease"). Record:
+`2026-09-04_fuel-measure-record.md`. Deltas against R2:
+
+1. **Form (c) for fuel'd functions: ``declare {lean} fuel_measure val f =
+   `<computable Lean expr over f's parameters>` ``.** The worker is
+   unchanged; the WRAPPER binds the parameters and starts the counter from
+   the measure (`def f (xs : …) : R := f_lemFuel (<measure>) xs`) — no
+   `[LemFuel]`, fuel-free for its callers, the kernel computes through it;
+   the fuel fixpoint treats a measured constant as non-fuel'd (its
+   consumers inherit no binder; it is lifted only if its own body passes
+   the ambient on). The OCaml output is untouched by construction. R2's
+   "three admissible forms" now read: (a) `fuel` + `[LemFuel]` for
+   (B)-shaped partial recursion; (c) `structural` for a recursion in the
+   checker's shape; (c) `fuel` + `fuel_measure` for a data-bounded
+   recursion in any shape — the census's HOF/lambda/computed-scrutinee
+   rows — with a per-function sufficiency obligation.
+2. **The obligation is STABILITY AT THE MEASURE**, emitted as a theorem
+   statement into the module's auxiliary file (lem's home for prover-side
+   obligations) with its proof delegated to the hand-written module
+   `<Module>_lemMeasureProofs` — the auxiliary file is a build root, so no
+   measured function ships without its theorem. `f_measure_sufficient :
+   f_lemFuel lemFuel xs = f xs` for every `lemFuel ≥ measure` is the
+   consumer's fuel-irrelevance lemma directly; the completion predicate
+   (R2 item 3) is the stronger operational form and is not generatable in
+   general (record §2 has the alternatives and the residual gap).
+3. **Finding: Lean's automatic `SizeOf` is noncomputable** — `sizeOf x`
+   cannot be a wrapper's runtime counter; measures are `List.length xs +
+   1`, `n + 1`, or hand-written structural size functions in an imported
+   Lean module; a measure over a type defined in the SAME module as the
+   measured function needs a backend-derived size (TODO row 15; the two
+   cerberus cases are `ctypeEqual` and `eq_core_base_type`).
+4. **The cerberus dry run** (record §6) classifies the 67 fuel'd
+   functions as measured (compiles with a proposed measure) / (B) monadic
+   (stays ambient) / residue (no data measure: tag lookup, accumulator,
+   counter), the cerberus half's work order.

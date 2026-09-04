@@ -281,5 +281,8 @@ lean-compile: check-capped
 
 clean:
 	rm -f *.lean *_ok
-	rm -f lean-test/Test_*.lean lean-test/*_auxiliary.lean
+	@# generated files are SYMLINKED into lean-test/ (lean-compile); remove only
+	@# symlinks — a hand-written module whose name follows a generated one
+	@# (Test_<x>_lemMeasureProofs.lean, fuel-measure slice) must survive clean
+	find lean-test -maxdepth 1 -type l \( -name "Test_*.lean" -o -name "*_auxiliary.lean" \) -delete
 	rm -rf lean-test/.lake lean-test/build

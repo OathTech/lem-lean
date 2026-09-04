@@ -327,6 +327,18 @@ and const_descr =
         combined with a fuel sentinel, a termination_argument or a
         target_rep on the same val. Lean backend only (structural-declare
         slice, 2026-09-04). *)
+
+    fuel_measure : string Target.Targetmap.t;
+    (** Per-target FUEL MEASURE (declare {targets} fuel_measure val f =
+        `expr`): for a fuel-declared constant, a target-syntax expression
+        over the constant's own parameters from which the wrapper
+        INSTANTIATES the worker's fuel counter (Lean: `def f x := f_lemFuel
+        (expr) x`) instead of reading the ambient `[LemFuel]`; the
+        constant is then fuel-free for its callers, and the backend emits a
+        per-function sufficiency OBLIGATION (`f_measure_sufficient`) whose
+        proof a hand-written companion module must supply. Requires the
+        fuel sentinel on the same val; exclusive with fuel_consumer and
+        structural. Lean backend only (fuel-measure slice, 2026-09-04). *)
   }
 
 and v_env = const_descr_ref Nfmap.t
@@ -581,6 +593,7 @@ type declare_def =  (** Declarations *)
  | Decl_reader_consumer       of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_fuel_consumer         of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_structural            of lskips * targets_opt * lskips * lskips * const_descr_ref id
+ | Decl_fuel_measure          of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

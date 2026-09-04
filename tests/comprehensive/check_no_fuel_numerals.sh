@@ -17,7 +17,14 @@
 #   F2  instance … : LemFuel                a global instance = a hidden default
 #   F3  <worker>_lemFuel <positive numeral> a worker run at a literal fuel
 #                                           (`_lemFuel 0` is the exhaustion
-#                                           lemma's statement, permitted)
+#                                           lemma's statement, permitted;
+#                                           the numeral must be the WHOLE
+#                                           counter argument — `_lemFuel 5`,
+#                                           `_lemFuel (5)`: a measured
+#                                           wrapper's `_lemFuel (1 + n)` is a
+#                                           data measure with an offset,
+#                                           certified by its sufficiency
+#                                           theorem, fuel-measure slice)
 #   F4  LemFuel := ⟨…⟩ / LemFuel.mk         an instance built from a literal
 #   F5  ⟨<numeral>⟩                        an anonymous-constructor literal
 #                                           (the entry-point idiom `@f ⟨n⟩`
@@ -26,8 +33,9 @@
 #                                           legal) — pre-merge audit M4
 # Vacuity guards: the scan must see at least MIN_FILES files and at least
 # one fuel worker (`_lemFuel`), or it is not scanning real generated code.
-# Plant test (run by hand, quoted in the arc record §8.4/§10): the seven
-# shapes — `spin_lemFuel 5 3`, `spin_lemFuel (5) 3` (F3);
+# Plant test (run by hand, quoted in the arc record §8.4/§10 and the
+# fuel-measure record): the seven shapes — `spin_lemFuel 5 3`,
+# `spin_lemFuel (5) 3` (F3; and `mlen_lemFuel (1 + List.length l)` stays green);
 # `instance : LemFuel := ⟨N⟩`, `instance : LemFuel where fuel := 5`,
 # `instance : LemFuel := LemFuel.mk k` (F2); `def i : LemFuel := LemFuel.mk 5`
 # + attribute [instance] (F4); `lemDefaultFuel` (F1); `@spin ⟨5⟩ 3` (F5) —
@@ -60,7 +68,7 @@ report() { # label pattern
 }
 report F1 'lemDefaultFuel'
 report F2 ':[[:space:]]*(@\[[^]]*\][[:space:]]*)?(scoped |local )?instance[^:]*:[[:space:]]*LemFuel\b'
-report F3 '_lemFuel[[:space:]]*\(?[[:space:]]*[1-9][0-9]*[[:space:]]*\)?([^0-9]|$)'
+report F3 '_lemFuel[[:space:]]+[1-9][0-9]*([^0-9A-Za-z_.'"'"']|$)|_lemFuel[[:space:]]*\([[:space:]]*[1-9][0-9]*[[:space:]]*\)'
 report F4 'LemFuel[[:space:]]*:=[[:space:]]*⟨|LemFuel\.mk[[:space:]]+[0-9]'
 report F5 '⟨[[:space:]]*[1-9][0-9]*[[:space:]]*⟩'
 if [ $status -eq 0 ]; then echo "  OK: $n files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)"; fi
