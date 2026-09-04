@@ -60,7 +60,7 @@ A hand-written Lean implementation that itself reads the ambient fuel declares s
     declare lean target_rep function g = `MyImpl.g`
     declare {lean} fuel_consumer val g
 
-Its call sites are unchanged (the implementation takes `[LemFuel]` and reads `LemFuel.fuel`); the declare's job is to make `g`'s callers fuel-lifted by the ordinary fixpoint. The library uses it once, for `Relation.transitiveClosureByCmp`, whose `Pset.tc` iterates pset.ml's unbounded `lfp` on the caller's fuel.
+Its call sites are unchanged (the implementation takes `[LemFuel]` and reads `LemFuel.fuel`); the declare's job is to make `g`'s callers fuel-lifted by the ordinary fixpoint. The library declares none. A fuel-reading implementation WITHOUT the declare is not detected at generation time (the backend cannot see a hand-written body): its callers are not lifted and the Lean build fails at the first call site with `failed to synthesize instance of type class LemFuel` — fail-closed at build time, and it cannot be absorbed silently because no instance exists anywhere.
 
 Fuel composes with the reader and supply liftings below (the worker threads the supply through the decremented self-call, and exhaustion returns the sentinel with the supply unconsumed at the cut); a `reader_seed` definition that reaches fuel is fuel-lifted like any other definition.
 

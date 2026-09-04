@@ -345,28 +345,42 @@ elsewhere.
 [USER 2026-09-03]: magic values — a fuel budget, a bound, a default, or
 any "magical" choice among nondeterministic alternatives that the source
 semantics does not fix — "are absolutely completely forbidden and are
-definitionally bugs". Every such choice is a QUANTIFIED PARAMETER of the
-generated code, threaded from the entry point (the reader lifting is
-the mechanism), so a consumer's theorem can range over it. A numeral may
-live only in a caller's command-line default, never in LemLib, in
-generated code or in a target_rep. The general form [USER 2026-09-03],
-verbatim: "any instance of a value that can be quantified over by a
-context / theorem is fine. Defaults that are chosen eg. in test suites
-are fine. Any and all magic values that are hardcoded and can't be
-quantified over are definitionally bugs (unless they mirror lem or ISO-C
-design choices)". A recursion bound COMPUTED inside a definition (even
-from the data, e.g. a tree height) is hardcoded in that sense, unless it
-is passed in by the calling context or eliminated by a termination proof. Any
-mechanism that mints such numerals per declaration is itself the
-defect. The operator's test for a candidate value [USER 2026-09-03],
-verbatim: "my aim here is to forbid values that limit the semantics or
-limit the ways the customer can reason about the semantics" — so a
-recursion index that is structurally recursive on a DATA measure (the
-AVL height stored in a `Pset`/`Pmap` node) is admissible: nothing is
-chosen, nothing bounds the semantics, a proof can unfold it; the three
-admissible forms are a caller parameter, a termination proof, and
-data-measure structural recursion. Record:
-`2026-09-03_fuel-parameter-design.md` (+ R1) and
+definitionally bugs". The general form, verbatim: "any instance of a
+value that can be quantified over by a context / theorem is fine.
+Defaults that are chosen eg. in test suites are fine. Any and all magic
+values that are hardcoded and can't be quantified over are
+definitionally bugs (unless they mirror lem or ISO-C design choices)".
+The operator's test for a candidate value, verbatim: "my aim here is to
+forbid values that limit the semantics or limit the ways the customer
+can reason about the semantics".
+
+Exactly three forms of recursion bound are admissible in LemLib, in
+generated code and in a target_rep:
+
+- **(a) a caller parameter** — the value is quantified by the calling
+  context (the ambient `[LemFuel]` instance every fuel'd function reads;
+  `Pset.lfpGo`'s fuel argument);
+- **(b) a termination proof** — well-founded recursion, no bound exists
+  (admissible, but the kernel cannot unfold it: closed-term `rfl`/`decide`
+  stop there);
+- **(c) structural recursion on a DATA measure** — an index computed
+  from the arguments that bounds the recursion exactly (the AVL height
+  stored in a `Pset`/`Pmap` node for `join`/`union`/`inter`/`diff`/`subset`/
+  `merge`, the element count for `compare`/`equal`): nothing is chosen,
+  nothing bounds the semantics, a proof unfolds it. `Pset.tc`'s
+  `(2|r|)² + 1` (the finite square of the relation's endpoints) is a
+  data-DERIVED bound classified (c) by the worker; whether "computed from
+  the data" and "stored in the data" draw the same line is decision D1,
+  pending the operator (`2026-09-04_fuel-parameter-record.md` §9).
+
+Everything else is forbidden: a numeral may live only in a caller's
+command-line default or a test suite, never in LemLib, in generated code
+or in a target_rep; a mechanism that mints such numerals per declaration
+is itself the defect (the deleted numeric fuel budget). Constants that
+mirror lem's own definitions are not magic (`Set.leastFixedPoint`'s
+`| 0 -> x`). A limit that exists only because the OCaml target's runtime
+imposes it (a 63-bit `int`) is forbidden too — "the real thing is the
+logical semantics". Records: `2026-09-03_fuel-parameter-design.md` (+ R1),
 `2026-09-04_fuel-parameter-record.md`.
 
 ## The declare vocabulary

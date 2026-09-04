@@ -106,7 +106,7 @@ classes (a)–(c) and do not widen them.
   (entry class 2, citing this addendum): the runner requires it to fail
   parity (Lean succeeds where the OCaml reference raises) and reports it
   XFAIL. Other LemLib behaviours examined under the same principle
-  (listed in `2026-09-04_fuel-parameter-record.md` §7): the `int32`/`int64`
+  (listed in `2026-09-04_fuel-parameter-record.md` §4 table and §9 D4): the `int32`/`int64`
   fixed-width WRAP is lem's declared semantics (stays); the loud failures
   that mirror OCaml *raises* (division by zero, `Z.sqrt` of a negative,
   `of_string` of an invalid literal, `Not_found`, `Invalid_argument

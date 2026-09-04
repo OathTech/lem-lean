@@ -19,7 +19,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-fuel-param lean-no-fuel-numerals lean-negative lean-invariance lean-parity
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-fuel-param lean-negative lean-invariance lean-parity lean-no-fuel-numerals
 
 # Two-target parity (parity-fix slice 2026-09-03; [USER] ruling: the OCaml
 # target is the reference semantics of a lem program, the Lean target
@@ -73,7 +73,9 @@ lean-fuel-param:
 # `instance … : LemFuel`, no worker applied to a positive numeral, no
 # `LemFuel := ⟨N⟩`. The only permitted shape of a fuel is a caller's
 # parameter; test harnesses (hand-written *Exec/*Check/Run_* drivers)
-# choose theirs and are outside the scan by design.
+# choose theirs and are outside the scan by design. Runs LAST in the
+# suite so that everything generated — including the parity runner's
+# P_*.lean modules — is under the scan (pre-merge audit M3).
 lean-no-fuel-numerals:
 	@echo "=== No fuel numerals in LemLib or generated code (gate) ==="
 	@./check_no_fuel_numerals.sh

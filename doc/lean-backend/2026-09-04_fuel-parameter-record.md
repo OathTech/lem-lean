@@ -235,12 +235,13 @@ lemma follows by induction on the counter, and the backend could
 generate it for functions whose payload is a DECLARED absorbing outcome
 of a DECLARED monad — new vocabulary, an operator decision (TODO row 13).
 
-## 6. Cerberus dry run (read-only; scratch copy of `frontend/**/*.lem` at cerberus-lean `HEAD`)
+## 6. Cerberus dry run (read-only; scratch copy of `frontend/**/*.lem` at cerberus-lean primary `de2fbf1bd`)
 
 Method: `.tmp/cerb/run.sh` — the cerberus Makefile's exact flags
 (`-wl ign -wl_rename warn -wl_pat_red err -wl_pat_exh warn -cerberus_pp`)
-and its expanded `LEM_SRC` (87 files) / `LEM_SRC_LEAN` (86), obtained
-with `make --eval` (read-only); OCaml with the baseline lem (`0db35ec`,
+and its expanded `LEM_SRC` (86 files) / `LEM_SRC_LEAN` (85), obtained
+with `make --eval` (read-only; the record's first draft said 87/86 — it
+had counted the echoed command word, audit N3); OCaml with the baseline lem (`0db35ec`,
 saved binary) and with this lem; Lean with this lem.
 
 1. **The five numeric declares are refused on every target**
@@ -274,8 +275,16 @@ saved binary) and with this lem; Lean with this lem.
      fuel-lifted `monStep` (error: "referenced outside a fuel scope").
    These are the §9 D2 decision (instance-level `[LemFuel]` in the
    backend vs restructuring in the model).
-4. **Counts on the complete tree (derived, `grep`):** fuel-declared vals
-   64 (69 declares minus the 5 numeric); wrappers at the ambient
+4. **Counts on the complete tree (derived, `grep`; recounted after audit
+   N3):** `declare {lean} fuel val` rows over `LEM_SRC_LEAN` at
+   `de2fbf1bd`: **72 in 15 files** (utils 4, ctype 1, ctype_aux 3,
+   formatted 2, defacto_memory_aux 6, defacto_memory 5, monadic_parsing 2,
+   nondeterminism 4, core 1, core_aux 20, ail/ailTypesAux 3, core_run_aux
+   4, core_eval 4, core_reduction 5, driver 8), of which 5 numeric and
+   **67 sentinel** — the first draft's "69 declares / 64 vals" was
+   mis-derived (a `grep` over `frontend/model/*.lem` only, minus a comment
+   line); 67 sentinel declares = 67 wrappers = 67 `_zero` lemmas, consistent;
+   wrappers at the ambient
    `:= f_lemFuel LemFuel.fuel` **67 in 15 files** (the design note's
    "77 sites in 16 files" was a grep for `lemDefaultFuel` over cerberus's
    `lean_frontend/generated/`, which also holds the hand-written copies —
@@ -487,7 +496,9 @@ exit=0
 ```
 
 (173 files at plant time, before the parity `P_*.lean` modules existed
-in the tree; 219 in the final run.) Excluded by design: test harnesses
+in the tree; 219 in the final run. Audit M3: the gate ran BEFORE the
+parity phase, so a clean run never scanned the `P_*` modules — fixed in
+§10: the gate is now the suite's last phase.) Excluded by design: test harnesses
 and pins (`LemLibTest.lean`, hand-written `lean-test/Test*.lean`, parity
 `Run_*`/`*.main.lean`) — a test suite may choose its fuel.
 
@@ -578,3 +589,75 @@ files is byte-identical. The cerberus tree: §6.2.
   regenerated (TODO row 5, pre-existing).
 - `.tmp/` (baseline binary, scratch trees, logs) is ephemeral and
   deleted at slice end; everything load-bearing is quoted above.
+
+## 10. Audit response (pre-merge audit `2026-09-04_fuel-parameter-audit-premerge.md` @ `b3d084e`, verdict MERGE-WITH-FIXES, no MAJOR)
+
+One commit on `arc/fuel-parameter`; each item as the auditor asked.
+
+- **M1** (manual asserted a library `fuel_consumer`): the sentence is
+  gone; the paragraph now says "The library declares none" and carries
+  N1's build-time behaviour.
+- **M2** (DESIGN.md contradiction): "No magic values" rewritten ONCE as
+  the three admissible forms — (a) caller parameter, (b) termination
+  proof, (c) structural recursion on a data measure — quoting the
+  operator's aim sentence and general form verbatim; `Pset.tc`'s
+  `(2|r|)² + 1` named as a data-DERIVED bound classified (c), D1 pending
+  the operator; the draft sentence forbidding data-computed bounds is
+  deleted.
+- **M3** (gate ran before parity): `lean-no-fuel-numerals` is now the
+  suite's LAST phase. Clean run (parity artefacts removed first), the
+  gate's line, verbatim:
+  `  OK: 219 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)`
+  (173 before: the 46 parity `P_*.lean`/`P_*_auxiliary.lean` modules
+  were never certified on a fresh tree).
+- **M4** (two green evasions): F3 now matches a parenthesised numeral in
+  fuel position (`_lemFuel[[:space:]]*\(?[[:space:]]*[1-9]…`); new F5
+  matches an anonymous-constructor literal `⟨<numeral>⟩` (`⟨n⟩` with a
+  variable stays legal). All eight shapes planted, each red, reverted
+  green — verbatim:
+
+  ```
+  PLANT A: exit=1 FAIL (F3)                 def plantA : Nat := spin_lemFuel 5 3
+  PLANT B: exit=1 FAIL (F2) FAIL (F4) FAIL (F5)   instance : LemFuel := ⟨1000000⟩
+  PLANT C: exit=1 FAIL (F1)                 def plantC : Nat := lemDefaultFuel
+  PLANT D: exit=1 FAIL (F2)                 instance : LemFuel where fuel := 5
+  PLANT E1: exit=1 FAIL (F3)                def plantE1 : Nat := spin_lemFuel (5) 3
+  PLANT E2: exit=1 FAIL (F2)                def plantK : Nat := 5 / instance : LemFuel := LemFuel.mk plantK
+  PLANT E3: exit=1 FAIL (F4)                def plantInst : LemFuel := LemFuel.mk 5 / attribute [instance] plantInst
+  PLANT E4: exit=1 FAIL (F5)                def plantE4 : Nat := @spin ⟨5⟩ 3
+    OK: 219 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+  REVERTED exit=0
+  ```
+- **M5**: `fuel_consumer` added to `test_contextual_keywords.lem` (let-bound
+  value, parameter, record field; asserts re-summed to 55).
+- **N1**: manual: an undeclared fuel-reading rep fails at the Lean build
+  (`failed to synthesize instance of type class LemFuel`) — fail-closed
+  at build time, not at generation; cannot be absorbed (no instance exists).
+- **N3**: §6 pinned to `de2fbf1bd`; counts recounted (72 declares in 15
+  files = 5 numeric + 67 sentinel = 67 wrappers = 67 `_zero` lemmas;
+  `LEM_SRC` 86 / `LEM_SRC_LEAN` 85).
+- **N4**: X3 addendum cross-reference → §4 table and §9 D4.
+- **N6**: TODO row 13 lists both monotonicity routes; the auditor's
+  generated completion predicate `f_completes` is the cheaper candidate.
+- N2 (cites at Z2), N5 (`heightsOk` preservation is the consumer's slice),
+  N7 (`deps/lem-pinned` binary stale — container hygiene, for the
+  operator), N8, N9: acknowledged, no change here.
+
+Re-run after the response (this tree), verbatim:
+
+```
+=== Generation: 47 passed, 0 failed, 0 skipped ===
+Build completed successfully (136 jobs).
+  OK (leg 1): panic prints the Incomplete Pattern message, then continues with default
+  OK (leg 2): fail-stops (exit 134) under LEAN_ABORT_ON_PANIC=1
+single-evaluation: OK
+  OK: compiled draw sequences hold
+  OK: compiled consumer injection holds
+  OK (leg 1): two sufficient fuels agree; insufficient gives the declared sentinel; callee starts from the full ambient
+  OK (leg 2): loud exhaustion at an insufficient runtime fuel fail-stops (exit 134)
+  [45 × OK (rejected as declared); 3 × invariance byte-identical; parity 21 OK / 7 both-fail / 3 XFAIL — derived]
+  OK: 219 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make lean  238.07s user 24.62s system 98% cpu 4:27.39 total
+EXIT 0
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+```

@@ -3,7 +3,7 @@ open import Pervasives_extra
 (* ================================================================
    The Lean-backend annotation words — fuel, reader, effectful,
    ground_rep, reader_seed, skip_instances, extra_import, supply,
-   reader_consumer — are CONTEXTUAL keywords: they act as keywords only inside `declare`
+   reader_consumer, fuel_consumer — are CONTEXTUAL keywords: they act as keywords only inside `declare`
    forms and must remain usable as ordinary identifiers everywhere
    else, on every target (2026-08-31 backend quality review, M1).
 
@@ -23,15 +23,21 @@ let skip_instances = (6:nat)
 let extra_import = (7:nat)
 let supply = (8:nat)
 let reader_consumer = (9:nat)
+let fuel_consumer = (10:nat)
 
 assert ctx_kw_sum_ok :
   (fuel + reader + effectful + ground_rep + reader_seed
-     + skip_instances + extra_import + supply + reader_consumer = (45:nat))
+     + skip_instances + extra_import + supply + reader_consumer
+     + fuel_consumer = (55:nat))
 
 (* === As function name and as parameter names === *)
 let add_fuel (fuel : nat) (reader : nat) = fuel + reader
 
 assert ctx_kw_param_ok : (add_fuel 20 22 = (42:nat))
+
+let add_fuel_consumer (fuel_consumer : nat) (supply : nat) = fuel_consumer + supply
+
+assert ctx_kw_param2_ok : (add_fuel_consumer 30 12 = (42:nat))
 
 (* === As pattern variables (match) === *)
 let match_fuel (x : maybe nat) =
@@ -43,12 +49,13 @@ let match_fuel (x : maybe nat) =
 assert ctx_kw_match_ok : (match_fuel (Just 9) = (9:nat))
 
 (* === As record field names === *)
-type engine = <| fuel : nat; effectful : bool |>
+type engine = <| fuel : nat; effectful : bool; fuel_consumer : nat |>
 
-let my_engine = <| fuel = 11; effectful = true |>
+let my_engine = <| fuel = 11; effectful = true; fuel_consumer = 12 |>
 
 assert ctx_kw_field_ok : (my_engine.fuel = (11:nat))
 assert ctx_kw_field2_ok : (my_engine.effectful = true)
+assert ctx_kw_field3_ok : (my_engine.fuel_consumer = (12:nat))
 
 (* === The declare forms themselves must keep working alongside === *)
 let rec count_down (n : nat) : nat =
