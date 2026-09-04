@@ -905,3 +905,33 @@ M4 probe among them), parity 23 OK / 6 both-fail / 4 XFAIL, no other
 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)`.
 The backend change touches only the measure renderer and a generated
 comment (Lean target); ocamlyacc unchanged.
+
+
+## 11. Orchestrator boundary review [AGENT, orchestrator, 2026-09-04]
+
+Independent re-verification of the two-slice branch `arc/structural-declare`
+(structural declare + D4 + monotonicity exemplar + fuel-measure declare +
+audit response), rebuilt from source in this worktree, three times: at
+`020df26` (structural slice), at `d8a17e3` (measure slice) and at
+`bf68174` (audit response `dc6a01b` + the audit document `e7796a1`
+cherry-picked). Final run, verbatim:
+
+```
+Lem bf68174
+Build completed successfully (37 jobs).          (lean-lib)
+0                                                (grep "^axiom " lean-lib → none)
+=== Generation: 51 passed, 0 failed, 0 skipped ===
+Build completed successfully (151 jobs).
+  OK: 236 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make-lean-rc=0
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+```
+
+(the run's `FAIL` lines are the four registered XFAILs: `f_int_of_big_num`
+and `f_int32_overflow` — ruled OCaml-target deviations — and the two F2
+strings rows.) Pre-merge audit
+`2026-09-04_structural-measure-audit-premerge.md` (MERGE-WITH-FIXES, no
+MAJOR → fixed in `dc6a01b`, §10). The OCaml byte-identity of the cerberus
+tree was verified by the auditor in a fresh checkout (86/86 files, diff
+0) and by the worker; not re-run here. Merge ask goes to the operator on
+this head.
