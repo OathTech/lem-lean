@@ -92,6 +92,30 @@ classes (a)–(c) and do not widen them.
   by design (a runner row would pin a known non-parity), the measurement
   is quoted in the parity record's N4 row.
 
+  **Addendum 2026-09-04 (fuel-parameter arc, commit on branch
+  `arc/fuel-parameter`) — the "conversion checks STAY" sentence above is
+  SUPERSEDED.** [USER 2026-09-03], verbatim: "ocaml limits that are
+  hardcoded thanks to ocaml-level execution issues are also forbidden,
+  the real thing is the logical semantics". The 63-bit checks in
+  `lemNatFromNatural`/`lemIntFromInteger` (added at `3c88f0d`) were an
+  OCaml-execution artifact, not lem's semantics: REMOVED; both
+  conversions are the identity on Lean's unbounded `Nat`/`Int`, end to
+  end (`natFromNumeral`/`intFromNumeral` were already literal
+  pass-throughs). The parity row `f_int_of_big_num` is now a registered
+  OCaml-target deviation in `tests/comprehensive/parity/expected_failures.txt`
+  (entry class 2, citing this addendum): the runner requires it to fail
+  parity (Lean succeeds where the OCaml reference raises) and reports it
+  XFAIL. Other LemLib behaviours examined under the same principle
+  (listed in `2026-09-04_fuel-parameter-record.md` §7): the `int32`/`int64`
+  fixed-width WRAP is lem's declared semantics (stays); the loud failures
+  that mirror OCaml *raises* (division by zero, `Z.sqrt` of a negative,
+  `of_string` of an invalid literal, `Not_found`, `Invalid_argument
+  "Array.sub"`) are failure-parity items under exception class (a), not
+  limits (stay); the `Nat_big_num.to_int32/to_int64: Overflow` raise on
+  `int32FromInteger`-style conversions is a candidate of the same kind as
+  X3 (the prover-side reading is `word_of_int`, i.e. wrap) and is put to
+  the operator in the record's decisions section, unchanged here.
+
 ### X1 — polymorphic compare on values containing a set or map
 
 - OCaml `compare`/`=` on a `Pset`/`Pmap` value raises

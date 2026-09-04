@@ -1561,26 +1561,20 @@ abbrev float32 := LemFloat32
   panic! "Debug.print_endline: unsupported on the Lean target"
 end LemUnsupported
 
-/- OCaml `nat`/`int` are 63-bit machine integers; the conversions from
-   the arbitrary-precision types are `Nat_big_num.to_int`, which RAISES
-   `Failure "int_of_big_int"` outside [-2^62, 2^62-1] (measured: 2^62 →
-   EXN, 2^62-1 → 4611686018427387903). Lean's Nat/Int are unbounded; the
-   conversions fail loudly at the same bound so a program that fails on
-   the OCaml reference fails here too (divergence census N4, conversion
-   leg; the arithmetic WRAP is the pending exception-case). -/
-def lemOcamlIntMax : Int := 4611686018427387903
-def lemOcamlIntMin : Int := -4611686018427387904
-def lemIntFromInteger (i : Int) : Int :=
-  if lemOcamlIntMin <= i && i <= lemOcamlIntMax then i
-  else failwithI s!"Failure \"int_of_big_int\" ({i} outside the OCaml 63-bit int range)"
-/- natFromNumeral / intFromNumeral keep their literal-passthrough reps: a
-   lem numeral renders as a Lean literal, as it renders as an OCaml int
-   literal on the reference (a literal >= 2^62 is an OCaml COMPILE error
-   there — part of the N4 exception-case row). -/
-def lemNatFromNatural (n : Nat) : Nat :=
-  if Int.ofNat n <= lemOcamlIntMax then n
-  else failwithI s!"Failure \"int_of_big_int\" ({n} outside the OCaml 63-bit int range)"
-
+/- lem `natFromNatural` / `intFromInteger`: the IDENTITY on Lean's unbounded
+   Nat/Int. lem's semantics for `nat`/`int` is the prover-side, unbounded
+   one (library/num.lem:104-111; exception-case rulings X3, 2026-09-03);
+   the OCaml target's `Nat_big_num.to_int` raising `Failure
+   "int_of_big_int"` outside [-2^62, 2^62-1] is an OCaml-execution limit,
+   not lem's meaning. HISTORY: the parity-fix slice (3c88f0d) made these
+   two conversions fail loudly at the OCaml bound; [USER 2026-09-03]
+   "ocaml limits that are hardcoded thanks to ocaml-level execution issues
+   are also forbidden, the real thing is the logical semantics" — removed
+   (fuel-parameter arc, 2026-09-04). The parity runner's `f_int_of_big_num`
+   row is a registered OCaml-target deviation (parity/expected_failures.txt).
+   natFromNumeral / intFromNumeral keep their literal-passthrough reps. -/
+def lemIntFromInteger (i : Int) : Int := i
+def lemNatFromNatural (n : Nat) : Nat := n
 
 /- Z.div / Z.rem / mod_big_int (ocaml-lib/nat_big_num.ml integerDiv_t,
    integerRem_t, integerRem_f); zarith raises Division_by_zero on 0. -/

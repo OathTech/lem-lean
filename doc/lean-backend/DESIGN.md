@@ -271,8 +271,11 @@ target follows lem's prover-side reading ([USER 2026-09-03] ruling,
 `doc/lean-backend/2026-09-03_exception-case-rulings.md`): `nat`/`int`
 are unbounded on Lean where OCaml's 63-bit `int` wraps silently above
 2^62 (`library/num.lem:104-111` documents the OCaml choice as a
-compromise; the checked conversions still fail loudly at the boundary
-where `Nat_big_num.to_int` raises), and structural `BEq`/`Ord` on values
+compromise; the conversions `natFromNatural`/`intFromInteger` are the
+identity — the 63-bit checks that once mirrored `Nat_big_num.to_int`'s
+raise were removed as an OCaml-execution limit, [USER 2026-09-03] "the
+real thing is the logical semantics"; the parity row `f_int_of_big_num`
+is a registered OCaml-target deviation), and structural `BEq`/`Ord` on values
 containing a `Pset`/`Pmap` compute where OCaml's polymorphic compare
 raises on the comparator closure (`lean-lib/LemLib.lean:741-748`).
 
