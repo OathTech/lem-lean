@@ -3364,25 +3364,22 @@ type pat_style = FunParam | MatchArm
                             let pats = match g with
                               | (_, _, pats, _, _, _) :: _ -> pats
                               | [] -> [] in
-                            let binders_and_args =
-                              List.mapi (fun i (p : pat) ->
-                                  match p.term with
-                                  | P_var v ->
-                                    let nm = name_var_output v in
-                                    Some (Output.flat [from_string " ("; nm; from_string " : ";
-                                                       pat_typ (C.t_to_src_t p.typ); from_string ")"],
-                                          Output.flat [from_string " "; nm])
-                                  | P_var_annot (v, t) ->
-                                    let nm = name_var_output v in
-                                    Some (Output.flat [from_string " ("; nm; from_string " : ";
-                                                       pat_typ t; from_string ")"],
-                                          Output.flat [from_string " "; nm])
-                                  | P_wild _ ->
-                                    let nm = from_string (Printf.sprintf "_x%d" (i + 1)) in
-                                    Some (Output.flat [from_string " ("; nm; from_string " : ";
-                                                       pat_typ (C.t_to_src_t p.typ); from_string ")"],
-                                          Output.flat [from_string " "; nm])
-                                  | _ -> None) pats in
+                            (* a parameter pattern's binder: a variable (bare,
+                               annotated `(x : t)`, or parenthesised), or a
+                               wildcard (fresh name); anything else has no
+                               name to state the lemma with *)
+                            let rec binder_of i (p : pat) =
+                              let mk nm t =
+                                Some (Output.flat [from_string " ("; nm; from_string " : "; t; from_string ")"],
+                                      Output.flat [from_string " "; nm]) in
+                              match p.term with
+                              | P_var v -> mk (name_var_output v) (pat_typ (C.t_to_src_t p.typ))
+                              | P_var_annot (v, t) -> mk (name_var_output v) (pat_typ t)
+                              | P_wild _ ->
+                                mk (from_string (Printf.sprintf "_x%d" (i + 1))) (pat_typ (C.t_to_src_t p.typ))
+                              | P_typ (_, p', _, _, _) | P_paren (_, p', _) -> binder_of i p'
+                              | _ -> None in
+                            let binders_and_args = List.mapi binder_of pats in
                             if List.exists (fun o -> o = None) binders_and_args then
                               Output.flat [
                                 from_string "/- "; from_string worker;
