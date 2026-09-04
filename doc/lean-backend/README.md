@@ -92,7 +92,13 @@ the negative/panic test legs — is `tests/comprehensive/`:
   obligation (`f_measure_sufficient`: worker = wrapper at every fuel at
   or above the measure) whose proof you write in
   `<Module>_lemMeasureProofs.lean` — a missing or mistyped theorem fails
-  the build, and a `sorry` fails the suite's token gate.
+  the build, and a `sorry` fails the suite's token gate. The measure may
+  be the backend-DERIVED structural size of an argument's type (`lemSize
+  x`): every recursive block of generated inductives gets a computable
+  `t.lemSize : t → Nat` in its own module, so a function recursing on a
+  type defined beside it (an `Eq` instance's equality, say) is measurable
+  without any hand-written Lean. An inductive relation whose premise
+  reaches the fuel takes `[LemFuel]` as an inductive parameter.
   Cerberus applies fuel declares across its whole execution path and
   checks that slice is total in its own build.
 - **Zero axioms; effects are explicit state.** Neither the library

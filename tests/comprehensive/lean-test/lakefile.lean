@@ -44,6 +44,9 @@ lean_lib LemComprehensiveTest where
     `Test_fuel_measure_tree_lemMeasureProofs,  -- hand-written proofs (nested inductive, foldl as written)
     `TestFuelMeasureImpl,  -- hand-written COMPUTABLE structural size of mtree (a measure over a user type)
     `TestFuelMeasureCheck,  -- hand-written fuel-measure kernel pins (decide/rfl through measured wrappers; consumers binder-free)
+    `Test_lem_size, `Test_lem_size_auxiliary,  -- backend-derived size functions as fuel measures (D2-enablers slice)
+    `Test_lem_size_lemMeasureProofs,  -- hand-written proofs of its obligations (the build fails without it)
+    `TestLemSizeCheck,  -- hand-written derived-size kernel pins (decide through the sizes and the measured wrappers; #print axioms)
     `Test_fuel_param, `Test_fuel_param_auxiliary,
     `TestFuelConsumerImpl,  -- hand-written fuel_consumer implementation ([LemFuel])
     `TestFuelParamCheck,  -- hand-written fuel-parameter kernel pins (fuel-parameter arc)

@@ -111,3 +111,18 @@ declare {lean} fuel val tup_spin = `996`
 val tail_spin : forall 'a. nat -> 'a -> 'a
 let rec tail_spin n = if n = 0 then (fun x -> x) else tail_spin (n - 1)
 declare {lean} fuel val tail_spin = `fun x => x`
+
+(* an INDUCTIVE RELATION whose premise reaches the ambient fuel
+   (D2-enablers slice, 2026-09-04; cerberus cmm_op.lem:580 `monStep`):
+   the generated `inductive` takes `[LemFuel]` as an inductive PARAMETER
+   (Lean allows an instance-implicit binder on an inductive; the
+   constructors' premises resolve the ambient from it), and the relation
+   is fuel-lifted like a def — a definition mentioning it takes the
+   binder; a reference from a fuel-free context (an assert: negative/
+   neg_fuel_indreln_scope.lem) is the fuel-scope error. Pinned in
+   lean-test/TestFuelParamCheck.lean (a derivation at an explicit
+   instance). *)
+indreln [spin_reach : nat -> nat -> bool]
+  spin_reach_refl : forall n. true ==> spin_reach n n
+and
+  spin_reach_step : forall n m. spin_reach n m && spin m = 0 ==> spin_reach n (m + 1)

@@ -92,3 +92,14 @@ theorem spin_fuel_irrelevant (f g n : Nat) (hf : n < f) (hg : n < g) :
 end TestFuelParamCheck
 
 #print axioms TestFuelParamCheck.spin_fuel_irrelevant
+
+/-! ### an inductive relation with a fuel'd premise takes `[LemFuel]` as an
+    inductive parameter (D2-enablers slice): its type, a derivation at an
+    explicit instance (the premise `spin m = 0` decided by the kernel at
+    that instance), and the constructor's binder shape -/
+example : [LemFuel] → Nat → Nat → Prop := @spin_reach
+example : @spin_reach ⟨5⟩ 0 1 :=
+  @spin_reach.spin_reach_step ⟨5⟩ 0 0 (@spin_reach.spin_reach_refl ⟨5⟩ 0) (by decide)
+example : @spin_reach ⟨5⟩ 3 3 := @spin_reach.spin_reach_refl ⟨5⟩ 3
+example (n m : Nat) [inst : LemFuel] (h : spin_reach n m) (hs : spin m = 0) : spin_reach n (m + 1) :=
+  spin_reach.spin_reach_step n m h hs

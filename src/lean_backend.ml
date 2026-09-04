@@ -231,6 +231,12 @@ type inh_plan =
    the whole mutable surface is now resettable in one call:
    St.reset_invocation () gives a fresh backend within one process,
    where previously a second invocation inherited unspecified state. *)
+(* Derived-size census entry (D2-enablers slice, 2026-09-04; mechanism
+   comment at lean_size_shape below). *)
+type size_status =
+  | Size_fn of string     (* derived: the Lean name of the type (module-qualified for lem submodules) *)
+  | Size_none of string   (* not derived: the reason, for the refusal message *)
+
 module St = struct
   (* [file] Type namespace names that need 'open' in the auxiliary file. *)
   let auxiliary_opens : string list ref = ref []
@@ -314,6 +320,13 @@ module St = struct
      — lem's own home for prover-side obligations — behind an import of
      the hand-written proofs module `<Module>_lemMeasureProofs`. *)
   let measure_obligations : Output.t list ref = ref []
+  (* [invocation] Derived-size census (D2-enablers slice, 2026-09-04;
+     mechanism comment at lean_size_shape): every generated type path of
+     the invocation -> whether the backend emits `t.lemSize` for it (with
+     the Lean name a measure's `lemSize x` resolves to) or why not. Filled
+     by lean_size_prepass over every typechecked module; read by the
+     measure renderer. *)
+  let size_census : (Path.t * size_status) list ref = ref []
   (* [render] reader_seed (declare {lean} reader_seed val f): while
      rendering a seed-marked def's body, the name of its first argument,
      which OVERRIDES the injected reader parameter name at every
@@ -410,6 +423,7 @@ module St = struct
     supply_head_ok := false;
     rendering_comment := false;
     failwith_threaded := Types.Cdmap.empty;
+    size_census := [];
     fresh_name_counter := 0
 
   (* Warning-32 suppression for the reentrancy hook (no in-tree caller
@@ -736,16 +750,62 @@ let lean_measure_tokens (m : string) : lean_measure_token list =
     end in
   go 0 []
 
-let lean_render_measure (l : Ast.l) (fname : string)
-    (params : (string * string) list) (measure : string) : string =
+(* Derived-size census lookup (D2-enablers; mechanism comment at
+   lean_size_shape, below). *)
+let size_census_lookup (p : Path.t) : size_status option =
+  Option.map snd (List.find_opt (fun (q, _) -> Path.compare p q = 0) !St.size_census)
+
+let lean_render_measure (d : Types.type_defs) (l : Ast.l) (fname : string)
+    (params : (string * (string * Types.t)) list) (measure : string) : string =
   let toks = lean_measure_tokens measure in
   let param_names = String.concat ", " (List.map fst params) in
   let mentions = ref 0 in
   let starts_with pre s =
     String.length s >= String.length pre && String.sub s 0 (String.length pre) = pre in
-  let render = function
-    | LM_other s | LM_num s -> s
-    | LM_ident t ->
+  (* `lemSize x` (D2-enablers slice; mechanism comment at lean_size_shape):
+     the derived size of the parameter x's type — resolved through the
+     size census to `<Type>.lemSize x`; refused when x is not a parameter
+     (FM-size-param) or its type has no derived size (FM-size-type, with
+     the census's reason). *)
+  let render_lem_size (rest : lean_measure_token list) : string * lean_measure_token list =
+    let rec skip_ws acc = function
+      | LM_other s :: tl when List.mem s [" "; "\t"; "\n"] -> skip_ws (String.concat "" [acc; s]) tl
+      | tl -> (acc, tl) in
+    let (ws_, tl) = skip_ws "" rest in
+    match tl with
+      | LM_ident x :: tl' when not (String.contains x '.') && List.mem_assoc x params ->
+        let (bind, ty) = List.assoc x params in
+        incr mentions;
+        let ty' = Types.head_norm d ty in
+        (match ty'.Types.t with
+          | Types.Tapp (_, p) ->
+            (match size_census_lookup p with
+              | Some (Size_fn tname) -> (String.concat "" [tname; ".lemSize"; ws_; bind], tl')
+              | Some (Size_none reason) ->
+                raise (Reporting_basic.err_general true l
+                  (Printf.sprintf
+                    "Lean backend: the fuel measure of %s uses `lemSize %s`, but the type of %s (%s) has no derived size function (FM-size-type: it is %s); a size is derived for every recursive block of generated inductive types in a user module (`t.lemSize`)"
+                    fname x x (Path.to_string p) reason))
+              | None ->
+                raise (Reporting_basic.err_general true l
+                  (Printf.sprintf
+                    "Lean backend: the fuel measure of %s uses `lemSize %s`, but the type of %s (%s) is not a generated inductive type of this invocation (FM-size-type: no derived size function exists for it — a size is derived for every recursive block of generated inductive types in a user module)"
+                    fname x x (Path.to_string p))))
+          | _ ->
+            raise (Reporting_basic.err_general true l
+              (Printf.sprintf
+                "Lean backend: the fuel measure of %s uses `lemSize %s`, but %s is not of a generated inductive type (FM-size-type: `lemSize` is the backend-derived structural size, defined for the recursive blocks of generated inductives; for a list use `List.length %s`, for a nat the parameter itself)"
+                fname x x x)))
+      | _ ->
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: `lemSize` in the fuel measure of %s must be applied directly to one of the parameters %s (FM-size-param: `lemSize x` — the backend resolves x's type to its derived size function `t.lemSize`; any other argument shape is refused)"
+            fname (if params = [] then "(none)" else param_names)))
+  in
+  let rec render acc = function
+    | [] -> acc
+    | (LM_other s | LM_num s) :: tl -> render (String.concat "" [acc; s]) tl
+    | LM_ident t :: tl ->
       let head, rest =
         match String.index_opt t '.' with
         | Some i -> String.sub t 0 i, String.sub t i (String.length t - i)
@@ -765,7 +825,7 @@ let lean_render_measure (l : Ast.l) (fname : string)
       else if List.exists (fun c -> c = "sizeOf" || c = "SizeOf") components then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: the fuel measure of %s uses `%s` (FM-sizeOf: Lean's automatic `SizeOf` instances are NONCOMPUTABLE — the wrapper must execute, so a measure is a computable expression: `List.length xs + 1`, `n + 1`, or a hand-written structural size function `Ns.size x` in a Lean module the generated module imports via `declare {lean} extra_import`)"
+            "Lean backend: the fuel measure of %s uses `%s` (FM-sizeOf: Lean's automatic `SizeOf` instances are NONCOMPUTABLE — the wrapper must execute, so a measure is a computable expression: `List.length xs + 1`, `n + 1`, the backend-derived structural size `lemSize x` of a parameter of a generated inductive type, or a hand-written structural size function `Ns.size x` in a Lean module the generated module imports via `declare {lean} extra_import`)"
             fname t))
       else if List.exists (fun c -> c = "LemFuel") components then
         raise (Reporting_basic.err_general true l
@@ -777,17 +837,21 @@ let lean_render_measure (l : Ast.l) (fname : string)
           (Printf.sprintf
             "Lean backend: the fuel measure of %s mentions the reserved binder `%s` (the backend's synthesized names are not the function's parameters)"
             fname t))
-      else if List.mem_assoc head params then begin
-        incr mentions; String.concat "" [List.assoc head params; rest]
+      else if t = "lemSize" then begin
+        let (out, tl') = render_lem_size tl in
+        render (String.concat "" [acc; out]) tl'
       end
-      else if rest <> "" then t
+      else if List.mem_assoc head params then begin
+        incr mentions; render (String.concat "" [acc; fst (List.assoc head params); rest]) tl
+      end
+      else if rest <> "" then render (String.concat "" [acc; t]) tl
       else
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: free variable `%s` in the fuel measure of %s (FM-free: a measure mentions only the function's parameters — here %s — and QUALIFIED Lean names such as `List.length xs` or `Ns.size x`; Lean's global namespace is not visible at generation, so an unqualified name that is not a parameter is refused)"
+            "Lean backend: free variable `%s` in the fuel measure of %s (FM-free: a measure mentions only the function's parameters — here %s — and QUALIFIED Lean names such as `List.length xs` or `Ns.size x`, or `lemSize x` for the derived size of a parameter's inductive type; Lean's global namespace is not visible at generation, so an unqualified name that is not a parameter is refused)"
             t fname (if params = [] then "none" else param_names)))
   in
-  let rendered = String.concat "" (List.map render toks) in
+  let rendered = render "" toks in
   if !mentions = 0 then begin
     let significant = List.filter (function
         | LM_other s -> not (List.mem s [" "; "\t"; "\n"; "("; ")"])
@@ -921,6 +985,18 @@ let lean_fuel_prepass env (ds : def list) =
       else
         let used = (add_def_entities target false empty_used_entities d).used_consts_set in
         (defined, used) :: acc
+    (* D2-enablers (2026-09-04): an inductive relation whose premises
+       reach the ambient fuel takes `[LemFuel]` as an inductive PARAMETER
+       (Lean allows an instance-implicit binder on an inductive; the
+       constructors' premises then resolve the ambient from it) — so the
+       relation is fuel-lifted like a def: a definition that mentions it
+       takes the binder, and a reference from a fuel-free context (an
+       assert, a lemma, an instance method) is the fuel_scope_check error.
+       All relations of one indreln block lift together (one def). *)
+    | Indreln _ ->
+      let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
+      let used = (add_def_entities target false empty_used_entities d).used_consts_set in
+      (defined, used) :: acc
     | _ -> acc in
   let infos = List.rev (List.fold_left def_infos [] ds) in
   let changed = ref true in
@@ -1868,6 +1944,181 @@ let rec lean_cmp_shape (d : Types.type_defs) (derived : (Path.t * string) list)
 
 let lean_cmp_shape_is_bad = function CSbad _ -> true | _ -> false
 
+(* ===== Backend-derived computable SIZE functions (D2-enablers slice,
+   2026-09-04; TODO row 15) =====
+
+   Classic mechanism name: a STRUCTURAL SIZE (the term-size measure of a
+   nested inductive), derived by the backend for every recursive block of
+   generated inductive types and emitted right after the block, in the
+   type's own module:
+
+       def t.lemSize (sizex_ : t) : Nat := match sizex_ with
+         | .C x1 x2 => 1 + s.lemSize x1 + t.lemSize_aux1 x2    -- one arm per constructor
+         …
+       termination_by structural sizex_
+
+   Why it exists: a `declare {lean} fuel_measure val` over a type defined
+   in the SAME module as the measured function cannot be a hand-written
+   Lean function (that module would have to import the generated one — a
+   cycle), and Lean's automatic `sizeOf` is NONCOMPUTABLE (`List._sizeOf_inst
+   … has no executable code`, measured in the fuel-measure slice), while a
+   measured wrapper must EXECUTE. So the backend derives the computable
+   size itself, in the derived-comparison machinery's shape (one mutual
+   block per type block, list/option/sum helpers per container element
+   type, `termination_by structural` everywhere — the kernel computes
+   through it, `decide` on closed terms).
+
+   The measure names it as `lemSize x` (x a parameter; the backend
+   resolves x's type to its size function: `lemSize c` ↦ `ctype.lemSize c`)
+   or, explicitly, as the qualified global `ctype.lemSize c`.
+
+   Size semantics (documented in the manual): every constructor node of
+   the block's types counts 1; every non-nullary constructor of a
+   supported container counts 1 (`::`, `Some`, `Sum.inl`, `Sum.inr`) and
+   the nullary ones (`[]`, `none`) 0; tuples are transparent (component
+   sizes summed); every other field is a LEAF counting 0 — a type
+   variable (a size over `'a` cannot recurse into `'a`), a base type, a
+   type of another block (its own size function, if any, is a separate
+   measure the user may add: `t.lemSize x + u.lemSize y`), a function
+   type, or a sibling under an unsupported head (`set t`, a user type
+   applied to `t` — NOT counted; a recursion through such a field is not
+   bounded by this size, and the sufficiency obligation is where that
+   shows). A size bounds RECURSION DEPTH through the block's own
+   constructors and the supported containers, which is what a fuel
+   measure needs; a leaf's contribution is irrelevant to that bound.
+
+   Emission policy: EVERY recursive block (some constructor field reaches
+   a sibling through tuples/list/maybe/either) of a non-library module
+   gets its size functions — on-demand emission is impossible in general
+   because the measure that needs a size may live in another module
+   generated by a LATER lem invocation (the test suite generates each file
+   separately; cerberus's `Defacto_memory_aux` measures over
+   `Defacto_memory_types`), and a Lean-only declare on the type side
+   (`declare {lean} size type t`) was rejected as a second knob the user
+   must remember (record §2 lists the alternatives and the measured output
+   cost). Non-recursive types have the constant size 1 — no function is
+   emitted (a measure over a constant is the magic value FM-const refuses),
+   and `lemSize x` on such a type is refused at generation with the reason.
+   Not derived (refused with the reason at a `lemSize` use): library types,
+   target_rep'd types (they are abbrevs), opaque types, heterogeneous
+   (Type-1, indexed) mutual blocks.
+
+   Fail-closed: a constructor or record field of the block named `lemSize`
+   or `lemSize_aux…` collides with the derived names (`t.lemSize` is in
+   the type's namespace, as constructors are) and is refused at
+   generation; `lemSize` in a measure must be applied directly to a
+   parameter (`lemSize x`), whose type must be a derived-size type.
+
+   The census below is computed by lean_size_prepass over EVERY
+   typechecked module of the invocation (the inhabited census's shape,
+   lean_analysis_prepass_all), so a measure can name a type from an
+   imported module; the emission (generate_lem_size, in the functor) and
+   the census agree because both run lean_size_block on the same block. *)
+
+(* The size shape of a field type: the derived-comparison shape with every
+   underivable/unsupported case a LEAF (a size never fails — it just does
+   not count what it cannot reach). *)
+let rec lean_size_shape (d : Types.type_defs) (siblings : (Path.t * string) list) (t : Types.t) : cmp_shape =
+  let paths = List.map fst siblings in
+  if not (lean_typ_refs_paths d paths t) then CSleaf
+  else
+    let t' = Types.head_norm d t in
+    match t'.Types.t with
+      | Types.Ttup ts ->
+        let shs = List.map (lean_size_shape d siblings) ts in
+        if List.for_all (fun sh -> sh = CSleaf) shs then CSleaf else CStuple shs
+      | Types.Tapp (ts, p) ->
+        (match List.find_opt (fun (q, _) -> Path.compare p q = 0) siblings with
+          | Some (_, name) -> CSsibling name
+          | None ->
+            (match Name.to_string (Path.get_name p), ts with
+              | "list", [e] ->
+                (match lean_size_shape d siblings e with CSleaf -> CSleaf | sh -> CSlist (e, sh))
+              | "maybe", [e] ->
+                (match lean_size_shape d siblings e with CSleaf -> CSleaf | sh -> CSoption (e, sh))
+              | "either", [l; r] ->
+                let shl = lean_size_shape d siblings l and shr = lean_size_shape d siblings r in
+                if shl = CSleaf && shr = CSleaf then CSleaf else CSsum ((l, shl), (r, shr))
+              | _ -> CSleaf))
+      | _ -> CSleaf
+
+(* One block's size analysis, shared by the census and the emission.
+   Returns None when the block gets no size functions (with the reason),
+   or Some members: (path, Lean type name, tnvar_list, ctors) with ctor =
+   (Lean constructor name, field types). *)
+let lean_size_block (env : env) (module_name : string)
+    (ts_list : (name_l * Typed_ast.tnvar list * Path.t * texp * name_sect option) list)
+  : ((Path.t * string * Typed_ast.tnvar list * (string * Types.t list) list) list, string) result =
+  let target = Target.Target_no_ident Target.Target_lean in
+  let l = Ast.Trans (false, "lean_size_block", None) in
+  let non_abbrev = List.filter (fun (_, _, _, t, _) -> match t with Te_abbrev _ -> false | _ -> true) ts_list in
+  if is_library_module module_name then Error "a library type (sizes are derived for user modules only)"
+  else if non_abbrev = [] then Error "a type abbreviation"
+  else begin
+    let param_counts = List.map (fun (_, tvs, _, _, _) -> List.length tvs) non_abbrev in
+    let is_type1 = match param_counts with
+      | [] -> false | x :: xs -> not (List.for_all (fun y -> y = x) xs) in
+    if is_type1 then Error "a member of a heterogeneous (indexed, Type 1) mutual block"
+    else begin
+      let member ((_, _), tnvar_list, path, t, _) =
+        let td = Types.type_defs_lookup l env.t_env path in
+        if Target.Targetmap.apply_target td.Types.type_target_rep target <> None then
+          Error "a type with a Lean target_rep (rendered as an abbrev of a hand-written type)"
+        else
+          let name = Name.to_string (Typed_ast_syntax.type_descr_to_name target path td) in
+          match t with
+            | Te_opaque -> Error "an opaque type (no constructors)"
+            | Te_variant (_, ctors) ->
+              let ctors = List.map (fun ((_, _), c_ref, _, args) ->
+                  let cd = c_env_lookup l env.c_env c_ref in
+                  let (_, cname, _) = Typed_ast_syntax.constant_descr_to_name target cd in
+                  (Name.to_string cname, List.map (fun (s : src_t) -> s.typ) (Seplist.to_list args)))
+                (Seplist.to_list ctors) in
+              Ok (path, name, tnvar_list, ctors)
+            | Te_record (_, _, fields, _) ->
+              Ok (path, name, tnvar_list, [("mk", List.map (fun (_, _, _, (s : src_t)) -> s.typ) (Seplist.to_list fields))])
+            | Te_abbrev _ -> Error "a type abbreviation" in
+      let rec collect acc = function
+        | [] -> Ok (List.rev acc)
+        | td :: rest -> (match member td with Ok m -> collect (m :: acc) rest | Error e -> Error e) in
+      match collect [] non_abbrev with
+        | Error e -> Error e
+        | Ok members ->
+          let siblings = List.map (fun (p, nm, _, _) -> (p, nm)) members in
+          let recursive = List.exists (fun (_, _, _, ctors) ->
+              List.exists (fun (_, args) ->
+                  List.exists (fun ty -> lean_size_shape env.t_env siblings ty <> CSleaf) args) ctors)
+              members in
+          if not recursive then
+            Error "a non-recursive type (its size is the constant 1 — a measure over it would be a magic value; measure the data that actually decreases)"
+          else Ok members
+    end
+  end
+
+(* Census pre-pass over one module's type blocks (recursing into lem
+   submodules, whose names prefix the Lean type name). Runs for every
+   typechecked module (lean_analysis_prepass_all) and again per emitted
+   module (lean_defs); insertions are idempotent. *)
+let lean_size_prepass env (ds : def list) =
+  let rec walk (ns : string list) (((d_aux, _), _, _) : def) =
+    match d_aux with
+      | Module (_, (name, _), _, _, _, inner, _) ->
+        let n = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip name)) in
+        List.iter (walk (ns @ [n])) inner
+      | Type_def (_, defs) ->
+        let ts_list = Seplist.to_list defs in
+        let register p st =
+          if size_census_lookup p = None then St.size_census := (p, st) :: !St.size_census in
+        (match lean_size_block env !St.current_module_name ts_list with
+          | Ok members ->
+            List.iter (fun (p, nm, _, _) ->
+                register p (Size_fn (String.concat "." (ns @ [nm])))) members
+          | Error reason ->
+            List.iter (fun (_, _, p, t, _) ->
+                match t with Te_abbrev _ -> () | _ -> register p (Size_none reason)) ts_list)
+      | _ -> () in
+  List.iter (walk []) ds
+
 let lean_thread_lookup (c : Types.const_descr_ref) : (int list * string list) option =
   Types.Cdmap.apply !St.failwith_threaded c
 let lean_thread_debug = (try Sys.getenv "LEM_THREAD_DEBUG" <> "" with Not_found -> false)
@@ -2319,7 +2570,8 @@ let lean_analysis_prepass_all env (mods : checked_module list) =
       lean_fuel_prepass env ds;
       lean_supply_prepass env ds;
       lean_inhabited_prepass env ds;
-      lean_failwith_thread_prepass env ds)
+      lean_failwith_thread_prepass env ds;
+      lean_size_prepass env ds)
     mods;
   St.current_module_name := saved
 
@@ -3949,7 +4201,7 @@ type pat_style = FunParam | MatchArm
                           let rec binder_of i (p : pat) =
                             let mk nm t lemname =
                               Some (Output.flat [from_string " ("; nm; from_string " : "; t; from_string ")"],
-                                    Output.flat [from_string " "; nm], lemname) in
+                                    Output.flat [from_string " "; nm], lemname, p.typ) in
                             let lem_of v = Name.to_string (Name.strip_lskip v) in
                             match p.term with
                             | P_var v -> mk (name_var_output v) (pat_typ (C.t_to_src_t p.typ)) (Some (lem_of v))
@@ -4058,16 +4310,16 @@ type pat_style = FunParam | MatchArm
                           if fuel_lifted_g <> workers_need_fuel then
                             raise (Reporting_basic.err_general true l
                               "Lean backend: internal error — the fuel fixpoint and the block's ambient-reach test disagree on a measured definition");
-                          let params = List.filter_map (fun (_, _, lemname) ->
+                          let params = List.filter_map (fun (_, _, lemname, ty) ->
                               match lemname with
-                              | Some ln -> Some (ln, lean_escape_keyword ln)
+                              | Some ln -> Some (ln, (lean_escape_keyword ln, ty))
                               | None -> None) bs in
-                          let measure_out = lean_render_measure l base_name params measure in
+                          let measure_out = lean_render_measure A.env.t_env l base_name params measure in
                           let result_out = pat_typ (C.t_to_src_t (codomain_after l npats cd.const_type)) in
                           let ambient_binder =
                             if fuel_lifted_g && not inside_instance then from_string " [LemFuel]" else emp in
-                          let arg_binders = Output.flat (List.map (fun (b, _, _) -> b) bs) in
-                          let arg_names = Output.flat (List.map (fun (_, a, _) -> a) bs) in
+                          let arg_binders = Output.flat (List.map (fun (b, _, _, _) -> b) bs) in
+                          let arg_names = Output.flat (List.map (fun (_, a, _, _) -> a) bs) in
                           let reader_binders =
                             if lifted then reader_binder_output () else emp in
                           let reader_args = if lifted then reader_args_output () else emp in
@@ -4147,13 +4399,13 @@ type pat_style = FunParam | MatchArm
                                 tv_out; cons_out;
                                 fuel_binder_output (); inhabited_binder_output ();
                                 reader_binder_output (); supply_binder_output ()]
-                                @ List.map (fun (b, _, _) -> b) bs
+                                @ List.map (fun (b, _, _, _) -> b) bs
                                 @ [from_string " :\n    ";
                                    (if tail_ascription <> None then from_string "(" else emp);
                                    from_string worker; from_string " 0";
                                    (if lifted then reader_args_output () else emp);
                                    supply_names]
-                                @ List.map (fun (_, a, _) -> a) bs
+                                @ List.map (fun (_, a, _, _) -> a) bs
                                 @ (match tail_ascription with
                                    | Some t -> [from_string " : "; t; from_string ")"]
                                    | None -> [])
@@ -4229,6 +4481,16 @@ type pat_style = FunParam | MatchArm
           gather_names_aux [] clause_list
       in
       let gathered = gather_names clause_list in
+      (* D2-enablers (2026-09-04): a relation in the fuel-lifted set (its
+         premises reach the ambient fuel; lean_fuel_prepass lifts the whole
+         block) takes `[LemFuel]` as an inductive parameter, and its
+         premises render inside a fuel scope. Inert for block comments. *)
+      let fuel_lifted_rel =
+        (not !St.rendering_comment)
+        && List.exists (fun (_, c) -> Types.Cdset.mem c !St.fuel_lifted) gathered in
+      let saved_fuel_binder = !St.fuel_binder in
+      if fuel_lifted_rel then St.fuel_binder := true;
+      Fun.protect ~finally:(fun () -> St.fuel_binder := saved_fuel_binder) (fun () ->
       (* For polymorphic indreln: compute type parameter names per relation
          and set St.indreln_params so exp can insert them in premises. *)
       let saved_indreln_params = !St.indreln_params in
@@ -4335,8 +4597,9 @@ type pat_style = FunParam | MatchArm
             ]
           in
           let clause_body = concat_str "\n" @@ List.map fst clause_outputs in
+          let fuel_param = if fuel_lifted_rel then from_string " [LemFuel]" else emp in
           Output.flat [
-            from_string name_string; from_string " "; free_vars_typeset; from_string " : "; index_type_sig; from_string " where\n";
+            from_string name_string; from_string " "; free_vars_typeset; fuel_param; from_string " : "; index_type_sig; from_string " where\n";
             clause_body
           ]
         ) gathered
@@ -4349,7 +4612,7 @@ type pat_style = FunParam | MatchArm
           from_string "\ninductive "; concat_str "\ninductive " indrelns;
           suffix
         ]
-      )
+      ))
     and let_body inside_instance i_ref_opt top_level tv_set ((lb, _):letbind) =
       match lb with
         | Let_val (p, topt, skips, e) ->
@@ -7297,6 +7560,142 @@ type pat_style = FunParam | MatchArm
         ] in
         (from_string text, List.map (fun (path, _, _, bounds, _) -> (path, bounds)) per_type)
       end
+    (* ===== D2-enablers (2026-09-04): derived computable SIZE functions
+       (mechanism comment at lean_size_shape, top level). For a recursive
+       block of generated inductives, one mutual block: `t.lemSize` per
+       member type and `<first>.lemSize_aux<k>` per container element
+       shape (list/option/sum, memoized per block) — the derived-comparison
+       machinery's shape, `termination_by structural` on every member that
+       makes a block call (a member with none is a plain def: Lean warns
+       on an unused clause). The census (lean_size_block) and this emitter
+       run the same analysis on the same block, so `lemSize x` in a
+       measure resolves exactly to what is emitted. *)
+    and generate_lem_size ts_list : Output.t =
+      match lean_size_block A.env !St.current_module_name ts_list with
+      | Error _ -> emp
+      | Ok members ->
+        let d = A.env.t_env in
+        let l = match ts_list with ((_, l0), _, _, _, _) :: _ -> l0 | [] -> Ast.Trans (false, "generate_lem_size", None) in
+        let siblings = List.map (fun (p, nm, _, _) -> (p, nm)) members in
+        let shape_of ty = lean_size_shape d siblings ty in
+        let starts_with pre str =
+          String.length str >= String.length pre && String.sub str 0 (String.length pre) = pre in
+        let collides nm = nm = "lemSize" || starts_with "lemSize_aux" nm in
+        (* fail-closed: the derived names live in the type's namespace,
+           as constructors (and mutual-block record accessors) do *)
+        List.iter (fun (_, tnm, _, ctors) ->
+            List.iter (fun (cn, _) ->
+                if collides cn then
+                  raise (Reporting_basic.err_general true l
+                    (Printf.sprintf
+                      "Lean backend: constructor `%s` of type `%s` collides with the backend-derived size function `%s.lemSize` / its helpers `%s.lemSize_aux<k>` (the names are reserved in every generated type's namespace; rename the constructor)"
+                      cn tnm tnm tnm))) ctors) members;
+        List.iter (fun ((n0, _), _, path, t, _) ->
+            match t with
+            | Te_record (_, _, fields, _) ->
+              let tnm = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip (B.type_path_to_name n0 path))) in
+              List.iter (fun ((fname, _), f_ref, _, _) ->
+                  let fnm = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip (B.const_ref_to_name fname false f_ref))) in
+                  if collides fnm then
+                    raise (Reporting_basic.err_general true l
+                      (Printf.sprintf
+                        "Lean backend: field `%s` of record type `%s` collides with the backend-derived size function `%s.lemSize` / its helpers `%s.lemSize_aux<k>` (the names are reserved in every generated type's namespace; rename the field)"
+                        fnm tnm tnm tnm))) (Seplist.to_list fields)
+            | _ -> ()) ts_list;
+        let first_name = match members with (_, nm, _, _) :: _ -> nm | [] -> assert false in
+        let helper_defs : string list ref = ref [] in
+        let helper_memo : (string, string) Hashtbl.t = Hashtbl.create 16 in
+        let helper_ctr = ref 0 in
+        let tv_binders_of (tys : Types.t list) : string =
+          let fvs = List.fold_left (fun acc ty -> Types.TNset.union acc (Types.free_vars ty))
+            Types.TNset.empty tys in
+          let bs = List.map (fun tnv ->
+            let nm = Ulib.Text.to_string (Types.tnvar_to_rope tnv) in
+            match tnv with
+              | Types.Ty _ -> Printf.sprintf "{%s : Type}" nm
+              | Types.Nv _ -> Printf.sprintf "{%s : Nat}" nm)
+            (Types.TNset.elements fvs) in
+          (match bs with [] -> "" | _ -> String.concat "" [" "; String.concat " " bs]) in
+        (* pattern for one field + the size terms its subterms contribute *)
+        let rec build (ctr : int ref) (sh : cmp_shape) : string * string list =
+          match sh with
+            | CSleaf -> ("_", [])
+            | CStuple shs ->
+              let parts = List.map (build ctr) shs in
+              (Printf.sprintf "(%s)" (String.concat ", " (List.map fst parts)),
+               List.concat_map snd parts)
+            | CSsibling nm ->
+              incr ctr; let x = Printf.sprintf "x%d" !ctr in (x, [Printf.sprintf "%s.lemSize %s" nm x])
+            | CSlist _ | CSoption _ | CSsum _ ->
+              incr ctr; let x = Printf.sprintf "x%d" !ctr in (x, [Printf.sprintf "%s %s" (helper sh) x])
+            | CSbad _ -> assert false (* lean_size_shape never produces it *)
+        and sum_terms (terms : string list) : string =
+          String.concat "" (List.map (fun t -> String.concat "" [" + "; t]) terms)
+        and helper (sh : cmp_shape) : string =
+          let key = match sh with
+            | CSlist (et, _) -> String.concat "" ["list|"; lean_typ_render et]
+            | CSoption (et, _) -> String.concat "" ["option|"; lean_typ_render et]
+            | CSsum ((lt_, _), (rt_, _)) -> String.concat "" ["sum|"; lean_typ_render lt_; "|"; lean_typ_render rt_]
+            | _ -> assert false in
+          match Hashtbl.find_opt helper_memo key with
+            | Some nm -> nm
+            | None ->
+              incr helper_ctr;
+              let nm = Printf.sprintf "%s.lemSize_aux%d" first_name !helper_ctr in
+              Hashtbl.add helper_memo key nm;
+              let def_text =
+                match sh with
+                  | CSlist (et, esh) ->
+                    let (px, terms) = build (ref 0) esh in
+                    Printf.sprintf
+                      "def %s%s (sizex_ : List (%s)) : Nat := match sizex_ with\n  | [] => 0\n  | %s :: xs0 => 1%s + %s xs0\ntermination_by structural sizex_"
+                      nm (tv_binders_of [et]) (lean_typ_render et) px (sum_terms terms) nm
+                  | CSoption (et, esh) ->
+                    let (px, terms) = build (ref 0) esh in
+                    Printf.sprintf
+                      "def %s%s (sizex_ : Option (%s)) : Nat := match sizex_ with\n  | none => 0\n  | some %s => 1%s\ntermination_by structural sizex_"
+                      nm (tv_binders_of [et]) (lean_typ_render et) px (sum_terms terms)
+                  | CSsum ((lt_, shl), (rt_, shr)) ->
+                    let (plx, lterms) = build (ref 0) shl in
+                    let (prx, rterms) = build (ref 0) shr in
+                    Printf.sprintf
+                      "def %s%s (sizex_ : Sum (%s) (%s)) : Nat := match sizex_ with\n  | Sum.inl %s => 1%s\n  | Sum.inr %s => 1%s\ntermination_by structural sizex_"
+                      nm (tv_binders_of [lt_; rt_]) (lean_typ_render lt_) (lean_typ_render rt_)
+                      plx (sum_terms lterms) prx (sum_terms rterms)
+                  | _ -> assert false in
+              helper_defs := def_text :: !helper_defs;
+              nm
+        in
+        let size_def (type_name, tnvar_list, ctors) : string =
+          let binders = String.concat "" (List.map (fun tv ->
+              Printf.sprintf " {%s : %s}" (tnvar_to_string tv) (tnvar_kind tv)) tnvar_list) in
+          let args = String.concat "" (List.map (fun tv -> String.concat "" [" "; tnvar_to_string tv]) tnvar_list) in
+          let recursive_here = ref false in
+          let arms = List.map (fun (cn, argtys) ->
+              let ctr = ref 0 in
+              let parts = List.map (fun ty -> build ctr (shape_of ty)) argtys in
+              let terms = List.concat_map snd parts in
+              if terms <> [] then recursive_here := true;
+              let sp = if argtys = [] then "" else " " in
+              Printf.sprintf "  | .%s%s%s => 1%s" cn sp (String.concat " " (List.map fst parts)) (sum_terms terms))
+            ctors in
+          Printf.sprintf "def %s.lemSize%s (sizex_ : %s%s) : Nat := match sizex_ with\n%s%s"
+            type_name binders type_name args (String.concat "\n" arms)
+            (if !recursive_here then "\ntermination_by structural sizex_" else "")
+        in
+        (* type defs first (they populate the helper demand), helpers after *)
+        let type_defs_text = List.map (fun (_, nm, tvs, ctors) -> size_def (nm, tvs, ctors)) members in
+        let all_defs = type_defs_text @ List.rev !helper_defs in
+        let body = String.concat "\n" all_defs in
+        let text = String.concat "" [
+          "\n/- Backend-derived computable structural size (the fuel-measure form\n";
+          "   `lemSize x`): one per constructor node of this block's types and per\n";
+          "   non-nullary container constructor (`::`/`some`/`inl`/`inr`); tuples\n";
+          "   transparent; every other field a leaf (0). Kernel-computable. -/\n";
+          (if List.length all_defs > 1 then String.concat "" ["mutual\n"; body; "\nend\n"]
+           else String.concat "" [body; "\n"])
+        ] in
+        from_string text
     and generate_default_values ts : Output.t =
       let ts = Seplist.to_list ts in
       (* In library modules, skip instance generation for opaque types
@@ -7321,7 +7720,7 @@ type pat_style = FunParam | MatchArm
           let (cmp_defs, derived_cmp) = derived_comparison_single td in
           Output.flat [cmp_defs; generate_beq_ord_instances ~emit_deriving:false ?derived_cmp td]
         else generate_beq_ord_instances td) ts in
-        Output.flat [concat_str "\n" mapped; concat emp beq_instances]
+        Output.flat [concat_str "\n" mapped; concat emp beq_instances; generate_lem_size ts]
     (* F4 helper: run the derived-comparison generator on a single type
        whose constructor order needs the OCaml rank, fail-closed. A shape
        the derivation cannot recurse through (a self-reference under a
@@ -7401,7 +7800,7 @@ type pat_style = FunParam | MatchArm
         let derived_cmp =
           Option.map snd (List.find_opt (fun (p, _) -> Path.compare p path = 0) derived_info) in
         generate_beq_ord_instances ~is_type1 ~emit_deriving ?derived_cmp td) ts_list in
-        Output.flat [inhabited_output; from_string "\n"; cmp_defs; concat emp beq_instances]
+        Output.flat [inhabited_output; from_string "\n"; cmp_defs; concat emp beq_instances; generate_lem_size ts_list]
     (* Arc-8 S2 (D4): the former `default_value` (the L_undefined
        renderer whose Typ_var case emitted `sorry`) is DELETED —
        L_undefined renders as failwithI (audit fix; mirrors OCaml's
@@ -7527,6 +7926,9 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
          over the call graph) — needs the S1 census, so runs after it.
          Also guard-sweeps instance methods (rule 3). *)
       lean_failwith_thread_prepass A.env ds;
+      (* D2-enablers: the derived-size census for this module's blocks
+         (idempotent re-run of the invocation-wide pass). *)
+      lean_size_prepass A.env ds;
       let lean_defs = defs false false ds in
       (* Drain any deferred abbrevs (e.g., abbrev mword after class Size).
 
