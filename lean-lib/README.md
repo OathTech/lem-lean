@@ -8,7 +8,14 @@ carries none; see the module docstring and the HISTORY notes in
 `LemLib.lean`).
 
 Build: `lake build` (toolchain per `lean-toolchain`). Property tests:
-`LemLibTest.lean`.
+`LemLibTest.lean`. Kernel-checked theorems: `LemLibTheorems.lean` (the
+tail-recursive rewrites equal the definitions they replaced; the
+height-indexed `join` equals the well-founded one under `heightsOk`) and
+`LemLibPmapLaws.lean` (lookup-after-insert laws for `Pmap`/`Fmap` under a
+strict-weak-order comparator: `Pmap.WF`, `Pmap.find?_add_same`,
+`Pmap.find?_add_other`, the `Fmap` corollaries) — every theorem closed
+under `propext`/`Classical.choice`/`Quot.sound` at most, `#print axioms`
+at the end of each file.
 
 Documentation for the backend that targets this library:
 [`doc/lean-backend/README.md`](../doc/lean-backend/README.md).

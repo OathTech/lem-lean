@@ -23,3 +23,12 @@ lean_lib LemLibTest where
 lean_lib LemLibTheorems where
   srcDir := "."
   globs := #[.one `LemLibTheorems]
+
+/-- Lookup-after-insert laws for the `Pmap`/`Fmap` port under a
+    strict-weak-order comparator (tails-and-pmap-laws slice 2026-09-05; the
+    refined-cerberus request §1): `WF`, `WF_add`, `find?_add_same`,
+    `find?_add_other`, the `Fmap` corollaries; kernel-only, `#print axioms`. -/
+@[default_target]
+lean_lib LemLibPmapLaws where
+  srcDir := "."
+  globs := #[.one `LemLibPmapLaws]
