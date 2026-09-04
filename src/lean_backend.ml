@@ -646,7 +646,8 @@ let lean_has_lean_rep env cref =
    guards): FM-nofuel (a measure needs the fuel worker), FM-consumer,
    FM-structural (one shape per definition), FM-free (an unqualified
    identifier in the measure that is not a parameter — a global Lean name
-   must be qualified), FM-sizeOf (Lean's automatic `SizeOf` instances are
+   must be qualified; every dotted COMPONENT of every identifier is tested
+   against the forbidden names and `_root_` is refused: FM-root), FM-sizeOf (Lean's automatic `SizeOf` instances are
    noncomputable — measured in this slice: `List._sizeOf_inst … has no
    executable code`; a measure must execute), FM-ambient
    (`LemFuel` in a measure), FM-literal / FM-const (a numeral, or any
@@ -749,24 +750,36 @@ let lean_render_measure (l : Ast.l) (fname : string)
         match String.index_opt t '.' with
         | Some i -> String.sub t 0 i, String.sub t i (String.length t - i)
         | None -> t, "" in
-      if List.mem_assoc head params then begin
-        incr mentions; String.concat "" [List.assoc head params; rest]
-      end
-      else if head = "sizeOf" || head = "SizeOf" then
+      (* the forbidden names are tested on EVERY dotted component, not the
+         head only, and `_root_` is refused outright — pre-merge audit M1:
+         `_root_.LemFuel.fuel + 0 * List.length l` and `_root_.sizeOf l`
+         passed the head-only checks (the first compiled to a
+         fuel-DEPENDENT wrapper whose obligation is false; the second was
+         caught only by Lean). A qualified global never needs `_root_`. *)
+      let components = String.split_on_char '.' t in
+      if head = "_root_" then
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: the fuel measure of %s mentions `%s` (FM-root: a `_root_`-qualified name is refused — a qualified global never needs it, and it would bypass the checks on the name's components)"
+            fname t))
+      else if List.exists (fun c -> c = "sizeOf" || c = "SizeOf") components then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
             "Lean backend: the fuel measure of %s uses `%s` (FM-sizeOf: Lean's automatic `SizeOf` instances are NONCOMPUTABLE — the wrapper must execute, so a measure is a computable expression: `List.length xs + 1`, `n + 1`, or a hand-written structural size function `Ns.size x` in a Lean module the generated module imports via `declare {lean} extra_import`)"
             fname t))
-      else if head = "LemFuel" then
+      else if List.exists (fun c -> c = "LemFuel") components then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
             "Lean backend: the fuel measure of %s mentions `%s` (FM-ambient: a measure that reads the ambient fuel is not a data measure — it must be an expression over the parameters %s)"
             fname t param_names))
-      else if head = "lemFuel" || starts_with "_lem" head then
+      else if List.exists (fun c -> c = "lemFuel" || starts_with "_lem" c) components then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
             "Lean backend: the fuel measure of %s mentions the reserved binder `%s` (the backend's synthesized names are not the function's parameters)"
             fname t))
+      else if List.mem_assoc head params then begin
+        incr mentions; String.concat "" [List.assoc head params; rest]
+      end
       else if rest <> "" then t
       else
         raise (Reporting_basic.err_general true l
@@ -4082,9 +4095,9 @@ type pat_style = FunParam | MatchArm
                             from_string "\n/- fuel_measure obligation for `"; from_string base_name;
                             from_string "` (generated; declare {lean} fuel_measure val "; from_string base_name;
                             from_string " = `"; from_string (String.trim measure);
-                            from_string "`): the measure is a sufficient fuel. The proof is hand-written in `";
+                            from_string "`): the worker is fuel-STABLE at the measure (equal to the wrapper at every fuel at or above it). The proof is hand-written in `";
                             from_string proofs_module; from_string "." ; from_string thm;
-                            from_string "`, stated with exactly these binders; the build fails without it. -/\n";
+                            from_string "`, stated with exactly these binders; a missing or mistyped theorem fails the build (a `sorry` is the sorry/axiom gates' job). -/\n";
                             from_string "theorem "; from_string thm; tv_out; cons_out;
                             ambient_binder; inhabited_binder_output ();
                             reader_binders; arg_binders;

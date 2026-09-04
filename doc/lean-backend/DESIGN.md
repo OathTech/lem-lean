@@ -113,7 +113,11 @@ fixpoint treats it as non-fuel'd; the kernel computes through it), and
 the backend emits the per-function SUFFICIENCY OBLIGATION into the
 auxiliary file — `theorem f_measure_sufficient … : f_lemFuel lemFuel xs
 = f xs := <Module>_lemMeasureProofs.f_measure_sufficient …` — whose
-proof a hand-written module supplies (the build fails without it). The
+proof a hand-written module supplies (a missing or mistyped theorem fails
+the build; a `sorry` is caught by the suite's token gate over the proofs
+modules and by the consumer's sorry/axiom gates). The obligation states
+fuel-STABILITY above the measure (the wrapper's value is fuel-independent),
+not that the exhaustion arm is unreachable. The
 ruling behind the mechanism, [USER 2026-09-04], verbatim: "I think
 sticking to our principle that we don't change the lem structure for
 ocaml is a very good design rule. That's available here with (2) right,
@@ -124,7 +128,9 @@ structure, and we get additional properties we want without any trust
 decrease". Measures are checked fail-closed at generation (only the
 function's parameters and QUALIFIED Lean names; `sizeOf` refused —
 Lean's `SizeOf` instances are noncomputable; `LemFuel` refused; a
-numeral or any parameter-free measure refused as a magic value). Fail-closed: a fuel'd/fuel-lifted definition referenced where no
+numeral or any parameter-free measure refused as a magic value; every
+dotted component of a name is tested and `_root_` is refused) — speedbumps;
+the theorem is the certificate. Fail-closed: a fuel'd/fuel-lifted definition referenced where no
 instance is in scope (a lem `assert`, an indreln rule, an instance
 method) is a generation-time error — there is no default to inject. The
 former per-declaration numeric budget (`declare {lean} fuel val f = N`)
@@ -454,7 +460,7 @@ unaffected:
 | `declare {lean} rename module = Name` | rename the generated module |
 | ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total worker recursing on a fuel counter (returning `sentinel` at zero) + a wrapper `f [LemFuel] := f_lemFuel LemFuel.fuel` starting the counter from the ambient fuel + the exhaustion lemma `f_lemFuel_zero`; `f` and everything reaching it take `[LemFuel]` (the fuel lifting). The numeric form `= N` is refused (a magic value) |
 | `declare {lean} fuel_consumer val f` | `f`'s hand-written Lean implementation reads the ambient fuel (`LemFuel.fuel`): its callers are fuel-lifted; call sites unchanged (requires a Lean target_rep) |
-| ``declare {lean} fuel_measure val f = `List.length xs + 1` `` | for a fuel'd `f`: the wrapper binds the parameters and starts the worker's counter from the computable measure (`def f (xs : …) := f_lemFuel (<measure>) xs`) — no `[LemFuel]`, `f` fuel-free for its callers, the kernel computes through it; the obligation `f_measure_sufficient` (worker = wrapper at every fuel ≥ measure) is emitted into the auxiliary file with its proof delegated to the hand-written `<Module>_lemMeasureProofs` (build fails without it). Requires `fuel`; refused with `fuel_consumer`, `structural`, on a supply-lifted def, in a library module; the measure may mention only the parameters and qualified Lean names (`sizeOf`, `LemFuel`, free variables, numerals/parameter-free measures refused) |
+| ``declare {lean} fuel_measure val f = `List.length xs + 1` `` | for a fuel'd `f`: the wrapper binds the parameters and starts the worker's counter from the computable measure (`def f (xs : …) := f_lemFuel (<measure>) xs`) — no `[LemFuel]`, `f` fuel-free for its callers, the kernel computes through it; the obligation `f_measure_sufficient` (fuel-stability: worker = wrapper at every fuel ≥ measure) is emitted into the auxiliary file with its proof delegated to the hand-written `<Module>_lemMeasureProofs` (a missing/mistyped theorem fails the build; a `sorry` is caught by the token gate). Requires `fuel`; refused with `fuel_consumer`, `structural`, on a supply-lifted def, in a library module; the measure may mention only the parameters and qualified Lean names (`sizeOf`, `LemFuel`, free variables, numerals/parameter-free measures refused) |
 | `declare {lean} structural val f` | emit the recursive `f` as an ordinary `def` with `termination_by structural <param>` (the parameter designated by the backend's analysis; Lean's checker is the build-time backstop; the well-founded fallback is forbidden, so the kernel computes through `f`). Refused with `fuel`, with `termination_argument`, on a rep'd val, on a non-recursive or multi-clause def, on part of a mutual block |
 | `declare {lean} termination_argument f = automatic` | lem's upstream termination vocabulary, honoured: a plain `def` with no clause (Lean tries structural, then well-founded recursion — total either way, kernel computability not promised) |
 | `declare {lean} effectful val f` | RETIRED (effect-retirement arc): refused fail-closed with an error naming supply lifting as the migration path; the annotation is retained in the grammar for other targets' potential use |

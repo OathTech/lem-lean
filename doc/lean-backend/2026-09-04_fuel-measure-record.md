@@ -15,7 +15,7 @@ derived. Nothing merged, nothing pushed.
 |---|---|
 | `005f9bb` | lean-lib: regenerate `LemLib/Num.lean` after D4 (comment-only; the D4 commit had not included the regeneration — `make lean-libs` reproduces exactly this diff) |
 | `af5d431` | The `fuel_measure` declare: lexer/parser/ast/typed_ast/typecheck/echo/Ott; backend (`lean_fuel_measure_check`, `lean_render_measure`, the measured wrapper, the obligation into the auxiliary file, the fuel fixpoint on ambient constants); tests (positive ×3 modules + 2 proofs modules + `TestFuelMeasureImpl`, kernel pins, 12 negative probes, parity probe + proofs + NEW pin, invariance witness, contextual keywords); gate F3 refinement; `make clean` symlink-only; `.gitignore` negation; parity runner `.proofs.lean`; manual, DESIGN, README, TODO rows 15/16, design note R3 |
-| (this record's commit) | the point-free-tail `_zero` lemma fix (found on the cerberus dry run) + its test/pin; this record; TODO row 17 |
+| `d8a17e3` | the point-free-tail `_zero` lemma fix (found on the cerberus dry run) + its test/pin; this record; TODO row 17 |
 
 ## 1. The ruling this slice implements
 
@@ -84,8 +84,9 @@ emission guards), each a negative probe:
 | FM-consumer | with `fuel_consumer` (a hand-written implementation reads the ambient; a measure instantiates a GENERATED worker) | `neg_fuel_measure_consumer` |
 | FM-structural | with `structural` (no counter to instantiate) | `neg_fuel_measure_structural` |
 | FM-free | an unqualified identifier that is not a parameter (`xs` when the parameter is `l`; `length l`) | `neg_fuel_measure_freevar`, `neg_fuel_measure_unqualified` |
-| FM-sizeOf | `sizeOf`/`SizeOf.…` — noncomputable (§2.3) | `neg_fuel_measure_sizeof` |
-| FM-ambient | `LemFuel…` in a measure (not a data measure) | `neg_fuel_measure_ambient` |
+| FM-sizeOf | `sizeOf`/`SizeOf` as ANY dotted component — noncomputable (§2.3) | `neg_fuel_measure_sizeof`, `neg_fuel_measure_dotted_sizeof` |
+| FM-ambient | `LemFuel` as ANY dotted component (not a data measure) | `neg_fuel_measure_ambient`, `neg_fuel_measure_dotted_ambient` |
+| FM-root | a `_root_`-qualified name (audit M1: it bypassed the head-only checks) | `neg_fuel_measure_root_ambient`, `neg_fuel_measure_root_sizeof` |
 | FM-literal | a measure that IS a numeral (`` `5` ``) — the deleted magic value | `neg_fuel_measure_literal`; the bare form `= 5` is refused at parse (`neg_fuel_measure_numeric`) |
 | FM-const | a measure mentioning no parameter (`Nat.succ Nat.zero`) | `neg_fuel_measure_const` |
 | FM-mutual | some but not all members of a truly mutual fuel'd block | `neg_fuel_measure_mutual_partial` |
@@ -130,11 +131,14 @@ theorem f_measure_sufficient (xs : List T) (lemFuel : Nat) (lemMeasureLe : (List
 
 with `[LemFuel]`/`[Inhabited]`/class-constraint/reader binders mirrored
 from the wrapper (the same `binder_of` renders wrapper, `_zero` lemma and
-obligation, so the three agree by construction). The statement: at every
-fuel at or above the measure the worker equals the wrapper — the wrapper's
-value is the fuel-independent value of the recursion, which is the
-consumer's per-function fuel-irrelevance lemma directly (`∀ n ≥ μ x,
-f_lemFuel n x = f x`, and `f x = f_lemFuel (μ x) x` by `rfl`).
+obligation, so the three agree by construction). The statement is
+fuel-STABILITY above the measure: at every fuel at or above it the worker
+equals the wrapper — the wrapper's value is the fuel-independent value of
+the recursion, which is the consumer's per-function fuel-irrelevance
+lemma directly (`∀ n ≥ μ x, f_lemFuel n x = f x`, and `f x = f_lemFuel (μ
+x) x` by `rfl`). It is NOT "the exhaustion arm is unreachable at μ" (audit
+N2: a divergent `f x = f x` with a value sentinel makes it provable for
+any measure) — the operational gap below.
 
 **Why the auxiliary file.** It is lem's own home for prover-side
 obligations (the HOL/Isabelle/Coq backends put the lemmas the user must
@@ -144,7 +148,11 @@ package of this repo and in cerberus's `lakefile.toml` (every module's
 its theorem" is the Lean build itself: the auxiliary file imports the
 hand-written proofs module and applies its constant at the exact stated
 type — a missing module, a missing theorem, or a theorem of another type
-fails the build. Plant-tested, verbatim (the `mlen` proof deleted from
+fails the build — but a `sorry`'d (or axiom-backed) theorem of the right
+type BUILDS (audit M2, plant P3 green): that case is the suite's token
+gate `check_no_sorry_proofs.sh` (phase `lean-no-sorry-proofs`, §10) and,
+downstream, cerberus's sorry/axiom gates over its seams. Plant-tested,
+verbatim (the `mlen` proof deleted from
 `Test_fuel_measure_lemMeasureProofs.lean`):
 
 ```
@@ -400,7 +408,7 @@ build: `PASS: mlen_ok`, `PASS: mspin_ok`, `PASS: mrev_acc_ok`, `PASS:
 mev_ok`, `PASS: maps_mspin_ok`, `PASS: mtsum_ok`, `PASS: mdepth_ok`,
 `PASS: ctx_kw_fuel_measure_decl_ok`.
 
-### 5.2 `make lean` on the final tree (the `_zero` fix)
+### 5.2 `make lean` on `d8a17e3` (the `_zero` fix)
 
 Clean (`make clean` then `make lean`; `.tmp/gate2.log`), after the
 `_zero` fix and the `tail_spin` test/pin:
@@ -595,21 +603,26 @@ in §6.3 (`✓`), was not reached (`—`), or the row is not measured (`·`).
 | 66 | `are_compatible_params` (ail/ailTypesAux) | RESIDUE | sibling | · |
 | 67 | `eq_core_base_type` (core) | SAME-MODULE (TODO 15) | as 9; dry-run copy: the D2 `structural` sibling rewrite (builds) | ✓ (rewrite) |
 
-**Tally (derived):** MEASURED 38 (of which 5 keep `[LemFuel]` because
-their bodies pass the ambient on: `convert_expr`, `memValueFromValue`,
-`step_eval_pexpr`, `easy_update_mem_value_aux`, `memcmp_load_aux`); (B)
-11 (`load_character_array_aux`, `full_eval_pexpr`, `print_eval_conv_aux`,
-`drive_nonmemory_steps_aux2`, `driver2`, `eval_pexpr_aux2`,
-`eval_pexpr_aux_broken`, `nd_bind`, `liftND`, `liftAction`; `many`/`many1`
-counted under residue); RESIDUE 16 — tag lookup 5 (`zeros_aux`,
-`are_compatible_aux` + 2 siblings, `mkUnspec`, and `simplify_integer_value_base`
-which is also rebuilt-term), point-free `function` tail 7
-(`one_step_unseq_aux`, `get_ctx` + `get_ctx_unseq_aux`, `are_compatible`
-+ 2 siblings — a one-line eta-expansion each would make most MEASURED;
-decision for the operator, §8), evaluation loop 1 (`hack`), client
-function 1 (`list_unfoldr_aux`), precondition 1
-(`showNonNegativeWithBasis_aux`), parser 2 (`many`, `many1`); SAME-MODULE
-2 (`ctypeEqual`, `eq_core_base_type`; TODO row 15). 38 + 11 + 16 + 2 = 67.
+**Tally (derived from the table's class column; CORRECTED per pre-merge
+audit M3 — the first version of this paragraph said 38/11/16/2, with the
+sub-labels "tag lookup 5" and "point-free tail 7", which did not match the
+table or the names listed; the commit message of `d8a17e3` carries the
+wrong numbers and stays as history):** MEASURED 38 (of which 5 keep
+`[LemFuel]` because their bodies pass the ambient on: `convert_expr`,
+`memValueFromValue`, `step_eval_pexpr`, `easy_update_mem_value_aux`,
+`memcmp_load_aux`); (B) 10 (`load_character_array_aux`,
+`full_eval_pexpr`, `print_eval_conv_aux`, `drive_nonmemory_steps_aux2`,
+`driver2`, `eval_pexpr_aux2`, `eval_pexpr_aux_broken`, `nd_bind`,
+`liftND`, `liftAction`); RESIDUE 17 — tag lookup 6 (`zeros_aux`,
+`are_compatible_aux` + 2 siblings, `mkUnspec`, and
+`simplify_integer_value_base` which is also rebuilt-term), point-free
+`function` tail 6 (`one_step_unseq_aux`, `get_ctx` + `get_ctx_unseq_aux`,
+`are_compatible` + 2 siblings — a one-line eta-expansion each would make
+most MEASURED; decision for the operator, §8), evaluation loop 1
+(`hack`), client function 1 (`list_unfoldr_aux`), precondition 1
+(`showNonNegativeWithBasis_aux`), parser 2 (`many`, `many1` — the table's
+"RESIDUE/(B)" rows, counted here as residue); SAME-MODULE 2
+(`ctypeEqual`, `eq_core_base_type`; TODO row 15). 38 + 10 + 17 + 2 = 67.
 
 ### 6.3 The build — verbatim
 
@@ -723,6 +736,12 @@ form as before. What this build does NOT check: the 38 obligations
    the same-module cases await TODO row 15 or the (A) sibling rewrite (the
    dry-run copy uses the rewrite; both build); `fake_mem_value_eq` is
    MEASURED (row 54) — no rewrite needed.
+8. (Audit M5, the cerberus half.) A gate that every `generated/*.lean`
+   is a root of `lakefile.toml` (fail on drift): today 85 `_auxiliary`
+   roots = 85 generated auxiliary files (the auditor's census), but
+   nothing checks it, and an auxiliary module dropped from the roots
+   silently un-builds its obligations (the auditor's plant P5 on the
+   suite's lakefile: green with the obligations unbuilt).
 7. `CerbND.lean`: its hand-written `_zero` duplicates and wrapper `rfl`s
    (fuel-parameter record §6.6) — unchanged by this slice; with `liftAction`'s
    `_zero` now carrying the codomain ascription, a hand-written duplicate
@@ -796,3 +815,93 @@ comment stood) — no code token differs.
 - The Ott derived artifacts (TODO row 5, pre-existing).
 - `.tmp/` (baseline lem, the cerberus copies, logs) is ephemeral and
   deleted at slice end; everything load-bearing is quoted above.
+
+## 10. Audit response (pre-merge audit `2026-09-04_structural-measure-audit-premerge.md` @ `e7796a1`, verdict MERGE-WITH-FIXES, no MAJOR)
+
+One commit on `arc/structural-declare` (this section's). Each item, what
+changed, and the evidence (verbatim from this worktree, `.tmp/gate3.log`
+/ `.tmp/nonlean3.log`).
+
+- **M1 (`_root_` evasion of FM-ambient/FM-sizeOf).** `lean_render_measure`
+  now refuses a `_root_` head outright (FM-root) and tests EVERY dotted
+  component of every identifier against the forbidden set (`LemFuel`,
+  `sizeOf`/`SizeOf`, the reserved `lemFuel`/`_lem…`), before the
+  parameter substitution. Four probes; the auditor's two evasions,
+  refused at generation, verbatim:
+  ```
+  Error: Lean backend: the fuel measure of len mentions `_root_.LemFuel.fuel` (FM-root: a `_root_`-qualified name is refused — a qualified global never needs it, and it would bypass the checks on the name's components)
+  Error: Lean backend: the fuel measure of len mentions `_root_.sizeOf` (FM-root: a `_root_`-qualified name is refused — a qualified global never needs it, and it would bypass the checks on the name's components)
+  Error: Lean backend: the fuel measure of len mentions `Some.Ns.LemFuel.fuel` (FM-ambient: a measure that reads the ambient fuel is not a data measure — it must be an expression over the parameters l)
+  Error: Lean backend: the fuel measure of len uses `Some.SizeOf.sizeOf` (FM-sizeOf: Lean's automatic `SizeOf` instances are NONCOMPUTABLE — …)
+  ```
+  (`neg_fuel_measure_root_ambient`, `neg_fuel_measure_root_sizeof`,
+  `neg_fuel_measure_dotted_ambient`, `neg_fuel_measure_dotted_sizeof`; the
+  plain forms still refused as before.) The manual's sentence now says
+  exactly this (every dotted component; `_root_` refused).
+- **M2 (`sorry` passes the suite).** New phase `lean-no-sorry-proofs`
+  (`tests/comprehensive/check_no_sorry_proofs.sh`): a comment-stripped,
+  vacuity-guarded token scan of `lean-test/*_lemMeasureProofs.lean` and
+  `parity/probes/*.proofs.lean` for `sorry`/`admit`/`axiom`/
+  `native_decide`/`bv_decide`/`ofReduceBool`/`ofReduceNat`; runs after
+  parity (its proofs files in scope) and before the no-numerals gate,
+  which stays last. Plant (the `mlen` proof body replaced by `sorry`),
+  verbatim:
+  ```
+  === M2 gate baseline ===
+    OK: 4 proofs modules scanned; no sorry/admit/axiom/native_decide/bv_decide token
+  === M2 plant: sorry for the mlen proof body ===
+    FAIL: proof-evading token in a fuel_measure proofs module:
+  …/tests/comprehensive/lean-test/Test_fuel_measure_lemMeasureProofs.lean:47:     mlen_lemFuel lemFuel l = mlen l := sorry
+  exit 1
+  === restored ===
+    OK: 4 proofs modules scanned; no sorry/admit/axiom/native_decide/bv_decide token
+  ```
+  Record §2.2, manual, DESIGN, README and the generated obligation
+  comment now read: a missing or mistyped theorem fails the build; a
+  `sorry`'d theorem is caught by the token gate (lem-lean) and by
+  cerberus's sorry/axiom gates.
+- **M3 (tally vs table).** Recounted from the table's class column
+  (derived): MEASURED 38 / (B) 10 / RESIDUE 17 (tag lookup 6, point-free
+  `function` tail 6, evaluation loop 1, client function 1, precondition 1,
+  parser 2 — `many`/`many1`, the table's "RESIDUE/(B)" rows, counted as
+  residue) / SAME-MODULE 2 = 67. §6.2's tally paragraph corrected and
+  labelled as such; design note R3 item 4 corrected; the commit message
+  of `d8a17e3` carries the wrong numbers (38/11/16/2) and stays as
+  history.
+- **M4 (`neg_structural_shadow` passed for the wrong reason).** The probe
+  now calls `bad xs` under the shadowing lambda (`List.foldl (fun acc xs
+  -> acc + bad xs) 0 [xs]`), EXPECT "not bound by a constructor pattern";
+  refused for the shadowing reason, verbatim:
+  ```
+  Error: Lean backend: 'declare {lean} structural val' refused — no parameter of bad is passed a strict structural subterm (a variable bound by a constructor pattern on that parameter) at every recursive call:
+  parameter l: at the self-call File "negative/neg_structural_shadow.lem", line 14, character 50 to line 14, character 55, the argument `xs` is a variable that is not bound by a constructor pattern on that parameter (bound by a lambda or let, or by a match on a computed scrutinee — …)
+  ```
+- **M5 (cerberus half).** Added to the seam work list as item 8: a gate
+  that every `generated/*.lean` is a lakefile root (fail on drift).
+- **N1.** The manual states that the syntactic measure rules are
+  speedbumps and a disguised parameter-free measure (`l.length - l.length
+  + 5`) yields a false, unprovable obligation — the theorem is the
+  backstop, by design.
+- **N2.** Record §2.2, manual, DESIGN and the generated comment now say
+  fuel-STABILITY above the measure (fuel-irrelevance), explicitly "not
+  that the exhaustion arm is unreachable".
+- **N9 nit.** `parity/expected_failures.txt` now names the OCaml
+  binary's text `Failure("int32_of_big_int")` (nat_big_num's wrapper).
+
+Gates on this tree (clean `make clean` then `make lean`, `.tmp/gate3.log`),
+verbatim:
+```
+=== Generation: 51 passed, 0 failed, 0 skipped ===
+Build completed successfully (151 jobs).
+  OK: inv_fuel_measure.lem (7 artifacts byte-identical across ocaml/hol/isa/coq)
+  OK: 4 proofs modules scanned; no sorry/admit/axiom/native_decide/bv_decide token
+  OK: 236 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make lean  288.48s user 35.54s system 121% cpu 4:26.09 total
+EXIT 0
+```
+Derived: 72 × `OK (rejected as declared)` (68 + the four M1 probes; the
+M4 probe among them), parity 23 OK / 6 both-fail / 4 XFAIL, no other
+`FAIL` line. `tests/nonlean-regress/run.sh`: `nonlean-regress: OK (893
+artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)`.
+The backend change touches only the measure renderer and a generated
+comment (Lean target); ocamlyacc unchanged.

@@ -323,6 +323,9 @@ get additional properties we want without any trust decrease"). Record:
    measured function needs a backend-derived size (TODO row 15; the two
    cerberus cases are `ctypeEqual` and `eq_core_base_type`).
 4. **The cerberus dry run** (record §6) classifies the 67 fuel'd
-   functions as measured (compiles with a proposed measure) / (B) monadic
-   (stays ambient) / residue (no data measure: tag lookup, accumulator,
-   counter), the cerberus half's work order.
+   functions as MEASURED 38 (each compiles with its proposed measure) /
+   (B) monadic 10 (stays ambient) / RESIDUE 17 (no data measure: tag
+   lookup 6, point-free `function` tail 6, evaluation loop, client
+   function, precondition, the two parser combinators) / same-module 2
+   (TODO 15) — derived from the record's table (pre-merge audit M3
+   corrected the first tally), the cerberus half's work order.

@@ -10,7 +10,7 @@ LAKE = $(CAPPED) lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-no-fuel-numerals check-capped clean
+.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-no-sorry-proofs lean-no-fuel-numerals check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -19,7 +19,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-fuel-param lean-negative lean-invariance lean-parity lean-no-fuel-numerals
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-fuel-param lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
 
 # Two-target parity (parity-fix slice 2026-09-03; [USER] ruling: the OCaml
 # target is the reference semantics of a lem program, the Lean target
@@ -66,6 +66,17 @@ lean-fuel-param:
 	else \
 		echo "  OK (leg 2): loud exhaustion at an insufficient runtime fuel fail-stops (exit $$st)"; \
 	fi
+
+# No proof-evading token in a hand-written fuel_measure proofs module
+# (pre-merge audit M2, 2026-09-04): the generated obligation makes the
+# build fail for a MISSING or MISTYPED theorem, not for a `sorry`'d one;
+# check_no_sorry_proofs.sh scans lean-test/*_lemMeasureProofs.lean and
+# parity/probes/*.proofs.lean (comments stripped, vacuity-guarded,
+# plant-tested). Runs after parity (its proofs files are in scope) and
+# before the no-numerals gate, which stays last.
+lean-no-sorry-proofs:
+	@echo "=== No sorry/admit/axiom/native_decide in fuel_measure proofs modules (gate) ==="
+	@./check_no_sorry_proofs.sh
 
 # No fuel numeral anywhere it could be magic (fuel-parameter arc gate;
 # plant-tested, see check_no_fuel_numerals.sh): LemLib, the generated

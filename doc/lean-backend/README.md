@@ -91,7 +91,8 @@ the negative/panic test legs — is `tests/comprehensive/`:
   computes through it; the backend emits the per-function sufficiency
   obligation (`f_measure_sufficient`: worker = wrapper at every fuel at
   or above the measure) whose proof you write in
-  `<Module>_lemMeasureProofs.lean` — the build fails without it.
+  `<Module>_lemMeasureProofs.lean` — a missing or mistyped theorem fails
+  the build, and a `sorry` fails the suite's token gate.
   Cerberus applies fuel declares across its whole execution path and
   checks that slice is total in its own build.
 - **Zero axioms; effects are explicit state.** Neither the library
