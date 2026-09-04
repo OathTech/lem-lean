@@ -320,6 +320,17 @@ module St = struct
      — lem's own home for prover-side obligations — behind an import of
      the hand-written proofs module `<Module>_lemMeasureProofs`. *)
   let measure_obligations : Output.t list ref = ref []
+  (* [file] Point-free `function` tails (tails-and-pmap-laws slice,
+     2026-09-05; mechanism comment at lean_hoist_tail_binders): for every
+     measured or structural definition whose trailing `function` (or
+     `fun`) binders were hoisted into its head, the hoisted binder names
+     in order. Read while the fuel'd worker and its `_zero` lemma render:
+     the sentinel is written in lem at the head's ORIGINAL codomain (a
+     function type), so it is applied to these binders. *)
+  let tail_hoisted : (Types.const_descr_ref * string list) list ref = ref []
+  (* [render] The hoisted binders of the fuel'd definition being rendered
+     (from tail_hoisted; [] for every other definition). *)
+  let tail_sentinel_args : string list ref = ref []
   (* [invocation] Derived-size census (D2-enablers slice, 2026-09-04;
      mechanism comment at lean_size_shape): every generated type path of
      the invocation -> whether the backend emits `t.lemSize` for it (with
@@ -392,7 +403,8 @@ module St = struct
     collected_imports := [];
     pending_abbrevs := [];
     deferred_opens := [];
-    measure_obligations := []
+    measure_obligations := [];
+    tail_hoisted := []
 
   (* Full reset — the reentrancy hook (be:G3): a second lem invocation in
      one process starts from a fresh backend. Not called on the normal
@@ -413,6 +425,7 @@ module St = struct
     fuel_workers := [];
     fuel_lifted := Types.Cdset.empty;
     fuel_binder := false;
+    tail_sentinel_args := [];
     reader_seed_param := None;
     reader_params_cache := None;
     supply_lifted := Types.Cdset.empty;
@@ -2951,6 +2964,176 @@ type pat_style = FunParam | MatchArm
     let is_ambient_fuelled_cref = lean_fuel_is_ambient A.env
     (* declare {lean} structural val (mechanism comment at lean_is_structural) *)
     let is_structural_cref = lean_is_structural A.env
+
+    (* ===== Point-free `function` tails (tails-and-pmap-laws slice,
+       2026-09-05; TODO row 17) =====
+
+       `let rec f acc = function | [] -> … | x :: xs -> f (acc + x) xs`
+       recurses on a list that is the anonymous scrutinee of a trailing
+       `function`, not a named parameter: after lem's pattern compilation
+       the clause body is `fun x -> match x with …` (Patterns.remove_function,
+       a fresh `x`), the head binds one parameter fewer than the type has
+       arrows, and neither the structural-parameter analysis (which ranges
+       over the head's parameters) nor a fuel measure (an expression over
+       the parameters) can name the recursion argument. [USER 2026-09-04]
+       "we don't change the lem structure for ocaml": the `.lem` is not
+       eta-expanded — the LEAN EMISSION is. For a definition that carries
+       `declare {lean} fuel_measure val` or `declare {lean} structural val`
+       (nothing else changes: an ambient fuel'd or plain definition renders
+       as before), the trailing binders are hoisted into the head:
+
+         def f (acc : Nat) : List Nat → Nat := fun (x : List Nat) => match x with …
+         def f (acc : Nat) (lemTail : List Nat) : Nat := match lemTail with …
+
+       ONE fresh binder per `function` — its scrutinee — named `lemTail`
+       (deterministic: the macro's `x`/`x1`/… depends on which names are
+       free in the body, and a measure must be able to name the binder
+       from the `.lem`: ``fuel_measure val f = `List.length lemTail + 1` ``);
+       a user-written `fun y ->` under which the `function` sits is hoisted
+       with the user's name (`let f acc = fun y -> function …` binds
+       `acc`, `y`, `lemTail`). Hygiene, fail-closed: `lemTail` is refused if
+       it is a parameter, a binder or a free variable anywhere in the
+       clause body, or the lem name of a constant the body references; a
+       user binder is refused if it would shadow a parameter or be captured
+       by the destructuring pattern it is hoisted through. Hoisting is
+       through a Paren and through the SINGLE-arm match that lem's pattern
+       compiler emits for a destructuring parameter (`let rec f (a, b) =
+       function …` ↦ `match p with | (a, b) => fun x => …`) — an
+       irrefutable match on a parameter variable with a lambda body is
+       extensionally the lambda over the match; nothing else is descended.
+       The head's declared result type loses one arrow per hoisted binder
+       (the annotation's own `Typ_fn` when it has one, else the
+       typechecker's codomain). The fuel sentinel (`declare {lean} fuel
+       val f = `payload` `) is written at the head's ORIGINAL codomain — a
+       function — so the worker's exhaustion arm and the `_zero` lemma
+       apply it to the hoisted binders (`((payload) lemTail)`, definitionally
+       the same value). Refused (unsupported) on a supply-lifted
+       definition: the supply prepass records the pre-hoist arity for the
+       call-site threading. The OCaml (and every non-Lean) emitter never
+       sees any of this. *)
+    let lean_tail_binder = "lemTail"
+    let lean_hoist_tail_binders inside_instance (g : funcl_aux list) : funcl_aux list =
+      match g with
+      | [(nla, c, pats, typ_opt, sk, e)]
+        when (not !St.rendering_comment) && not inside_instance
+             && (fuel_measure_for c <> None || is_structural_cref c) ->
+        let l = locn_of_clause_group g in
+        let fname = Name.to_string (Name.strip_lskip nla.term) in
+        let refuse msg =
+          raise (Reporting_basic.err_general true l
+            (Printf.sprintf "Lean backend: point-free `function` tail of %s: %s" fname msg)) in
+        let nm x = Name.to_string (Name.strip_lskip x) in
+        let pat_names p = List.map (fun a -> nm a.term) (Pattern_syntax.pat_vars_src p) in
+        let param_var (p : pat) = match lean_strip_pat p with
+          | P_var v | P_var_annot (v, _) -> Some (nm v)
+          | _ -> None in
+        let rec strip e = match C.exp_to_term e with
+          | Paren (_, e', _) -> strip e'
+          | _ -> e in
+        let is_remove_function e = match Typed_ast.exp_to_locn e with
+          | Ast.Trans (_, "remove_function", _) -> true
+          | _ -> false in
+        (* what the synthesized binder must not collide with *)
+        let body_bound = exp_bound_names e in
+        let body_free = Nfmap.fold (fun acc k _ -> Name.to_string k :: acc) [] (C.exp_to_free e) in
+        let body_consts = List.map (fun cr ->
+            Name.to_string (Path.get_name (c_env_lookup Ast.Unknown A.env.c_env cr).const_binding))
+            (add_exp_entities empty_used_entities e).used_consts in
+        let rec strip_typ_paren (t : src_t) = match t.term with
+          | Typ_paren (_, t', _) -> strip_typ_paren t'
+          | _ -> t in
+        (* the result annotation after one more head binder *)
+        let typ_after typ_opt (cod : Types.t) = match typ_opt with
+          | None -> None
+          | Some (s, t) ->
+            (match (strip_typ_paren t).term with
+             | Typ_fn (_, _, t2) -> Some (s, t2)
+             | _ -> Some (s, C.t_to_src_t cod)) in
+        let tail_name = Name.add_lskip (Name.from_string lean_tail_binder) in
+        (* hoist : pats so far -> annotation -> clause body -> the pattern
+           variables of every destructuring match hoisted through -> hoisted
+           names so far -> (pats, annotation, residual body, hoisted) *)
+        let rec hoist pats typ_opt e enclosing hoisted =
+          let e' = strip e in
+          match C.exp_to_term e' with
+          | Fun (_, ps, _, body) when ps <> [] && List.for_all (fun p -> param_var p <> None) ps ->
+            let ps, body =
+              if not (is_remove_function e') then ps, body
+              else begin
+                (* the macro's shape is `fun x -> match x with …` with a
+                   fresh x: rename the binder and the scrutinee to lemTail *)
+                match ps, C.exp_to_term (strip body) with
+                | [p], Case (b, cs1, scrut, cs2, arms, cs3) ->
+                  (match param_var p, C.exp_to_term (strip scrut) with
+                   | Some x, Var v when nm v = x ->
+                     let clash where =
+                       refuse (Printf.sprintf "the scrutinee binder `%s` synthesized for the eta-expansion (the measured or structural emission names the `function` argument so a measure or the structural analysis can see it) would %s — rename that variable" lean_tail_binder where) in
+                     if List.exists (fun q -> param_var q = Some lean_tail_binder) pats
+                        || List.mem lean_tail_binder hoisted then clash "shadow a parameter of the same name";
+                     if List.mem lean_tail_binder enclosing then clash "be captured by a destructuring pattern of a parameter it sits under";
+                     if List.mem lean_tail_binder body_bound then clash "collide with a binder of the same name in the body";
+                     if List.mem lean_tail_binder body_free then clash "capture a free variable of the same name in the body";
+                     if List.mem lean_tail_binder body_consts then clash "capture a constant of the same name referenced in the body";
+                     let p' = C.mk_pvar p.locn tail_name p.typ in
+                     let scrut' = C.mk_var (Typed_ast.exp_to_locn scrut) tail_name p.typ in
+                     let body' = C.mk_case b (Typed_ast.exp_to_locn body) cs1 scrut' cs2 arms cs3
+                         (Some (Typed_ast.exp_to_typ body)) in
+                     [p'], body'
+                   | _ -> refuse "internal error — the compiled `function` is not `fun x -> match x with …`")
+                | _ -> refuse "internal error — the compiled `function` binds more than one variable"
+              end in
+            let names = List.map (fun p -> match param_var p with Some v -> v | None -> "") ps in
+            List.iter (fun v ->
+                if List.exists (fun q -> param_var q = Some v) pats || List.mem v hoisted then
+                  refuse (Printf.sprintf "hoisting the binder `%s` of the trailing lambda into the head would shadow a parameter of the same name — rename one of them" v);
+                if List.mem v enclosing then
+                  refuse (Printf.sprintf "hoisting the binder `%s` of the trailing lambda into the head would capture it by the destructuring pattern of a parameter it sits under — rename one of them" v))
+              names;
+            (* one arrow of the annotation per hoisted binder *)
+            let typ_opt' =
+              List.fold_left (fun (topt, ty) _ ->
+                  let ty = Types.head_norm A.env.t_env ty in
+                  match ty.Types.t with
+                  | Types.Tfn (_, cod) -> (typ_after topt cod, cod)
+                  | _ -> refuse "internal error — the trailing lambda binds more variables than its type has arrows")
+                (typ_opt, Typed_ast.exp_to_typ e') ps |> fst in
+            hoist (pats @ ps) typ_opt' body (enclosing) (hoisted @ names)
+          | Case (b, cs1, scrut, cs2, arms, cs3) when Seplist.length arms = 1 ->
+            (* the pattern compiler's destructuring match: its scrutinee is
+               a parameter variable, or the tuple of several (`match p, p0
+               with | (a, b), (c, d) => …` for two destructuring parameters) *)
+            let is_param_var e0 = match C.exp_to_term (strip e0) with
+              | Var v -> List.exists (fun q -> param_var q = Some (nm v)) pats
+              | _ -> false in
+            let on_params = match C.exp_to_term (strip scrut) with
+              | Var _ -> is_param_var scrut
+              | Tup (_, es, _) -> Seplist.to_list es <> [] && List.for_all is_param_var (Seplist.to_list es)
+              | _ -> false in
+            (match on_params, Seplist.to_list arms with
+             | true, [(ap, as1, abody, al)] ->
+               (match C.exp_to_term (strip abody) with
+                | Fun _ ->
+                  let (pats', typ_opt', abody', hoisted') =
+                    hoist pats typ_opt abody (enclosing @ pat_names ap) hoisted in
+                  if hoisted' == hoisted then (pats, typ_opt, e, hoisted)
+                  else begin
+                    let arms' = Seplist.map (fun (p0, s0, _, l0) -> (p0, s0, abody', l0)) arms in
+                    let e'' = C.mk_case b (Typed_ast.exp_to_locn e') cs1 scrut cs2 arms' cs3
+                        (Some (Typed_ast.exp_to_typ abody')) in
+                    (pats', typ_opt', e'', hoisted')
+                  end
+                | _ -> (pats, typ_opt, e, hoisted))
+             | _ -> (pats, typ_opt, e, hoisted))
+          | _ -> (pats, typ_opt, e, hoisted) in
+        let (pats', typ_opt', e', hoisted) = hoist pats typ_opt e [] [] in
+        if hoisted = [] then g
+        else begin
+          if Types.Cdset.mem c !St.supply_lifted then
+            refuse "eta-expansion of a supply-lifted definition (unsupported: the supply prepass threads call sites at the pre-hoist arity; extend when needed)";
+          St.tail_hoisted := (c, hoisted) :: List.remove_assoc c !St.tail_hoisted;
+          [(nla, c, pats', typ_opt', sk, e')]
+        end
+      | _ -> g
     (* Does this expression force fuel lifting of its enclosing def. *)
     let exp_needs_fuel (e : exp) : bool =
       let ue = add_exp_entities empty_used_entities e in
@@ -3011,6 +3194,15 @@ type pat_style = FunParam | MatchArm
            @ List.concat_map (fun (_, pname) ->
                  [from_string ", "; from_string pname])
                (get_supply_params ())
+           @ [from_string ")"])
+      else if !St.tail_sentinel_args <> [] then
+        (* a hoisted `function` tail: the payload is written at the head's
+           original (function) codomain — apply it to the hoisted binders
+           (mechanism comment at lean_hoist_tail_binders) *)
+        Output.flat
+          ([from_string "(("; from_string sentinel; from_string ")"]
+           @ List.concat_map (fun n -> [from_string " "; from_string (lean_escape_keyword n)])
+               !St.tail_sentinel_args
            @ [from_string ")"])
       else Output.flat [from_string "("; from_string sentinel; from_string ")"]
 
@@ -3729,6 +3921,11 @@ type pat_style = FunParam | MatchArm
                    failwith-thread pre-pass. Multi-clause groups render
                    as Lean 4 pattern-matching equations. *)
                 let groups = List.map snd (lean_group_funcls funcls) in
+                (* point-free `function` tails of measured/structural
+                   members (mechanism comment at lean_hoist_tail_binders):
+                   hoisted BEFORE every analysis below reads the clause
+                   parameters *)
+                let groups = List.map (lean_hoist_tail_binders inside_instance) groups in
                 let num_functions = List.length groups in
                 (* Acyclic de-mutualization (arc 3): a 'let rec ... and ...'
                    block whose call graph is a DAG (ignoring self-loops) is
@@ -4187,6 +4384,11 @@ type pat_style = FunParam | MatchArm
                       St.fuel_emit := Some s;
                       St.reader_binder := lifted;
                       St.supply_binder := supply_lifted_g && not inside_instance;
+                      (* the hoisted `function`-tail binders the sentinel is
+                         applied to (mechanism comment at lean_hoist_tail_binders) *)
+                      let saved_ta = !St.tail_sentinel_args in
+                      St.tail_sentinel_args :=
+                        (match List.assoc_opt c !St.tail_hoisted with Some ns -> ns | None -> []);
                       (* the wrapper ALWAYS takes the ambient (it starts the
                          counter from it — emitted literally below); the
                          worker only when it passes it on (workers_need_fuel) *)
@@ -4203,7 +4405,8 @@ type pat_style = FunParam | MatchArm
                           St.fuel_emit := saved_e;
                           St.reader_binder := saved_rb;
                           St.supply_binder := saved_sb;
-                          St.fuel_binder := saved_fb)
+                          St.fuel_binder := saved_fb;
+                          St.tail_sentinel_args := saved_ta)
                         (fun () ->
                           let body = render_group g in
                           (* A parameter pattern's binder: a variable (bare,

@@ -51,6 +51,9 @@ lean_lib LemComprehensiveTest where
     `TestFuelConsumerImpl,  -- hand-written fuel_consumer implementation ([LemFuel])
     `TestFuelParamCheck,  -- hand-written fuel-parameter kernel pins (fuel-parameter arc)
     `TestFuelMonoExemplar,  -- hand-proved fuel-monotonicity exemplar (Route B: completion predicate; structural-declare slice)
+    `Test_function_tails, `Test_function_tails_auxiliary,  -- point-free `function` tails hoisted for measured/structural defs (tails-and-pmap-laws slice)
+    `Test_function_tails_lemMeasureProofs,  -- hand-written proofs of its obligations (the build fails without it)
+    `TestFunctionTailsCheck,  -- hand-written kernel pins (decide/rfl through the hoisted binders; the applied sentinel)
     `Test_functions, `Test_functions_auxiliary,
     `Test_indreln, `Test_indreln_auxiliary,
     `Test_instances, `Test_instances_auxiliary,

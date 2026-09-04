@@ -97,7 +97,21 @@ the negative/panic test legs — is `tests/comprehensive/`:
   x`): every recursive block of generated inductives gets a computable
   `t.lemSize : t → Nat` in its own module, so a function recursing on a
   type defined beside it (an `Eq` instance's equality, say) is measurable
-  without any hand-written Lean. An inductive relation whose premise
+  without any hand-written Lean. A definition whose recursion argument is
+  the anonymous scrutinee of a trailing `function` (`let rec f acc =
+  function | [] -> … | x :: xs -> f … xs`, the head binding one parameter
+  fewer than its type has arrows) is NOT rewritten in the `.lem`: when it
+  carries `fuel_measure` or `structural`, the Lean emission alone hoists
+  the trailing binders into the head — the `function`'s scrutinee as the
+  deterministic binder `lemTail` (name it in the measure: ``fuel_measure
+  val f = `List.length lemTail + 1` ``), a user-written `fun k ->` above
+  it under the user's name, through the single-arm match lem's pattern
+  compiler makes for a destructuring parameter — so the measure and the
+  structural analysis see a named parameter; the fuel sentinel, written
+  at the head's original function-typed codomain, is applied to the
+  hoisted binders. Refused if `lemTail` (or a hoisted user binder) would
+  shadow a parameter or be captured. The OCaml output is untouched. An
+  inductive relation whose premise
   reaches the fuel takes `[LemFuel]` as an inductive parameter.
   Cerberus applies fuel declares across its whole execution path and
   checks that slice is total in its own build.
