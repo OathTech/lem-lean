@@ -186,7 +186,7 @@ recursion.
 | `Pset.compareAux`, `Pmap.equalAux`, `Pmap.compareAux` | index `cardinal s1 + cardinal s2 + 1` | unchanged, reclassified | (c) | none needed |
 | `Pset.tc` | `lfpGo … ((2n)(2n) + 1)` | unchanged, reclassified; a caller-fuelled variant via `fuel_consumer` on `Relation.transitiveClosureByCmp` was BUILT and WITHDRAWN (§9 D1) | (c) — flagged | — |
 | `Pset.lfpGo` | fuel-taking primitive | unchanged; documented as the caller-fuelled primitive whose one caller (`tc`) supplies a data measure | (a) | — |
-| `lemLeastFixedPoint` | `bound` from lem, `\| 0 => x` silent | unchanged | lem's own `Set.leastFixedPoint` (set.lem:709 `\| 0 -> x`) — not magic, not ours to change alone (§9 D3) | — |
+| `lemLeastFixedPoint` | `bound` from lem, `\| 0 => x` silent | unchanged | lem's own `Set.leastFixedPoint` (set.lem:709 `\| 0 -> x`) — a lem design choice, exempt by rule (§9 D3, resolved) | — |
 | `gen_pow_aux`, `listSet`, `boolListFromNatural`, `bitSeqBinopAux`, `lemStringFromNatHelper`, `lemStringFromNaturalHelper` | WF (`exp`, `remainder`, list lengths, `n`) | unchanged | (b) — admissible; blocks kernel computation like `join` did | TODO row 12 |
 | `natFromNatural` / `intFromInteger` | fail outside ±2^62 (OCaml limit) | identity | OCaml-execution limit REMOVED | — |
 
@@ -445,6 +445,16 @@ the twelve F7 theorems unchanged. `grep -rn "^axiom " lean-lib/
 nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
 ```
 
+Boundary re-verification finding (orchestrator, 2026-09-04): the net's
+`golden.exitcodes` comparison was locale-fragile — the `for f in *.lem`
+glob order follows the environment's collation (`classes`/`classes2`,
+`indreln`/`indreln2` swapped elsewhere); the sha manifest was already
+`LC_ALL=C sort`ed and unaffected. Fixed at `dfd1a63`: the exit-code rows
+are sorted under `LC_ALL=C`; `golden.exitcodes` rebaselined ORDER-ONLY
+(`diff <(LC_ALL=C sort <old>) <new>` → exit 0; `golden.sha256`
+untouched); re-run, verbatim: `nonlean-regress: OK (893 artifact rows,
+216 exit rows, 9 emitters, byte-identical to golden)`.
+
 (One intermediate variant — `fuel_consumer` declared on
 `library/relation.lem` — made 37 `lib/tex`, 33 `lib/tex_all`, 1 `lib/lem`,
 1 `lib/html`, 1 `lib/ident` rows drift, because the human/echo targets
@@ -521,24 +531,40 @@ files is byte-identical. The cerberus tree: §6.2.
   hand-written `instance [LemFuel]` via `skip_instances`, same gap. The
   indreln rule cannot take a binder at all: the concurrency model's
   problem to restate. Until decided the backend refuses fail-closed.
-- **D3 — `lemLeastFixedPoint`'s silent `| 0 => x`** (the reasoning-
-  artifact audit's remark). It is lem's own `Set.leastFixedPoint`
-  (set.lem:709-715: `| 0 -> x`); the OCaml target computes exactly that.
-  Making the Lean arm loud alone would be a Lean-vs-OCaml discrepancy
-  (Lean fails where the reference succeeds) — the conflict between the
-  audit's request and the zero-discrepancy rule is raised here, not
-  resolved; a loud arm is an upstream (lem library) question. Other
-  `| 0 =>` arms: every LemLib bounded recursion's is the loud
+- **D3 — `lemLeastFixedPoint`'s silent `| 0 => x`: RESOLVED BY RULE**
+  [AGENT applying the USER rule, orchestrator-relayed 2026-09-04]. It is
+  lem's own `Set.leastFixedPoint` (set.lem:709-715: `| 0 -> x`), computed
+  identically by the OCaml target; the general form exempts values that
+  "mirror lem or ISO-C design choices" — a lem design choice, not a magic
+  value. Kept as is; the reasoning-artifact audit's remark is withdrawn.
+  Other `| 0 =>` arms: every LemLib bounded recursion's is the loud
   `fuelExhaustedWith`; the backend's emitted `| 0 => <sentinel>` is the
   model author's payload — cerberus uses loud/typed payloads at 63 of 64
-  declares and one silent VALUE payload
-  (`defacto_memory_aux.lem:469` `simplify_integer_value_base` =
-  ``Sum.inr ival_``, "returns its input unsimplified", its own comment
-  says), noted for the cerberus half.
-- **D4 — `int32FromInteger`-family Overflow raise** (X3 addendum): same
-  shape as the removed 63-bit checks, but for lem's fixed-width types;
-  wrap (prover-side `word_of_int`) or raise (zarith) — ruling needed;
-  parity rows `f_int32_overflow`/`p_int_wrap` would move (TODO row 11).
+  declares and one silent VALUE payload (`defacto_memory_aux.lem:469`
+  `simplify_integer_value_base` = ``Sum.inr ival_``, "returns its input
+  unsimplified", its own comment says), noted for the cerberus half.
+- **D4 — `int32FromInteger`-family Overflow raise: FINDING (no code
+  change yet, as instructed).** lem's own library semantics
+  (`library/num.lem`), verbatim reps: `int32FromInteger` — isabelle
+  `((`word_of_int` i) : int32)`, ocaml `Nat_big_num.to_int32`
+  (= `BI.int32_of_big_int`, raises on overflow), lean
+  `lemInt32OfIntegerExact` (raises); its lem DEFINITION (`:2389-2393`)
+  routes through `int32FromNatural`, whose hol rep is `((`n2w` n) :
+  int32)` and isabelle `((`word_of_int` (`int` n)):int32)` — both
+  MODULAR (`word_of_int`/`n2w` reduce mod 2^32); coq
+  `Z.pred (Z.pos (P_of_succ_nat n))` is marked `(* TODO check *)` and
+  does not truncate (an acknowledged-incomplete rep, not a specification).
+  `int64FromInteger`/`int64FromNatural` (`:2451-2470`) are the same
+  shape. `int32FromNumeral`/`int64FromNumeral` (`:828-834`, `:1037-1043`):
+  isabelle `word_of_int`, hol `n2w` — modular. Conclusion: lem's
+  prover-side meaning of an out-of-range conversion is WRAP; the
+  `Overflow` raise is an OCaml-execution artifact of the same kind as X3,
+  and under "the real thing is the logical semantics" the Lean reps
+  (`lemInt32OfIntegerExact`, `lemInt32OfNaturalExact`,
+  `lemInt32FromNumeral`, and the `Int64` trio) should become
+  `Int32.ofInt`/`Int64.ofInt` (modular), moving parity rows
+  `f_int32_overflow` (both-fail → a ruled deviation) and possibly
+  `p_int_wrap`. Awaiting the operator's ruling (TODO row 11).
 - **D5 — the cerberus half's D2 choice shapes the pin bump**: with (i),
   no backend change; with (ii), one more lem slice before the bump.
 
