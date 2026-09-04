@@ -640,3 +640,27 @@ EXIT 0
 ```
 No rebaseline; the diff touches only `src/lean_backend.ml` (Lean target),
 three negative probes, docs and a Makefile comment.
+
+
+## 9. Orchestrator boundary review [AGENT, orchestrator, 2026-09-04]
+
+Independent re-verification of `arc/d2-enablers`, lem rebuilt from source
+in this worktree, twice: at `22aa0fb` (the slice) and at `1c5349c` (audit
+response `bc5e04a` + the audit document `145f453` cherry-picked). Final run,
+verbatim:
+
+```
+Lem 1c5349c
+=== Generation: 52 passed, 0 failed, 0 skipped ===
+  OK: 242 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make-lean-rc=0
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+```
+
+(lean-lib `Build completed successfully (37 jobs)`, zero axioms, and the
+four registered XFAILs, as in the previous runs.) Pre-merge audit
+`2026-09-04_d2-enablers-audit-premerge.md` (MERGEABLE, no MAJOR; the three
+MINORs fixed in `bc5e04a`, §8). The cerberus OCaml byte-identity was
+verified by the worker and reproduced three ways by the auditor; not
+re-run here. Merged ff-only on the operator's standing authorisation for
+this branch ([USER 2026-09-04] "once the fixes land, go ahead and merge").
