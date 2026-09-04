@@ -55,6 +55,16 @@ example (p : Nat × Nat) (l : List Nat) : tpair_lemFuel 0 p l = (0, 0) := tpair_
 example (acc k : Nat) (l : List Nat) : tscale_lemFuel 0 acc k l = acc := tscale_lemFuel_zero acc k l
 example (acc : Nat) (l : List Nat × List Nat) : tdot_lemFuel 0 acc l = 0 := tdot_lemFuel_zero acc l
 
+/-! ### (4b) a trailing user lambda with no `function` (audit F3, probe
+    p13): `k` is a head binder; the point-free form by funext -/
+example : tuser 3 10 = 13 := by decide
+example : tuser 3 10 = 13 := rfl
+example : Nat → Nat → Nat := tuser
+example (n k : Nat) : tuser n k = tuser_lemFuel (n + 1) n k := rfl
+example (n k : Nat) : tuser_lemFuel 0 n k = 0 := tuser_lemFuel_zero n k
+example (n : Nat) : (tuser_lemFuel 0 n : Nat → Nat) = (fun _ => 0) := funext (fun k => tuser_lemFuel_zero n k)
+example (n k m : Nat) (h : n + 1 ≤ m) : tuser_lemFuel m n k = tuser n k := tuser_measure_sufficient n k m h
+
 /-! ### (5) NOT hoisted: an ambient fuel'd point-free tail without a
     measure keeps the fuel-measure slice's shape (codomain-ascribed
     `_zero` lemma, `[LemFuel]` wrapper) -/

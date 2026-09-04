@@ -457,6 +457,64 @@ theorem Pmap.cmpLaws_defaultCompare_nat : Pmap.CmpLaws (defaultCompare : Nat →
   · intro a b c hab
     rw [eq_of_defaultCompare_nat hab]
 
+/-! ## The generic bridge: any lawful `Ord` (audit response F2)
+
+`defaultCompare [Ord α] x y` is `compare x y` read into `LemOrdering`
+(`LemLib.lean:138`), so `CmpLaws (defaultCompare)` follows from Lean core's
+`Std.TransOrd α` — `Std.TransCmp (compare : α → α → Ordering)`, the class
+that packages exactly the strict-weak-order laws of a comparator:
+`OrientedCmp.eq_swap` (gives `flip`, and reflexivity through the
+`OrientedCmp → ReflCmp` instance), `TransCmp.lt_trans`, and
+`TransCmp.congr_left` (comparator-equal keys compare alike — our
+`eq_congr`). `Std.TransOrd` is in Lean core (`Init/Data/Order/Ord.lean`)
+in both toolchains this library is built with (4.28.0 here, 4.32.2 by the
+cerberus consumer) with instances for `Nat`, `Int`, `String`, `Char`,
+`Bool`, the fixed-width integers, `Fin n`, `Option`, and lexicographic
+products — so `Nat`/`Int`/`String` keys are covered by one theorem and
+`cmpLaws_defaultCompare_nat` becomes an independent hand witness. A
+comparator that is NOT `defaultCompare` of a `TransOrd` instance (the
+consumer's `Ord sym` — digest compare, then `nat`, written by hand in
+cerberus) is provable through the bridge once its `Ord` carries a
+`Std.TransOrd` instance (a lexicographic pair of `String`/`Nat` compares,
+both `TransOrd` — the instance is an `⟨eq_swap, isLE_trans⟩` pair over
+`compareLex`, or by hand), else by proving `CmpLaws` directly as the `Nat`
+witness does. -/
+
+theorem defaultCompare_eq_LT_iff {α : Type} [Ord α] (a b : α) :
+    defaultCompare a b = .LT ↔ compare a b = .lt := by
+  unfold defaultCompare; cases compare a b <;> simp
+
+theorem defaultCompare_eq_EQ_iff {α : Type} [Ord α] (a b : α) :
+    defaultCompare a b = .EQ ↔ compare a b = .eq := by
+  unfold defaultCompare; cases compare a b <;> simp
+
+theorem Pmap.cmpLaws_of_transOrd {α : Type} [Ord α] [Std.TransOrd α] :
+    Pmap.CmpLaws (defaultCompare : α → α → LemOrdering) := by
+  -- (inside `theorem Pmap.…` the bare `compare` would resolve to `Pmap.compare`)
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · intro a
+    unfold defaultCompare
+    rw [Std.ReflCmp.compare_self (cmp := (Ord.compare : α → α → Ordering))]
+  · intro a b
+    unfold defaultCompare
+    rw [Std.OrientedCmp.eq_swap (cmp := (Ord.compare : α → α → Ordering)) (a := b) (b := a)]
+    cases Ord.compare a b <;> rfl
+  · intro a b c hab hbc
+    rw [defaultCompare_eq_LT_iff] at hab hbc ⊢
+    exact Std.TransCmp.lt_trans hab hbc
+  · intro a b c hab
+    rw [defaultCompare_eq_EQ_iff] at hab
+    unfold defaultCompare
+    rw [Std.TransCmp.congr_left (cmp := (Ord.compare : α → α → Ordering)) hab]
+
+/-- The bridge at the three key types a consumer meets first. -/
+theorem Pmap.cmpLaws_defaultCompare_nat' : Pmap.CmpLaws (defaultCompare : Nat → Nat → LemOrdering) :=
+  Pmap.cmpLaws_of_transOrd
+theorem Pmap.cmpLaws_defaultCompare_int : Pmap.CmpLaws (defaultCompare : Int → Int → LemOrdering) :=
+  Pmap.cmpLaws_of_transOrd
+theorem Pmap.cmpLaws_defaultCompare_string : Pmap.CmpLaws (defaultCompare : String → String → LemOrdering) :=
+  Pmap.cmpLaws_of_transOrd
+
 /-! ## Unit pins: the kernel computes both laws on closed maps -/
 section Pins
 def cNat : Nat → Nat → LemOrdering := defaultCompare
@@ -470,6 +528,22 @@ example : Pmap.find? cNat 9 (Pmap.add cNat 3 "three" m0) = some "nine" := rfl
 example : Pmap.toList m0 = [(1, "one"), (2, "two"), (5, "five"), (9, "nine")] := by decide
 example : Pmap.WF cNat m0 := by decide
 example : fmapLookupBy cNat 4 (fmapAddBy cNat 4 "four" (fmapAddBy cNat 1 "one" fmapEmpty)) = some "four" := by decide
+/-- `Int` and `String` keys through the bridge's comparator (audit F2). -/
+def cInt : Int → Int → LemOrdering := defaultCompare
+def cStr : String → String → LemOrdering := defaultCompare
+def mI : Pmap Int Nat := Pmap.add cInt (-3) 1 (Pmap.add cInt 7 2 (Pmap.add cInt 0 3 .Empty))
+example : Pmap.find? cInt (-3) (Pmap.add cInt (-3) 9 mI) = some 9 := by decide
+example : Pmap.find? cInt 7 (Pmap.add cInt 5 9 mI) = Pmap.find? cInt 7 mI := by decide
+example : Pmap.WF cInt mI := by decide
+example (k : Int) (v : Nat) (m : Pmap Int Nat) (hw : Pmap.WF cInt m) :
+    Pmap.find? cInt k (Pmap.add cInt k v m) = some v :=
+  Pmap.find?_add_same Pmap.cmpLaws_of_transOrd k v m hw
+def mS : Pmap String Nat := Pmap.add cStr "b" 1 (Pmap.add cStr "a" 2 (Pmap.add cStr "c" 3 .Empty))
+example : Pmap.find? cStr "a" (Pmap.add cStr "a" 9 mS) = some 9 := by decide
+example : Pmap.find? cStr "c" (Pmap.add cStr "bb" 9 mS) = Pmap.find? cStr "c" mS := by decide
+example (k k' : String) (v : Nat) (m : Pmap String Nat) (hw : Pmap.WF cStr m) (hne : cStr k k' ≠ .EQ) :
+    Pmap.find? cStr k (Pmap.add cStr k' v m) = Pmap.find? cStr k m :=
+  Pmap.find?_add_other Pmap.cmpLaws_of_transOrd k k' v m hw hne
 end Pins
 
 #print axioms Pmap.find?_add_same
@@ -478,3 +552,6 @@ end Pins
 #print axioms Fmap.fmapLookupBy_fmapAddBy_same
 #print axioms Fmap.fmapLookupBy_fmapAddBy_other
 #print axioms Pmap.cmpLaws_defaultCompare_nat
+#print axioms Pmap.cmpLaws_of_transOrd
+#print axioms Pmap.cmpLaws_defaultCompare_int
+#print axioms Pmap.cmpLaws_defaultCompare_string

@@ -2153,6 +2153,100 @@ let lean_thread_lookup (c : Types.const_descr_ref) : (int list * string list) op
   Types.Cdmap.apply !St.failwith_threaded c
 let lean_thread_debug = (try Sys.getenv "LEM_THREAD_DEBUG" <> "" with Not_found -> false)
 
+(* ===== The reserved-name CAPTURE check (tails-and-pmap-laws audit response
+   F1, 2026-09-05) =====
+
+   The reserved-binder scan (reserved_binder_check, emission) refuses a lem
+   BINDER named like a synthesized binder. It never looked at what a
+   referenced CONSTANT renders as: a constant whose Lean target_rep text is
+   `lemTail` (or `lemFuel`) renders as exactly that identifier inside the
+   worker, where the synthesized binder is in scope — captured silently.
+   Measured by the pre-merge audit: `declare lean target_rep function dl =
+   `lemTail`` referenced in a hoisted body evaluated 4 on Lean vs 1 on
+   OCaml (probe p11b); the same shape with `lemFuel` was accepted by the
+   ecf75b4 lem (p11c) — a pre-existing class. One generic check for every
+   reserved name: every constant the clause body references contributes
+   the identifiers of its Lean rep (`CR_simple`/`CR_inline` bodies —
+   every `Backend` ident in the rep expression —, `CR_infix`'s ident,
+   `CR_special_rep`'s text) and its lem name (the rendered name of a
+   constant without a rep, modulo the collision renaming, which never
+   produces a reserved word); plus every `Backend` ident written directly
+   in the body (an already-inlined rep). Any of them equal to a reserved
+   name, or carrying a reserved prefix, is refused with the constant and
+   the text named. Run for every fuel'd/reader/supply group
+   (reserved_binder_check) and whenever a `function` tail is hoisted
+   (lean_hoist_tail_binders). *)
+let lean_reserved_exact_names = ["lemFuel"; "lemMeasureLe"; "LemFuel"; "lemTail"]
+let lean_reserved_prefixes = ["_lemReader_"; "_lemSupply"]
+let lean_is_reserved_name (n : string) : bool =
+  List.mem n lean_reserved_exact_names
+  || List.exists (fun pre ->
+       String.length n >= String.length pre && String.sub n 0 (String.length pre) = pre)
+       lean_reserved_prefixes
+
+(* every `Backend` identifier (a target_rep's Lean text) in an expression *)
+let rec exp_backend_idents (e : exp) : string list =
+  let seplist_exps sl = Seplist.to_list sl in
+  match ExpW.exp_to_term e with
+  | Backend (_, i) -> [String.trim (Ident.to_string i)]
+  | Var _ | Nvar_e _ | Constant _ | Lit _ -> []
+  | Fun (_, _, _, e1) -> exp_backend_idents e1
+  | Function (_, arms, _) ->
+    List.concat_map (fun (_, _, e1, _) -> exp_backend_idents e1) (Seplist.to_list arms)
+  | App (e1, e2) -> exp_backend_idents e1 @ exp_backend_idents e2
+  | Infix (e1, e2, e3) ->
+    exp_backend_idents e1 @ exp_backend_idents e2 @ exp_backend_idents e3
+  | Record (_, fes, _) ->
+    List.concat_map (fun (_, _, e1, _) -> exp_backend_idents e1) (Seplist.to_list fes)
+  | Recup (_, e0, _, fes, _) ->
+    exp_backend_idents e0
+    @ List.concat_map (fun (_, _, e1, _) -> exp_backend_idents e1) (Seplist.to_list fes)
+  | Field (e1, _, _) -> exp_backend_idents e1
+  | Vector (_, es, _) | Tup (_, es, _) | List (_, es, _) | Set (_, es, _) ->
+    List.concat_map exp_backend_idents (seplist_exps es)
+  | VectorSub (e1, _, _, _, _, _) | VectorAcc (e1, _, _, _) -> exp_backend_idents e1
+  | Case (_, _, e0, _, arms, _) ->
+    exp_backend_idents e0
+    @ List.concat_map (fun (_, _, e1, _) -> exp_backend_idents e1) (Seplist.to_list arms)
+  | Typed (_, e1, _, _, _) | Paren (_, e1, _) | Begin (_, e1, _) -> exp_backend_idents e1
+  | Let (_, (lb, _), _, body) ->
+    (match lb with
+     | Let_val (_, _, _, rhs) -> exp_backend_idents rhs
+     | Let_fun (_, _, _, _, rhs) -> exp_backend_idents rhs) @ exp_backend_idents body
+  | If (_, e1, _, e2, _, e3) ->
+    exp_backend_idents e1 @ exp_backend_idents e2 @ exp_backend_idents e3
+  | Setcomp (_, e1, _, e2, _, _) -> exp_backend_idents e1 @ exp_backend_idents e2
+  | Comp_binding (_, _, e1, _, _, _, _, e2, _) -> exp_backend_idents e1 @ exp_backend_idents e2
+  | Quant (_, _, _, e1) -> exp_backend_idents e1
+  | Do (_, _, dls, _, e1, _, _) ->
+    List.concat_map (fun (Do_line (_, _, rhs, _)) -> exp_backend_idents rhs) dls
+    @ exp_backend_idents e1
+
+(* (what the constant renders as, the constant's lem name) for every
+   constant an expression references, plus the body's own Backend idents *)
+let lean_referenced_lean_names env (e : exp) : (string * string) list =
+  let of_cref cref =
+    let cd = c_env_lookup Ast.Unknown env.c_env cref in
+    let lem_name = Name.to_string (Path.get_name cd.const_binding) in
+    let reps = match Target.Targetmap.apply_target cd.target_rep (Target.Target_no_ident Target.Target_lean) with
+      | Some (CR_simple (_, _, _, re)) | Some (CR_inline (_, _, _, re)) -> exp_backend_idents re
+      | Some (CR_infix (_, _, _, i)) -> [String.trim (Ident.to_string i)]
+      | Some (CR_special (_, _, CR_special_rep (strs, _), _)) -> List.map String.trim strs
+      | Some (CR_special _) | Some (CR_undefined _) -> []
+      | None -> [] in
+    List.map (fun r -> (r, lem_name)) (lem_name :: reps) in
+  List.concat_map of_cref (add_exp_entities empty_used_entities e).used_consts
+  @ List.map (fun i -> (i, "(an inlined target_rep)")) (exp_backend_idents e)
+
+let lean_reserved_capture_check env (l : Ast.l) (fname : string) (e : exp) : unit =
+  List.iter (fun (rendered, lem_name) ->
+      if lean_is_reserved_name rendered then
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: the body of %s references constant %s, which renders on Lean as `%s` — a reserved synthesized binder name (the reserved-name contract: 'lemFuel', 'lemMeasureLe', 'LemFuel', 'lemTail' and the '_lemReader_'/'_lemSupply' prefixes are the backend's); inside the generated worker that identifier is CAPTURED by the synthesized binder and computes a different value than the OCaml target (pre-merge audit 2026-09-05, probe p11b) — rename the constant or its Lean target_rep"
+            fname lem_name rendered)))
+    (lean_referenced_lean_names env e)
+
 (* Constants whose LEAN target_rep is the bare identifier `failwith`
    (Assert_extra.failwith, cerberus's Utils.error, ...) — shared by the
    pre-pass and emission so the two can never disagree. *)
@@ -3074,6 +3168,9 @@ type pat_style = FunParam | MatchArm
                      if List.mem lean_tail_binder body_bound then clash "collide with a binder of the same name in the body";
                      if List.mem lean_tail_binder body_free then clash "capture a free variable of the same name in the body";
                      if List.mem lean_tail_binder body_consts then clash "capture a constant of the same name referenced in the body";
+                     (* what the body's constants RENDER as — a Lean
+                        target_rep spelled `lemTail` (audit response F1) *)
+                     lean_reserved_capture_check A.env l fname e;
                      let p' = C.mk_pvar p.locn tail_name p.typ in
                      let scrut' = C.mk_var (Typed_ast.exp_to_locn scrut) tail_name p.typ in
                      let body' = C.mk_case b (Typed_ast.exp_to_locn body) cs1 scrut' cs2 arms cs3
@@ -4279,7 +4376,13 @@ type pat_style = FunParam | MatchArm
                           raise (Reporting_basic.err_general true (locn_of_clause_group g)
                             (Printf.sprintf
                               "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel', 'lemMeasureLe' and the '_lemReader_'/'_lemSupply' prefixes are the backend's, in parameters AND clause bodies; a shadowed fuel/reader/supply binder is silently wrong) — rename the variable" n)))
-                        bound in
+                        bound;
+                      (* and what the body's constants RENDER as (audit
+                         response F1; mechanism comment at
+                         lean_reserved_capture_check) *)
+                      List.iter (fun ({term = n}, _, _, _, _, e) ->
+                          lean_reserved_capture_check A.env (locn_of_clause_group g)
+                            (Name.to_string (Name.strip_lskip n)) e) g in
                     (* --- Supply lifting: group classification + the
                        fail-closed guards (G-inst; the v1 restrictions
                        on truly-mutual blocks and multi-clause groups —

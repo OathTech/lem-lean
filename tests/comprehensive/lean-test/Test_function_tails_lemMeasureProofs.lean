@@ -168,6 +168,35 @@ theorem tdot_measure_sufficient (acc : Nat) (lemTail : List Nat × List Nat) (le
   obtain ⟨l1, l2⟩ := lemTail
   exact tdot_stable l1 l2 acc lemFuel (List.length l1 + 1) lemMeasureLe (Nat.le_refl _)
 
+/-! ### tuser : a trailing user lambda with no `function` (audit F3, probe
+    p13) — `k` hoisted; the measure is on `n` -/
+
+theorem tuser_stable (n k : Nat) (f g : Nat) (hf : n + 1 ≤ f) (hg : n + 1 ≤ g) :
+    tuser_lemFuel f n k = tuser_lemFuel g n k := by
+  induction n generalizing k f g with
+  | zero =>
+    cases f with
+    | zero => omega
+    | succ f =>
+      cases g with
+      | zero => omega
+      | succ g => simp [tuser_lemFuel]
+  | succ n ih =>
+    cases f with
+    | zero => omega
+    | succ f =>
+      cases g with
+      | zero => omega
+      | succ g =>
+        simp only [tuser_lemFuel, Nat.add_one_sub_one]
+        simp only [show ((n + 1 == 0) = false) from by simp]
+        simp only [Bool.false_eq_true, ↓reduceIte]
+        exact ih (k + 1) f g (by omega) (by omega)
+
+theorem tuser_measure_sufficient (n k : Nat) (lemFuel : Nat) (lemMeasureLe : n + 1 ≤ lemFuel) :
+    tuser_lemFuel lemFuel n k = tuser n k :=
+  tuser_stable n k lemFuel (n + 1) lemMeasureLe (Nat.le_refl _)
+
 end Test_function_tails_lemMeasureProofs
 
 #print axioms Test_function_tails_lemMeasureProofs.tlen_measure_sufficient
@@ -176,3 +205,4 @@ end Test_function_tails_lemMeasureProofs
 #print axioms Test_function_tails_lemMeasureProofs.tev_measure_sufficient
 #print axioms Test_function_tails_lemMeasureProofs.todd_measure_sufficient
 #print axioms Test_function_tails_lemMeasureProofs.tdot_measure_sufficient
+#print axioms Test_function_tails_lemMeasureProofs.tuser_measure_sufficient

@@ -47,13 +47,14 @@ record §6.2) were RESIDUE for exactly this reason (row 39 `get_ctx` and 64
 
 For a definition that carries `declare {lean} fuel_measure val` or
 `declare {lean} structural val` (and only those — every other definition
-renders as before), the Lean emission hoists the clause body's trailing
-lambda binders into the head: the binder the pattern compiler made for a
-`function` becomes the deterministic name `lemTail` (its match scrutinee
-renamed with it), a user-written `fun k ->` above it keeps the user's
-name, and the hoist goes through a `Paren` and through the single-arm
-match the compiler emits for a destructuring parameter (`let rec f (a, b)
-= function …` ↦ `match p with | (a, b) => fun x => …`). The head's result
+renders as before), the Lean emission hoists EVERY trailing lambda with
+plain-variable binders of the clause body into the head: the binder the
+pattern compiler made for a `function` becomes the deterministic name
+`lemTail` (its match scrutinee renamed with it), a user-written `fun k
+->` — above a `function` or on its own (audit F3, probe `p13`) — keeps
+the user's name, and the hoist goes through a `Paren` and through the
+single-arm match the compiler emits for a destructuring parameter (`let
+rec f (a, b) = function …` ↦ `match p with | (a, b) => fun x => …`). The head's result
 annotation loses one arrow per hoisted binder, the fuel sentinel — written
 in the `.lem` at the head's ORIGINAL function-typed codomain — is applied
 to the hoisted binders in the worker's exhaustion arm and the `_zero`
@@ -74,12 +75,20 @@ hoisted under the user's `x`.
 
 ### 2.3 Why one binder, why this name, what else was considered
 
-- **One fresh binder per `function`** — its scrutinee is the only
-  binder the compiler invented; everything else in the tail is the
-  user's (a `fun k ->`, hoisted under `k`; `fun a b ->` hoists both). A
-  wildcard lambda binder (`fun _ ->`) is not hoisted (no name to give it
-  short of inventing a second synthesized name); the definition then meets
-  the existing refusals.
+- **One fresh binder per `function`, every user binder as is** — the
+  scrutinee is the only binder the compiler invented; everything else in
+  the tail is the user's (a `fun k ->`, hoisted under `k`; `fun a b ->`
+  hoists both), and the rule applies to a trailing user lambda WITHOUT a
+  `function` beneath it just the same (audit F3: `let rec f n = fun k ->
+  …` measured becomes `def f (n : Nat) (k : Nat) : Nat` — a
+  consumer-visible arity change for such a definition, extensionally the
+  same function, the point-free form recovered by `funext`; the
+  alternative — gating on the `remove_function` tag — was not taken: the
+  general rule is simpler to state, is what a measure over `k` would
+  need, and has zero cerberus impact, the tree being byte-identical
+  without the new declares). A wildcard lambda binder (`fun _ ->`) is not
+  hoisted (no name to give it short of inventing a second synthesized
+  name); the definition then meets the existing refusals.
 - **Why `lemTail` and not the macro's `x`**: `Name.fresh (r"x")` yields
   `x`, `x1`, … depending on which names are FREE in the body — a measure
   in the `.lem` must name the binder, and an author cannot see the macro's
@@ -167,9 +176,11 @@ generated worker (`Test_function_tails.lean`, `tpair`):
   all-or-none measures); (f) `tdot acc = function | ([], []) …` over a
   pair of lists, measure `List.length lemTail.1 + 1`
   (`are_compatible_params_aux`'s shape); (g) `structural` under `fun k ->
-  function`; and `plain_tail`, an ambient fuel'd tail that is NOT hoisted
-  (the fuel-measure slice's codomain-ascribed `_zero` lemma, pinned).
-  Nine lem asserts (measured/structural defs are fuel-free, so assertable).
+  function`; (h) `tuser n = fun k -> …` with no `function` (audit F3,
+  probe `p13`: `k` hoisted, wrapper `def tuser (n : Nat) (k : Nat) : Nat`);
+  and `plain_tail`, an ambient fuel'd tail that is NOT hoisted (the
+  fuel-measure slice's codomain-ascribed `_zero` lemma, pinned). Ten lem
+  asserts (measured/structural defs are fuel-free, so assertable).
 - `lean-test/Test_function_tails_lemMeasureProofs.lean` — the six
   obligations (stability by induction on the hoisted list; `tdot` by
   destructuring the pair, `tev`/`todd` jointly); verbatim:
@@ -184,7 +195,10 @@ generated worker (`Test_function_tails.lean`, `tpair`):
   hoisted parameter (`[propext, Quot.sound]`).
 - Negatives: `neg_tail_shadow_param.lem` (parameter named `lemTail`),
   `neg_tail_body_binder.lem` (a `let lemTail` in an arm),
-  `neg_tail_user_shadow.lem` (`let rec bad acc = fun acc -> function …`).
+  `neg_tail_user_shadow.lem` (`let rec bad acc = fun acc -> function …`),
+  `neg_tail_rep_capture.lem` and `neg_fuel_rep_capture.lem` (a constant
+  whose Lean `target_rep` is `lemTail` / `lemFuel` referenced in the body
+  — audit F1, §8).
 - Invariance: `invariance/inv_function_tails.lem` — the three declared
   shapes; `OK: inv_function_tails.lem (7 artifacts byte-identical across ocaml/hol/isa/coq)`.
 - Parity: `parity/probes/p_function_tails.lem` + `.proofs.lean`, pin
@@ -273,6 +287,10 @@ theorem Fmap.fmapLookupBy_fmapAddBy_other (h : Pmap.CmpLaws cmp) (c' : α → α
     (m : Fmap α β) (hw : WF cmp m) (hne : cmp k k' ≠ .EQ) :
     fmapLookupBy c' k (fmapAddBy cmp k' v m) = fmapLookupBy c' k m
 theorem Pmap.cmpLaws_defaultCompare_nat : Pmap.CmpLaws (defaultCompare : Nat → Nat → LemOrdering)
+-- audit response F2 (§8): the generic bridge from Lean core's lawful-Ord class
+theorem Pmap.cmpLaws_of_transOrd {α : Type} [Ord α] [Std.TransOrd α] :
+    Pmap.CmpLaws (defaultCompare : α → α → LemOrdering)
+theorem Pmap.cmpLaws_defaultCompare_int / _string / _nat' := Pmap.cmpLaws_of_transOrd
 ```
 
 `#print axioms`, verbatim (`lake build` in `lean-lib`):
@@ -380,6 +398,147 @@ witness above).
 Cerberus OCaml tree, this lem vs `ecf75b4` (§2.7): `OCAML DIFF exit 0 lines 0` (86/86 files).
 
 
+## 8. Audit response (pre-merge audit `2026-09-05_tails-pmap-audit-premerge.md` @ `f6e10d2`: MERGEABLE, no MAJOR; F1–F3 MINOR, 7 NOTEs)
+
+One commit (this commit, the audit-response commit — the fourth of the branch). Every quoted output verbatim from this
+worktree after the fix (`.tmp/suite-2.log`, `.tmp/nonlean-2.log`,
+`.tmp/leanlib-3.log`).
+
+- **F1 (capture through a Lean `target_rep` spelled like a synthesized
+  binder).** The hoist's constant check compared `lemTail` with referenced
+  constants' LEM names only; a constant with ``target_rep function dl =
+  `lemTail` `` rendered as the binder (audit probe `p11b`: Lean 4 vs OCaml
+  1), and the same hole existed at `ecf75b4` for `lemFuel` (`p11c`), the
+  reserved-binder scan looking at binders only. Fix, one generic check
+  (`lean_reserved_capture_check`, `src/lean_backend.ml`; mechanism comment
+  there): for every constant a clause body references, the identifiers its
+  Lean rep renders as (`CR_simple`/`CR_inline` bodies — every `Backend`
+  ident —, `CR_infix`, `CR_special_rep` text) and its lem name, plus every
+  `Backend` ident written directly in the body, are compared against the
+  reserved set — exact `lemFuel`, `lemMeasureLe`, `LemFuel`, `lemTail`,
+  prefixes `_lemReader_`/`_lemSupply` — and any hit is refused naming the
+  constant and the text. Run in `reserved_binder_check` (every fuel'd /
+  reader / supply group) and in `lean_hoist_tail_binders` (every hoist,
+  so `structural`-only hoists are covered too). Negatives
+  `neg_tail_rep_capture.lem` (`p11b`) and `neg_fuel_rep_capture.lem`
+  (`p11c`); the refusals, verbatim:
+
+  ```
+  Error: Lean backend: the body of bad references constant dl, which renders on Lean as `lemTail` — a reserved synthesized binder name (the reserved-name contract: 'lemFuel', 'lemMeasureLe', 'LemFuel', 'lemTail' and the '_lemReader_'/'_lemSupply' prefixes are the backend's); inside the generated worker that identifier is CAPTURED by the synthesized binder and computes a different value than the OCaml target (pre-merge audit 2026-09-05, probe p11b) — rename the constant or its Lean target_rep
+  Error: Lean backend: the body of g references constant seven, which renders on Lean as `lemFuel` — a reserved synthesized binder name (the reserved-name contract: 'lemFuel', 'lemMeasureLe', 'LemFuel', 'lemTail' and the '_lemReader_'/'_lemSupply' prefixes are the backend's); inside the generated worker that identifier is CAPTURED by the synthesized binder and computes a different value than the OCaml target (pre-merge audit 2026-09-05, probe p11b) — rename the constant or its Lean target_rep
+  ```
+
+  Consequence for §7 decision 4: `lemTail` now IS in the generic reserved
+  set for every fuel'd/reader/supply definition's referenced constants
+  (the binder scan itself is unchanged); the constant-name side of the
+  contract is uniform across all reserved names. The lem-name check is
+  kept alongside (a constant without a rep renders as its lem name).
+  Stricter than `ecf75b4` only for programs that were silently wrong.
+- **F2 (generic `CmpLaws` bridge).** `theorem Pmap.cmpLaws_of_transOrd
+  {α : Type} [Ord α] [Std.TransOrd α] : Pmap.CmpLaws (defaultCompare : α →
+  α → LemOrdering)`. Hypothesis choice: `defaultCompare` is `compare`
+  read into `LemOrdering` (`LemLib.lean:138`), and Lean core's
+  `Std.TransOrd α` (= `Std.TransCmp (compare : α → α → Ordering)`,
+  `Init/Data/Order/Ord.lean`, present in both 4.28.0 and 4.32.2 with the
+  same names) packages exactly the four laws: `OrientedCmp.eq_swap`
+  (`flip`; reflexivity via the `OrientedCmp → ReflCmp` instance),
+  `TransCmp.lt_trans`, `TransCmp.congr_left` (`eq_congr`). No
+  LemLib-local class was needed. Instances in core cover `Nat`, `Int`,
+  `String`, `Char`, `Bool`, fixed-width ints, `Fin`, `Option`, and
+  lexicographic products. Pins: `cmpLaws_defaultCompare_nat'`, `_int`,
+  `_string` by the bridge; `decide`/`rfl` on closed `Int`- and
+  `String`-keyed maps; the laws instantiated at `Int`/`String` through
+  the bridge. Verbatim:
+
+  ```
+  info: LemLibPmapLaws.lean:555:0: 'Pmap.cmpLaws_of_transOrd' depends on axioms: [propext]
+  info: LemLibPmapLaws.lean:556:0: 'Pmap.cmpLaws_defaultCompare_int' depends on axioms: [propext, Classical.choice, Quot.sound]
+  info: LemLibPmapLaws.lean:557:0: 'Pmap.cmpLaws_defaultCompare_string' depends on axioms: [propext, Classical.choice, Quot.sound]
+  ```
+
+  (the classical axioms at `Int`/`String` come from core's `TransOrd`
+  instances, not from this file.) The consumer's `Ord sym` (cerberus
+  `symbol.lem:169`: digest compare, then `nat`) is `defaultCompare` of a
+  hand-written `Ord` instance: provable through the bridge once that `Ord`
+  carries `Std.TransOrd sym` (a lexicographic pair of `String`/`Nat`
+  compares, both `TransOrd`; an `⟨eq_swap, isLE_trans⟩` instance over
+  `compareLex`, or by hand), else by proving `CmpLaws` directly as the
+  `Nat` witness does — the consumer's call.
+- **F3 (doc precision: any trailing lambda is hoisted).** Documented as
+  the general rule (§2.2, §2.3; manual; DESIGN table row and paragraph)
+  rather than gated on the `remove_function` tag: extensionally equal,
+  zero cerberus impact (the tree without the new declares is byte-identical
+  under both lems — the auditor's measurement), simpler to state, and a
+  measure over the user binder needs exactly this. `p13` is now the
+  positive `tuser` in `test_function_tails.lem` (h) with its obligation
+  proof and kernel pins; before (fuel only) / after (fuel + measure),
+  verbatim (`.tmp/tuser-before-after.diff`):
+
+  ```
+  28,30c28,30
+  <  def  tuser_lemFuel (lemFuel : Nat)  (n : Nat)  : Nat → Nat := match lemFuel with
+  <   | 0 => (fun _ => 0)
+  <   | Nat.succ lemFuel => ( fun (k : Nat) =>  if  n  ==   0 then  k  else (tuser_lemFuel lemFuel)  (n  -   1)  (k  +   1))
+  ---
+  >  def  tuser_lemFuel (lemFuel : Nat)  (n : Nat) (k : Nat)  : Nat := match lemFuel with
+  >   | 0 => ((fun _ => 0) k)
+  >   | Nat.succ lemFuel => ( if  n  ==   0 then  k  else (tuser_lemFuel lemFuel)  (n  -   1)  (k  +   1))
+  32,34c32,34
+  < def tuser [LemFuel] : Nat → Nat → Nat := tuser_lemFuel LemFuel.fuel
+  < theorem tuser_lemFuel_zero ( n : Nat) :
+  <     (tuser_lemFuel 0  n : Nat → Nat) = (fun _ => 0) := rfl
+  ---
+  > def tuser ( n : Nat) ( k : Nat) : Nat := tuser_lemFuel (n + 1)  n  k
+  > theorem tuser_lemFuel_zero ( n : Nat) ( k : Nat) :
+  >     tuser_lemFuel 0  n  k = ((fun _ => 0) k) := rfl
+  ```
+- **N7.** `[AGENT]` tags on each §7 decision item.
+- N1–N6 need no change (N4: the `body_free` clause is unreachable in
+  practice and kept as belt-and-braces; N5/N6 are the record's own
+  caveats).
+
+Gates re-run after the response, verbatim:
+
+```
+=== Generation: 53 passed, 0 failed, 0 skipped ===
+Build completed successfully (160 jobs).
+  OK (leg 1): panic prints the Incomplete Pattern message, then continues with default
+  OK (leg 2): fail-stops (exit 134) under LEAN_ABORT_ON_PANIC=1
+single-evaluation: OK
+  OK: compiled draw sequences hold
+  OK: compiled consumer injection holds
+  OK (leg 1): two sufficient fuels agree; insufficient gives the declared sentinel; callee starts from the full ambient
+  OK (leg 2): loud exhaustion at an insufficient runtime fuel fail-stops (exit 134)
+  OK (rejected as declared): negative/neg_fuel_rep_capture.lem
+  OK (rejected as declared): negative/neg_tail_body_binder.lem
+  OK (rejected as declared): negative/neg_tail_rep_capture.lem
+  OK (rejected as declared): negative/neg_tail_shadow_param.lem
+  OK (rejected as declared): negative/neg_tail_user_shadow.lem
+  OK: inv_function_tails.lem (7 artifacts byte-identical across ocaml/hol/isa/coq)
+  OK: parity (11 lines byte-identical to the OCaml reference; pin matches)
+  OK: 8 proofs modules scanned; no sorry/admit/axiom/native_decide/bv_decide token
+  OK: 248 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make lean  380.20s user 23.06s system 93% cpu 7:11.55 total
+exit 0
+```
+
+(all 81 negative probes and 7 invariance witnesses OK; the parity phase's
+four `FAIL` lines are the same four registered XFAILs — `f_int32_overflow`,
+`f_int_of_big_num`, `p_str_bytes`, `p_str_escapes`.) The `tuser` obligation:
+`'Test_function_tails_lemMeasureProofs.tuser_measure_sufficient' depends on axioms: [propext, Quot.sound]`.
+
+`lean-lib` `lake build`: `Build completed successfully (39 jobs).` — the
+nine `#print axioms` lines (the six of §3.1 unchanged, the three of F2
+above). `grep -c "^axiom "` over `lean-lib/*.lean`, `lean-lib/LemLib/*.lean`
+→ every count 0.
+
+`tests/nonlean-regress/run.sh`:
+`nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)`.
+
+The cerberus OCaml byte-identity of §2.7 is unaffected by the response
+(the changes are two refusals and a rule for Lean emission only; the
+invariance witness and the net above are the evidence).
+
 ## 5. TODO rows
 
 - 17 — RESOLVED (this record); row kept with its original text.
@@ -396,7 +555,7 @@ tail rule and `lemTail`), `DESIGN.md` (the declare table's "point-free
 
 ## 7. Decisions for the operator
 
-1. **The comparator hypothesis is a strict WEAK order** (`Pmap.CmpLaws`:
+1. [AGENT] **The comparator hypothesis is a strict WEAK order** (`Pmap.CmpLaws`:
    `refl`/`flip`/`lt_trans`/`eq_congr`), weaker than the consumer's
    "strict total order" and the honest one for a comparator-keyed map
    whose `add` replaces on EQ. If the consumer prefers the `EQ ↔ =`
@@ -404,7 +563,7 @@ tail rule and `lemTail`), `DESIGN.md` (the declare table's "point-free
    as `cmpLaws_defaultCompare_nat` does); the laws themselves stay
    comparator-relative. Nothing to change unless they want a derived
    `find?_add_other'` with `k ≠ k'` under an `EQ ↔ =` hypothesis — S.
-2. **`Fmap.WF cmp` pins the CAPTURED comparator to `cmp`** (a function
+2. [AGENT] **`Fmap.WF cmp` pins the CAPTURED comparator to `cmp`** (a function
    equality). The generated environments insert with one static
    comparator, so this is the natural invariant; a consumer that
    threads maps built under a different-but-equal comparator would need
@@ -412,7 +571,7 @@ tail rule and `lemTail`), `DESIGN.md` (the declare table's "point-free
    the captured comparator) makes the `_other` law's hypothesis
    `c k k' ≠ EQ` about the captured `c`, which the caller cannot see.
    Kept the pinned form.
-3. **Dry-run measures for the two shared-counter mutual blocks are
+3. [AGENT] **Dry-run measures for the two shared-counter mutual blocks are
    acceptance witnesses, not sufficiency claims.** `get_ctx`/`get_ctx_unseq_aux`
    share one counter: `lemSize g + 1` bounds the call DEPTH through the
    expression only if every hop descends (it does — each `get_ctx` call is
@@ -429,14 +588,14 @@ tail rule and `lemTail`), `DESIGN.md` (the declare table's "point-free
    measure may name it as a qualified global). What this slice
    establishes: the mechanism accepts and generates all six; the
    measures' proofs are C1's remaining work, as for every measured row.
-4. **`lemTail` and the reserved-name contract.** The name is checked
+4. [AGENT] **`lemTail` and the reserved-name contract.** The name is checked
    locally (refused wherever a hoist would collide) but NOT added to the
    global reserved scan (`lemFuel`, `lemMeasureLe`, `_lemReader_*`,
    `_lemSupply*`), so a definition without a tail may still bind
    `lemTail`. Making it globally reserved is a one-line change; kept
    local so as not to refuse code the rule never touches. Operator's
    call; either way the manual states the name.
-5. **Sentinel typing under the hoist.** The fuel payload stays written at
+5. [AGENT] **Sentinel typing under the hoist.** The fuel payload stays written at
    the head's original (function) codomain and is APPLIED to the hoisted
    binders — the cerberus declares (`fuelExhausted (fun _ => none)`,
    `fuelExhausted (fun _ => acc)`) need no edit. A payload written for

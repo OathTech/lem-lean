@@ -102,6 +102,17 @@ let rec sscale acc = fun k -> function
 end
 declare {lean} structural val sscale
 
+(* (h) a trailing user lambda with NO `function` beneath it (pre-merge
+   audit probe p13, F3): the rule hoists EVERY trailing variable-binder
+   lambda of a measured/structural clause body — here `k` — so the head
+   binds n and k and the wrapper is `def tuser (n : Nat) (k : Nat) : Nat`
+   (a consumer-visible arity change for such a definition, extensionally
+   the same function; the point-free form is recovered by funext) *)
+val tuser : nat -> nat -> nat
+let rec tuser n = fun k -> if n = 0 then k else tuser (n - 1) (k + 1)
+declare {lean} fuel val tuser = `fun _ => 0`
+declare {lean} fuel_measure val tuser = `n + 1`
+
 (* NOT hoisted (unchanged emission): an ambient fuel'd point-free tail
    without a measure keeps the `_zero` lemma's codomain ascription of the
    fuel-measure slice (test_fuel_param.lem `tail_spin`); a plain
@@ -123,3 +134,4 @@ assert todd_ok : (todd 0 [1; 2; 3] = (5 : nat))
 assert tdot_ok : (tdot 0 ([1; 2; 3], [4; 5; 6]) = (32 : nat))
 assert tdot_ragged : (tdot 0 ([1; 2], [4]) = (0 : nat))
 assert sscale_ok : (sscale 1 3 [1; 2] = (10 : nat))
+assert tuser_ok : (tuser 3 10 = (13 : nat))
