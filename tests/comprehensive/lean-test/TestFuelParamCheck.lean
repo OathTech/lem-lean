@@ -25,6 +25,9 @@ example (n : Nat) : @outer_lemFuel ⟨3⟩ 0 n = fuelExhausted n := @outer_lemFu
 example (n : Nat) : @mping_lemFuel ⟨3⟩ 0 n = 995 := @mping_lemFuel_zero ⟨3⟩ n
 example (n : Nat) (u : Unit) : wild_spin_lemFuel 0 n u = 997 := wild_spin_lemFuel_zero n u
 example (p : Nat × Nat) : tup_spin_lemFuel 0 p = 996 := tup_spin_lemFuel_zero p
+-- a point-free tail: the lemma's LHS carries the codomain ascription (fuel-measure slice)
+example (n : Nat) : (tail_spin_lemFuel 0 n : Nat → Nat) = (fun x => x) := tail_spin_lemFuel_zero n
+example : @tail_spin Nat ⟨3⟩ 2 7 = 7 := by decide
 
 /-! ### (3) sufficient fuel: two different fuels, the same value -/
 example : @spin ⟨6⟩ 5 = 0 := by decide

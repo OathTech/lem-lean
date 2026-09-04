@@ -101,3 +101,13 @@ declare {lean} fuel val wild_spin = `997`
 val tup_spin : nat * nat -> nat
 let rec tup_spin (a, b) = if a = 0 then b else tup_spin (a - 1, b + 1)
 declare {lean} fuel val tup_spin = `996`
+
+(* point-free tail: the head binds fewer parameters than the type has
+   arrows, so the worker at counter 0 is a FUNCTION; the _zero lemma
+   ascribes the codomain to its left-hand side, or the sentinel lambda's
+   implicit type arguments have nothing to unify with (found on the
+   cerberus dry run of the fuel-measure slice, `liftAction_lemFuel_zero`:
+   `don't know how to synthesize implicit argument`) *)
+val tail_spin : forall 'a. nat -> 'a -> 'a
+let rec tail_spin n = if n = 0 then (fun x -> x) else tail_spin (n - 1)
+declare {lean} fuel val tail_spin = `fun x => x`

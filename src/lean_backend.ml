@@ -3948,6 +3948,23 @@ type pat_style = FunParam | MatchArm
                           let binders_and_args = List.mapi binder_of pats in
                           let all_named = not (List.exists (fun o -> o = None) binders_and_args) in
                           let bs = List.filter_map (fun o -> o) binders_and_args in
+                          let npats = List.length pats in
+                          (* the type after the head's parameters: a definition
+                             whose head binds FEWER parameters than its type has
+                             arrows (a point-free tail — cerberus `liftAction`,
+                             `one_step_unseq_aux`) leaves the codomain a function
+                             type *)
+                          let rec codomain_after l n (t : Types.t) =
+                            if n = 0 then t
+                            else match t.Types.t with
+                              | Types.Tfn (_, b) -> codomain_after l (n - 1) b
+                              | _ ->
+                                raise (Reporting_basic.err_general true l
+                                  "Lean backend: internal error — a fuel'd definition has more parameters than its type has arrows") in
+                          let arity =
+                            let rec go (t : Types.t) = match t.Types.t with
+                              | Types.Tfn (_, b) -> 1 + go b | _ -> 0 in
+                            go cd.const_type in
                           (* class-constraint binders must be re-emitted on
                              the wrapper too (arc-3 batch D: [Eq0 a]-style
                              constrained defs failed to elaborate) *)
@@ -4033,15 +4050,7 @@ type pat_style = FunParam | MatchArm
                               | Some ln -> Some (ln, lean_escape_keyword ln)
                               | None -> None) bs in
                           let measure_out = lean_render_measure l base_name params measure in
-                          let npats = List.length pats in
-                          let rec codomain n (t : Types.t) =
-                            if n = 0 then t
-                            else match t.Types.t with
-                              | Types.Tfn (_, b) -> codomain (n - 1) b
-                              | _ ->
-                                raise (Reporting_basic.err_general true l
-                                  "Lean backend: internal error — a measured definition has more parameters than its type has arrows") in
-                          let result_out = pat_typ (C.t_to_src_t (codomain npats cd.const_type)) in
+                          let result_out = pat_typ (C.t_to_src_t (codomain_after l npats cd.const_type)) in
                           let ambient_binder =
                             if fuel_lifted_g && not inside_instance then from_string " [LemFuel]" else emp in
                           let arg_binders = Output.flat (List.map (fun (b, _, _) -> b) bs) in
@@ -4109,16 +4118,32 @@ type pat_style = FunParam | MatchArm
                                 Output.flat (List.map (fun (_, pname) ->
                                     Output.flat [from_string " "; from_string pname])
                                   (get_supply_params ())) in
+                              (* a point-free tail (npats < arity): ascribe the
+                                 codomain to the LHS, or the RHS lambda's implicit
+                                 type arguments have nothing to unify with
+                                 (cerberus dry run 2026-09-04, liftAction_lemFuel_zero:
+                                 `don't know how to synthesize implicit argument`);
+                                 not under supply lifting, whose codomain is the
+                                 transformed pair type (no such case exists) *)
+                              let tail_ascription =
+                                if npats < arity && not !St.supply_binder then
+                                  Some (pat_typ (C.t_to_src_t (codomain_after (locn_of_clause_group g) npats cd.const_type)))
+                                else None in
                               Output.flat ([
                                 from_string "theorem "; from_string worker; from_string "_zero";
                                 tv_out; cons_out;
                                 fuel_binder_output (); inhabited_binder_output ();
                                 reader_binder_output (); supply_binder_output ()]
                                 @ List.map (fun (b, _, _) -> b) bs
-                                @ [from_string " :\n    "; from_string worker; from_string " 0";
+                                @ [from_string " :\n    ";
+                                   (if tail_ascription <> None then from_string "(" else emp);
+                                   from_string worker; from_string " 0";
                                    (if lifted then reader_args_output () else emp);
                                    supply_names]
                                 @ List.map (fun (_, a, _) -> a) bs
+                                @ (match tail_ascription with
+                                   | Some t -> [from_string " : "; t; from_string ")"]
+                                   | None -> [])
                                 @ [from_string " = "; fuel_sentinel_output s; from_string " := rfl\n"])
                             end in
                           (* Wrapper (and its lemma) are returned separately:
