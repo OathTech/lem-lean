@@ -601,3 +601,29 @@ tail rule and `lemTail`), `DESIGN.md` (the declare table's "point-free
    `fuelExhausted (fun _ => acc)`) need no edit. A payload written for
    the post-hoist shape would fail to typecheck (loud). Documented in the
    manual; no alternative was built.
+
+
+## 9. Orchestrator boundary review [AGENT, orchestrator, 2026-09-05]
+
+Independent re-verification, lem rebuilt from source in this worktree, at
+`a30b0bc` (the slice) and at `0875d6a` (audit response `b034e7c` + the
+audit document `f6e10d2` cherry-picked). Final run, verbatim:
+
+```
+Lem 0875d6a
+Build completed successfully (39 jobs).          (lean-lib)
+0                                                (grep "^axiom " lean-lib → none)
+=== Generation: 53 passed, 0 failed, 0 skipped ===
+Build completed successfully (160 jobs).
+  OK: 248 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make-lean-rc=0
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+```
+
+(the four `FAIL` lines in the run are the registered XFAILs.) Pre-merge
+audit `2026-09-05_tails-pmap-audit-premerge.md` (MERGEABLE, no MAJOR; the
+F1 capture hole — a pre-existing class for `lemFuel` too — closed generically
+in `b034e7c`, with F2's `Std.TransOrd` bridge and F3's rule statement). The
+cerberus OCaml byte-identity (86/86, diff 0) and the Lean-tree identity
+without new declares (170/170) were verified by the auditor in a fresh
+checkout; not re-run here. Merge ask goes to the operator on this head.
