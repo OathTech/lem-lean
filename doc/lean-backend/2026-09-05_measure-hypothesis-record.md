@@ -627,3 +627,30 @@ one table (`lean_is_letter_like`); the grammar is untouched.
 **§8 item 1, superseded by F1:** the gate's `hyp=<H>` report and the
 reviewed hypothesis register are REQUIRED of the cerberus half before its
 first `assuming` row, not a policy choice.
+
+
+## 11. Orchestrator boundary review [AGENT, orchestrator, 2026-09-05]
+
+Independent re-verification, lem rebuilt from source in this worktree, at
+`906ac21` (the slice) and at `e58151f` (audit response `7963352` + the
+audit document `05a533f` cherry-picked). Final run, verbatim:
+
+```
+Lem e58151f
+=== Generation: 54 passed, 0 failed, 0 skipped ===
+  OK: 254 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make-lean-rc=0
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+```
+
+(lean-lib `Build completed successfully (39 jobs)`, zero axioms, the four
+registered XFAILs only.) Pre-merge audit
+`2026-09-05_measure-hypothesis-audit-premerge.md`: verdict MERGEABLE, but
+F1 graded MAJOR "by the scope's letter" (contradictory hypotheses pass the
+token-level vacuity check; disposition: undecidable at generation; a
+cerberus-half REQUIREMENT — `hyp=<H>` reporting + a reviewed hypothesis
+register — recorded in §10/TODO row 23). The operator's overnight pre-sign
+for this branch was conditional on "no MAJOR"; under a fail-closed reading
+the orchestrator did NOT merge under the pre-sign — the branch is held for
+the operator's explicit merge ask [AGENT decision, logged]. Cerberus OCaml
++ Lean byte identity (86/86, 170/170) verified by the auditor.
