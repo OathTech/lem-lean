@@ -3,7 +3,7 @@ open import Pervasives_extra
 (* ================================================================
    The Lean-backend annotation words — fuel, reader, effectful,
    ground_rep, reader_seed, skip_instances, extra_import, supply,
-   reader_consumer, fuel_consumer, structural, fuel_measure — are CONTEXTUAL keywords: they act as keywords only inside `declare`
+   reader_consumer, fuel_consumer, structural, fuel_measure, assuming — are CONTEXTUAL keywords: they act as keywords only inside `declare`
    forms and must remain usable as ordinary identifiers everywhere
    else, on every target (2026-08-31 backend quality review, M1).
 
@@ -26,11 +26,12 @@ let reader_consumer = (9:nat)
 let fuel_consumer = (10:nat)
 let structural = (11:nat)
 let fuel_measure = (12:nat)
+let assuming = (13:nat)
 
 assert ctx_kw_sum_ok :
   (fuel + reader + effectful + ground_rep + reader_seed
      + skip_instances + extra_import + supply + reader_consumer
-     + fuel_consumer + structural + fuel_measure = (78:nat))
+     + fuel_consumer + structural + fuel_measure + assuming = (91:nat))
 
 (* === As function name and as parameter names === *)
 let add_fuel (fuel : nat) (reader : nat) = fuel + reader
@@ -47,7 +48,10 @@ assert ctx_kw_param3_ok : (add_structural 40 2 = (42:nat))
 
 let add_fuel_measure (fuel_measure : nat) (structural : nat) = fuel_measure + structural
 
+let add_assuming (assuming : nat) (fuel_measure : nat) = assuming + fuel_measure
+
 assert ctx_kw_param4_ok : (add_fuel_measure 41 1 = (42:nat))
+assert ctx_kw_param5_ok : (add_assuming 40 2 = (42:nat))
 
 (* === As pattern variables (match) === *)
 let match_fuel (x : maybe nat) =
@@ -59,15 +63,16 @@ let match_fuel (x : maybe nat) =
 assert ctx_kw_match_ok : (match_fuel (Just 9) = (9:nat))
 
 (* === As record field names === *)
-type engine = <| fuel : nat; effectful : bool; fuel_consumer : nat; structural : bool; fuel_measure : nat |>
+type engine = <| fuel : nat; effectful : bool; fuel_consumer : nat; structural : bool; fuel_measure : nat; assuming : bool |>
 
-let my_engine = <| fuel = 11; effectful = true; fuel_consumer = 12; structural = false; fuel_measure = 13 |>
+let my_engine = <| fuel = 11; effectful = true; fuel_consumer = 12; structural = false; fuel_measure = 13; assuming = true |>
 
 assert ctx_kw_field_ok : (my_engine.fuel = (11:nat))
 assert ctx_kw_field2_ok : (my_engine.effectful = true)
 assert ctx_kw_field3_ok : (my_engine.fuel_consumer = (12:nat))
 assert ctx_kw_field4_ok : (my_engine.structural = false)
 assert ctx_kw_field5_ok : (my_engine.fuel_measure = (13:nat))
+assert ctx_kw_field6_ok : (my_engine.assuming = true)
 
 (* === The declare forms themselves must keep working alongside === *)
 let rec count_down (n : nat) : nat =
@@ -108,3 +113,19 @@ declare {lean} fuel val count_list_measured = `999`
 declare {lean} fuel_measure val count_list_measured = `List.length l + 1`
 
 assert ctx_kw_fuel_measure_decl_ok : (count_list_measured [1; 2; 3] = (3:nat))
+
+(* the `assuming` clause beside the identifier of the same name
+   (measure-hypothesis slice, 2026-09-05): a bound PASSED BY THE CALLER
+   certified by the hypothesis — measure `k + 1`, hypothesis `List.length
+   l ≤ k` — the (a)-flavoured use of a hypothesis; the obligation is
+   proved in lean-test/Test_contextual_keywords_lemMeasureProofs.lean *)
+val count_list_bounded : nat -> list nat -> nat
+let rec count_list_bounded (k : nat) (l : list nat) : nat =
+  match l with
+    | [] -> 0
+    | _ :: xs -> 1 + count_list_bounded k xs
+  end
+declare {lean} fuel val count_list_bounded = `999`
+declare {lean} fuel_measure val count_list_bounded = `k + 1` assuming `List.length l ≤ k`
+
+assert ctx_kw_assuming_decl_ok : (count_list_bounded 5 [1; 2; 3] = (3:nat))

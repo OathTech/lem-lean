@@ -669,7 +669,39 @@ let lean_has_lean_rep env cref =
    whose proof the consumer supplies in the hand-written module
    `<Module>_lemMeasureProofs` (imported by the auxiliary file): the Lean
    build FAILS without it — no measured function ships without its
-   theorem. Fail-closed rules (lean_fuel_measure_check + the emission
+   theorem.
+
+   The HYPOTHESIS-CARRYING form (measure-hypothesis slice, 2026-09-05;
+   [USER 2026-09-05] "agree, go ahead with option 1" on D-C2-1 of the
+   cerberus C2 record): ``fuel_measure val f = `<measure>` assuming
+   `<H>` `` where H is a Lean Prop over the same parameters. The WRAPPER
+   is unchanged (fuel-free: `def f x := f_lemFuel (<measure>) x`); the
+   obligation gains H as the binder named `lemHyp`, placed immediately
+   BEFORE `lemFuel`:
+
+       theorem f_measure_sufficient (x : T) (lemHyp : (<H>)) (lemFuel : Nat)
+           (lemMeasureLe : (<measure>) ≤ lemFuel) :
+           f_lemFuel lemFuel x = f x := <Module>_lemMeasureProofs.f_measure_sufficient x lemHyp lemFuel lemMeasureLe
+
+   i.e. `H xs → μ xs ≤ fuel → f_lemFuel fuel xs = f xs`. Operationally:
+   on inputs violating H the wrapper may exhaust (the sentinel — loud by
+   convention), which is admissible because the oracle's own behaviour
+   on those inputs is not the semantics anyone relies on (a tag
+   environment the frontend never produces; a basis below 2 the callers
+   never pass); the consumer's theorems carry H exactly as they already
+   assume well-formedness. A consumer-side gate tells the two forms apart
+   deterministically: the conditional form has a binder NAMED `lemHyp`
+   (Prop-typed, mentioning only the parameters) immediately before the
+   `lemFuel : Nat` binder; the unconditional form has no binder of that
+   name (`lemHyp` is a reserved synthesized name). Refusals on H
+   (lean_render_param_expr, the measure's rules under the hypothesis
+   reading): FH-vacuous (a hypothesis mentioning no parameter — `True`, a
+   closed term: the unconditional form in disguise, refused to keep the
+   two forms distinct), FH-free, FH-ambient (`LemFuel`: the hypothesis
+   may not mention the fuel), the reserved `lemFuel`/`lemMeasureLe`/
+   `lemHyp`/`_lem…` binders, FH-root, FH-sizeOf (one vocabulary for
+   measure and hypothesis). Whether H is a Prop is Lean's check at build
+   time (`(lemHyp : (H))` fails to elaborate otherwise). Fail-closed rules (lean_fuel_measure_check + the emission
    guards): FM-nofuel (a measure needs the fuel worker), FM-consumer,
    FM-structural (one shape per definition), FM-free (an unqualified
    identifier in the measure that is not a parameter — a global Lean name
@@ -736,30 +768,76 @@ let lean_fuel_measure_check env =
    expression). A measure
    mentioning NO parameter is refused (FM-literal for a bare numeral,
    FM-const otherwise): nothing about the data bounds it — the magic
-   value itself. Tokens: ASCII letters/`_`/non-ASCII bytes start an
-   identifier, continued by those plus digits, `'`, `.`, `!`, `?`;
-   digits start a numeral; everything else passes through unchanged. *)
+   value itself. Tokens: ASCII letters/`_` and Lean's LETTER-LIKE Unicode
+   code points (Greek but λ/Π/Σ, Coptic, the letterlike block ℕ…, script/
+   double-struck/fraktur letters, subscripts — Lean's `isLetterLike`/
+   `isSubScriptAlnum`) start an identifier, continued by those plus
+   digits, `'`, `.`, `!`, `?`; digits start a numeral; everything else —
+   ASCII punctuation and every OTHER Unicode code point (`≤`, `∧`, `∀`,
+   `→`, `≠`, `∈`, `¬`, `×`: the operators a Prop is written with) —
+   passes through unchanged. (Before the measure-hypothesis slice every
+   non-ASCII byte was an identifier character, which made `2 ≤ b` the
+   free variable `≤`; a measure had no need of Unicode operators.) *)
 type lean_measure_token = LM_ident of string | LM_num of string | LM_other of string
+
+(* UTF-8: the code point at byte i and the byte length of its encoding
+   (a malformed lead byte is treated as a one-byte non-letter symbol, so
+   it passes through and Lean reports it). *)
+let lean_utf8_decode (m : string) (i : int) : int * int =
+  let n = String.length m in
+  let b k = if i + k < n then Char.code m.[i + k] else 0 in
+  let c0 = b 0 in
+  if c0 < 0x80 then (c0, 1)
+  else if c0 land 0xE0 = 0xC0 && i + 1 < n then (((c0 land 0x1F) lsl 6) lor (b 1 land 0x3F), 2)
+  else if c0 land 0xF0 = 0xE0 && i + 2 < n then
+    (((c0 land 0x0F) lsl 12) lor ((b 1 land 0x3F) lsl 6) lor (b 2 land 0x3F), 3)
+  else if c0 land 0xF8 = 0xF0 && i + 3 < n then
+    (((c0 land 0x07) lsl 18) lor ((b 1 land 0x3F) lsl 12) lor ((b 2 land 0x3F) lsl 6) lor (b 3 land 0x3F), 4)
+  else (c0, 1)
+
+(* Lean's `isLetterLike` ∪ `isSubScriptAlnum` (Lean 4 `Init/Meta.lean`) *)
+let lean_is_letter_like (c : int) : bool =
+  (0x3b1 <= c && c <= 0x3c9 && c <> 0x3bb)                    (* lower Greek but λ *)
+  || (0x391 <= c && c <= 0x3a9 && c <> 0x3a0 && c <> 0x3a3)   (* upper Greek but Π, Σ *)
+  || (0x3ca <= c && c <= 0x3fb)                               (* Coptic *)
+  || (0x1f00 <= c && c <= 0x1ffe)                             (* polytonic Greek *)
+  || (0x2100 <= c && c <= 0x214f)                             (* letterlike block *)
+  || (0x1d49c <= c && c <= 0x1d59f)                           (* script/double-struck/fraktur *)
+  || (0x2080 <= c && c <= 0x2089) || (0x2090 <= c && c <= 0x209c) || (0x1d62 <= c && c <= 0x1d6a)  (* subscripts *)
 
 let lean_measure_tokens (m : string) : lean_measure_token list =
   let n = String.length m in
-  let is_alpha c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_' || Char.code c >= 128 in
-  let is_digit c = c >= '0' && c <= '9' in
-  let is_ident_cont c = is_alpha c || is_digit c || c = '\'' || c = '.' || c = '!' || c = '?' in
+  (* classify the code point at i: `Start (len) | `Cont (len) | `Digit | `Other (len) *)
+  let classify i =
+    let c = m.[i] in
+    if Char.code c < 128 then begin
+      if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_' then (`Alpha, 1)
+      else if c >= '0' && c <= '9' then (`Digit, 1)
+      else if c = '\'' || c = '.' || c = '!' || c = '?' then (`Cont, 1)
+      else (`Other, 1)
+    end else begin
+      let (cp, len) = lean_utf8_decode m i in
+      if lean_is_letter_like cp then (`Alpha, len) else (`Other, len)
+    end in
   let rec go i acc =
     if i >= n then List.rev acc
     else begin
-      let c = m.[i] in
-      if is_alpha c then begin
-        let j = ref (i + 1) in
-        while !j < n && is_ident_cont m.[!j] do incr j done;
+      match classify i with
+      | (`Alpha, len) ->
+        let j = ref (i + len) in
+        let continue_ = ref true in
+        while !continue_ && !j < n do
+          (match classify !j with
+           | ((`Alpha | `Digit | `Cont), l) -> j := !j + l
+           | (`Other, _) -> continue_ := false)
+        done;
         go !j (LM_ident (String.sub m i (!j - i)) :: acc)
-      end else if is_digit c then begin
+      | (`Digit, _) ->
         let j = ref (i + 1) in
-        while !j < n && is_digit m.[!j] do incr j done;
+        while !j < n && m.[!j] >= '0' && m.[!j] <= '9' do incr j done;
         go !j (LM_num (String.sub m i (!j - i)) :: acc)
-      end else
-        go (i + 1) (LM_other (String.make 1 c) :: acc)
+      | ((`Cont | `Other), len) ->
+        go (i + len) (LM_other (String.sub m i len) :: acc)
     end in
   go 0 []
 
@@ -768,10 +846,19 @@ let lean_measure_tokens (m : string) : lean_measure_token list =
 let size_census_lookup (p : Path.t) : size_status option =
   Option.map snd (List.find_opt (fun (q, _) -> Path.compare p q = 0) !St.size_census)
 
-let lean_render_measure (d : Types.type_defs) (l : Ast.l) (fname : string)
+(* What is being rendered over the parameters: the measure (a Nat the
+   wrapper executes) or the `assuming` hypothesis (a Prop the obligation
+   binds as `lemHyp`). Same tokenizer, same scope rules, same forbidden
+   names; the tags in the messages and the parameter-free refusal differ
+   (FM-literal/FM-const vs FH-vacuous). *)
+type lean_param_expr_kind = LPE_measure | LPE_hypothesis
+
+let lean_render_param_expr (kind : lean_param_expr_kind) (d : Types.type_defs) (l : Ast.l) (fname : string)
     (params : (string * (string * Types.t)) list) (measure : string) : string =
   let toks = lean_measure_tokens measure in
   let param_names = String.concat ", " (List.map fst params) in
+  let what = match kind with LPE_measure -> "fuel measure" | LPE_hypothesis -> "measure hypothesis (`assuming`)" in
+  let tag pre = String.concat "" [(match kind with LPE_measure -> "FM-" | LPE_hypothesis -> "FH-"); pre] in
   let mentions = ref 0 in
   let starts_with pre s =
     String.length s >= String.length pre && String.sub s 0 (String.length pre) = pre in
@@ -797,25 +884,25 @@ let lean_render_measure (d : Types.type_defs) (l : Ast.l) (fname : string)
               | Some (Size_none reason) ->
                 raise (Reporting_basic.err_general true l
                   (Printf.sprintf
-                    "Lean backend: the fuel measure of %s uses `lemSize %s`, but the type of %s (%s) has no derived size function (FM-size-type: it is %s); a size is derived for every recursive block of generated inductive types in a user module (`t.lemSize`)"
-                    fname x x (Path.to_string p) reason))
+                    "Lean backend: the %s of %s uses `lemSize %s`, but the type of %s (%s) has no derived size function (FM-size-type: it is %s); a size is derived for every recursive block of generated inductive types in a user module (`t.lemSize`)"
+                    what fname x x (Path.to_string p) reason))
               | None ->
                 raise (Reporting_basic.err_general true l
                   (Printf.sprintf
-                    "Lean backend: the fuel measure of %s uses `lemSize %s`, but the type of %s (%s) is not a generated inductive type of this invocation (FM-size-type: no derived size function exists for it — a size is derived for every recursive block of generated inductive types in a user module)"
-                    fname x x (Path.to_string p))))
+                    "Lean backend: the %s of %s uses `lemSize %s`, but the type of %s (%s) is not a generated inductive type of this invocation (FM-size-type: no derived size function exists for it — a size is derived for every recursive block of generated inductive types in a user module)"
+                    what fname x x (Path.to_string p))))
           | _ ->
             raise (Reporting_basic.err_general true l
               (Printf.sprintf
-                "Lean backend: the fuel measure of %s uses `lemSize %s`, but %s is not of a generated inductive type (FM-size-type: `lemSize` is the backend-derived structural size, defined for the recursive blocks of generated inductives; for a list use `List.length %s`, for a nat the parameter itself)"
-                fname x x x)))
+                "Lean backend: the %s of %s uses `lemSize %s`, but %s is not of a generated inductive type (FM-size-type: `lemSize` is the backend-derived structural size, defined for the recursive blocks of generated inductives; for a list use `List.length %s`, for a nat the parameter itself)"
+                what fname x x x)))
       | _ ->
         let usable = List.filter (fun (n, _) -> n <> "lemSize") params in
         let usable_names = String.concat ", " (List.map fst usable) in
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: `lemSize` in the fuel measure of %s must be applied directly to one of the parameters %s (FM-size-param: `lemSize x` — the backend resolves x's type to its derived size function `t.lemSize`; any other argument shape is refused%s)"
-            fname (if usable = [] then "(none)" else usable_names)
+            "Lean backend: `lemSize` in the %s of %s must be applied directly to one of the parameters %s (FM-size-param: `lemSize x` — the backend resolves x's type to its derived size function `t.lemSize`; any other argument shape is refused%s)"
+            what fname (if usable = [] then "(none)" else usable_names)
             (if List.mem_assoc "lemSize" params
              then "; `lemSize` is a reserved word inside a measure, so the PARAMETER named `lemSize` cannot be mentioned there — rename it"
              else "")))
@@ -835,26 +922,34 @@ let lean_render_measure (d : Types.type_defs) (l : Ast.l) (fname : string)
          fuel-DEPENDENT wrapper whose obligation is false; the second was
          caught only by Lean). A qualified global never needs `_root_`. *)
       let components = String.split_on_char '.' t in
-      if head = "_root_" then
+      (* `True` is the unconditional form in disguise and `False` makes the
+         obligation say nothing: both vacuous (checked before FH-free, which
+         would otherwise report them as unqualified names) *)
+      if kind = LPE_hypothesis && (t = "True" || t = "False") then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: the fuel measure of %s mentions `%s` (FM-root: a `_root_`-qualified name is refused — a qualified global never needs it, and it would bypass the checks on the name's components)"
+            "Lean backend: the measure hypothesis of %s is `%s` (FH-vacuous: `True` is the unconditional form — write the measure without `assuming`; `False` would make the obligation say nothing)"
             fname t))
+      else if head = "_root_" then
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: the %s of %s mentions `%s` (%s: a `_root_`-qualified name is refused — a qualified global never needs it, and it would bypass the checks on the name's components)"
+            what fname t (tag "root")))
       else if List.exists (fun c -> c = "sizeOf" || c = "SizeOf") components then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: the fuel measure of %s uses `%s` (FM-sizeOf: Lean's automatic `SizeOf` instances are NONCOMPUTABLE — the wrapper must execute, so a measure is a computable expression: `List.length xs + 1`, `n + 1`, the backend-derived structural size `lemSize x` of a parameter of a generated inductive type, or a hand-written structural size function `Ns.size x` in a Lean module the generated module imports via `declare {lean} extra_import`)"
-            fname t))
+            "Lean backend: the %s of %s uses `%s` (%s: Lean's automatic `SizeOf` instances are NONCOMPUTABLE — the wrapper must execute, so a measure is a computable expression: `List.length xs + 1`, `n + 1`, the backend-derived structural size `lemSize x` of a parameter of a generated inductive type, or a hand-written structural size function `Ns.size x` in a Lean module the generated module imports via `declare {lean} extra_import`; a hypothesis is stated in the same vocabulary)"
+            what fname t (tag "sizeOf")))
       else if List.exists (fun c -> c = "LemFuel") components then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: the fuel measure of %s mentions `%s` (FM-ambient: a measure that reads the ambient fuel is not a data measure — it must be an expression over the parameters %s)"
-            fname t param_names))
-      else if List.exists (fun c -> c = "lemFuel" || starts_with "_lem" c) components then
+            "Lean backend: the %s of %s mentions `%s` (%s: a measure that reads the ambient fuel is not a data measure, and a hypothesis may not mention the fuel — it must be an expression over the parameters %s)"
+            what fname t (tag "ambient") param_names))
+      else if List.exists (fun c -> c = "lemFuel" || c = "lemMeasureLe" || c = "lemHyp" || starts_with "_lem" c) components then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: the fuel measure of %s mentions the reserved binder `%s` (the backend's synthesized names are not the function's parameters)"
-            fname t))
+            "Lean backend: the %s of %s mentions the reserved binder `%s` (the backend's synthesized names `lemFuel`, `lemMeasureLe`, `lemHyp`, `_lem…` are not the function's parameters; a hypothesis in particular may not mention the fuel)"
+            what fname t))
       else if t = "lemSize" then begin
         let (out, tl') = render_lem_size tl in
         render (String.concat "" [acc; out]) tl'
@@ -862,31 +957,56 @@ let lean_render_measure (d : Types.type_defs) (l : Ast.l) (fname : string)
       else if List.mem_assoc head params then begin
         incr mentions; render (String.concat "" [acc; fst (List.assoc head params); rest]) tl
       end
+      else if rest <> ""
+              && List.exists (fun c -> c <> "" && String.for_all (fun ch -> ch >= '0' && ch <= '9') c)
+                   (List.tl components) then
+        (* `env.1` where `env` is not a parameter: a numeral component is a
+           PROJECTION, never a namespace, so the head had to be a parameter
+           (found on the cerberus dry run: lem's rename pass had made the
+           parameter `env1`, and `env.1` passed as a qualified global) *)
+        raise (Reporting_basic.err_general true l
+          (Printf.sprintf
+            "Lean backend: `%s` in the %s of %s is a projection on `%s`, which is not a parameter (%s: the parameters are %s — note that lem's rename pass may have renamed a clashing variable, e.g. `env` to `env1`; a qualified global has no numeral component)"
+            t what fname head (tag "free") (if params = [] then "none" else param_names)))
       else if rest <> "" then render (String.concat "" [acc; t]) tl
       else
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: free variable `%s` in the fuel measure of %s (FM-free: a measure mentions only the function's parameters — here %s — and QUALIFIED Lean names such as `List.length xs` or `Ns.size x`, or `lemSize x` for the derived size of a parameter's inductive type; Lean's global namespace is not visible at generation, so an unqualified name that is not a parameter is refused)"
-            t fname (if params = [] then "none" else param_names)))
+            "Lean backend: free variable `%s` in the %s of %s (%s: a measure or hypothesis mentions only the function's parameters — here %s — and QUALIFIED Lean names such as `List.length xs`, `Ns.size x` or `Ns.WellFormed env`, or `lemSize x` for the derived size of a parameter's inductive type; Lean's global namespace is not visible at generation, so an unqualified name that is not a parameter is refused)"
+            t what fname (tag "free") (if params = [] then "none" else param_names)))
   in
   let rendered = render "" toks in
   if !mentions = 0 then begin
     let significant = List.filter (function
         | LM_other s -> not (List.mem s [" "; "\t"; "\n"; "("; ")"])
         | _ -> true) toks in
-    match significant with
-    | [LM_num _] ->
+    match kind, significant with
+    | LPE_hypothesis, _ ->
+      (* a parameter-free hypothesis (`True`, a closed proposition) is the
+         unconditional obligation in disguise: refused so that the two
+         forms stay distinct (a consumer gate reads the `lemHyp` binder as
+         "conditional") *)
       raise (Reporting_basic.err_general true l
         (Printf.sprintf
-          "Lean backend: the fuel measure of %s is the numeral `%s` (FM-literal: a literal fuel is a magic value — [USER 2026-09-03] \"any and all magic values that are hardcoded and can't be quantified over are definitionally bugs\"; a fuel measure is an expression over the parameters %s, e.g. `List.length xs + 1`)"
+          "Lean backend: the measure hypothesis of %s (`%s`) mentions none of its parameters %s (FH-vacuous: a hypothesis qualifies the obligation by a fact about the ARGUMENTS — `2 ≤ b`, `Ns.Acyclic env`; a closed proposition such as `True` is the unconditional form, so write the measure without `assuming`)"
           fname (String.trim measure) (if params = [] then "(none)" else param_names)))
-    | _ ->
+    | LPE_measure, [LM_num _] ->
       raise (Reporting_basic.err_general true l
         (Printf.sprintf
-          "Lean backend: the fuel measure of %s (`%s`) mentions none of its parameters %s (FM-const: a DATA measure is a function of the data; a constant measure is a magic value)"
-          fname (String.trim measure) (if params = [] then "(none)" else param_names)))
+          "Lean backend: the %s of %s is the numeral `%s` (FM-literal: a literal fuel is a magic value — [USER 2026-09-03] \"any and all magic values that are hardcoded and can't be quantified over are definitionally bugs\"; a fuel measure is an expression over the parameters %s, e.g. `List.length xs + 1`)"
+          what fname (String.trim measure) (if params = [] then "(none)" else param_names)))
+    | LPE_measure, _ ->
+      raise (Reporting_basic.err_general true l
+        (Printf.sprintf
+          "Lean backend: the %s of %s (`%s`) mentions none of its parameters %s (FM-const: a DATA measure is a function of the data; a constant measure is a magic value)"
+          what fname (String.trim measure) (if params = [] then "(none)" else param_names)))
   end;
   rendered
+
+let lean_render_measure d l fname params measure =
+  lean_render_param_expr LPE_measure d l fname params measure
+let lean_render_hypothesis d l fname params hyp =
+  lean_render_param_expr LPE_hypothesis d l fname params hyp
 
 (* Guards FC-rep / FC-inert, fail-closed for every marked constant even if
    unused; idempotent; run at every pre-pass entry.
@@ -2176,7 +2296,7 @@ let lean_thread_debug = (try Sys.getenv "LEM_THREAD_DEBUG" <> "" with Not_found 
    the text named. Run for every fuel'd/reader/supply group
    (reserved_binder_check) and whenever a `function` tail is hoisted
    (lean_hoist_tail_binders). *)
-let lean_reserved_exact_names = ["lemFuel"; "lemMeasureLe"; "LemFuel"; "lemTail"]
+let lean_reserved_exact_names = ["lemFuel"; "lemMeasureLe"; "lemHyp"; "LemFuel"; "lemTail"]
 let lean_reserved_prefixes = ["_lemReader_"; "_lemSupply"]
 let lean_is_reserved_name (n : string) : bool =
   List.mem n lean_reserved_exact_names
@@ -2243,7 +2363,7 @@ let lean_reserved_capture_check env (l : Ast.l) (fname : string) (e : exp) : uni
       if lean_is_reserved_name rendered then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: the body of %s references constant %s, which renders on Lean as `%s` — a reserved synthesized binder name (the reserved-name contract: 'lemFuel', 'lemMeasureLe', 'LemFuel', 'lemTail' and the '_lemReader_'/'_lemSupply' prefixes are the backend's); inside the generated worker that identifier is CAPTURED by the synthesized binder and computes a different value than the OCaml target (pre-merge audit 2026-09-05, probe p11b) — rename the constant or its Lean target_rep"
+            "Lean backend: the body of %s references constant %s, which renders on Lean as `%s` — a reserved synthesized binder name (the reserved-name contract: 'lemFuel', 'lemMeasureLe', 'lemHyp', 'LemFuel', 'lemTail' and the '_lemReader_'/'_lemSupply' prefixes are the backend's); inside the generated worker that identifier is CAPTURED by the synthesized binder and computes a different value than the OCaml target (pre-merge audit 2026-09-05, probe p11b) — rename the constant or its Lean target_rep"
             fname lem_name rendered)))
     (lean_referenced_lean_names env e)
 
@@ -4370,12 +4490,12 @@ type pat_style = FunParam | MatchArm
                               (Pattern_syntax.pat_vars_src p)) pats
                           @ exp_bound_names e) g in
                       List.iter (fun n ->
-                        if n = "lemFuel" || n = "lemMeasureLe"
+                        if n = "lemFuel" || n = "lemMeasureLe" || n = "lemHyp"
                            || (String.length n >= 11 && String.sub n 0 11 = "_lemReader_")
                            || (String.length n >= 10 && String.sub n 0 10 = "_lemSupply") then
                           raise (Reporting_basic.err_general true (locn_of_clause_group g)
                             (Printf.sprintf
-                              "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel', 'lemMeasureLe' and the '_lemReader_'/'_lemSupply' prefixes are the backend's, in parameters AND clause bodies; a shadowed fuel/reader/supply binder is silently wrong) — rename the variable" n)))
+                              "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel', 'lemMeasureLe', 'lemHyp' and the '_lemReader_'/'_lemSupply' prefixes are the backend's, in parameters AND clause bodies; a shadowed fuel/reader/supply/hypothesis binder is silently wrong) — rename the variable" n)))
                         bound;
                       (* and what the body's constants RENDER as (audit
                          response F1; mechanism comment at
@@ -4604,7 +4724,7 @@ type pat_style = FunParam | MatchArm
                             result_typ_out;
                             from_string " := "; from_string worker;
                             from_string " LemFuel.fuel"; from_string "\n"]
-                            | Some measure ->
+                            | Some (measure, hyp_opt) ->
                           (* declare {lean} fuel_measure val (mechanism
                              comment at lean_fuel_measure_for): the wrapper
                              binds the parameters and starts the worker's
@@ -4638,6 +4758,18 @@ type pat_style = FunParam | MatchArm
                               | Some ln -> Some (ln, (lean_escape_keyword ln, ty))
                               | None -> None) bs in
                           let measure_out = lean_render_measure A.env.t_env l base_name params measure in
+                          (* the `assuming` hypothesis (measure-hypothesis
+                             slice): rendered under the same scope rules;
+                             it appears ONLY in the obligation, as the binder
+                             `lemHyp` immediately before `lemFuel` — the
+                             wrapper stays fuel-free and hypothesis-free *)
+                          let hyp_out = Option.map (lean_render_hypothesis A.env.t_env l base_name params) hyp_opt in
+                          let hyp_binder = match hyp_out with
+                            | None -> emp
+                            | Some h -> Output.flat [from_string " (lemHyp : ("; from_string h; from_string "))"] in
+                          let hyp_arg = match hyp_out with
+                            | None -> emp
+                            | Some _ -> from_string " lemHyp" in
                           let result_out = pat_typ (C.t_to_src_t (codomain_after l npats cd.const_type)) in
                           let ambient_binder =
                             if fuel_lifted_g && not inside_instance then from_string " [LemFuel]" else emp in
@@ -4670,18 +4802,22 @@ type pat_style = FunParam | MatchArm
                             from_string "\n/- fuel_measure obligation for `"; from_string base_name;
                             from_string "` (generated; declare {lean} fuel_measure val "; from_string base_name;
                             from_string " = `"; from_string (String.trim measure);
-                            from_string "`): the worker is fuel-STABLE at the measure (equal to the wrapper at every fuel at or above it). The proof is hand-written in `";
+                            (match hyp_opt with
+                             | None -> from_string "`)"
+                             | Some h -> Output.flat [from_string "` assuming `"; from_string (String.trim h);
+                                                      from_string "`; the hypothesis is the binder `lemHyp`, before `lemFuel` — on inputs violating it the wrapper may exhaust)"]);
+                            from_string ": the worker is fuel-STABLE at the measure (equal to the wrapper at every fuel at or above it). The proof is hand-written in `";
                             from_string proofs_module; from_string "." ; from_string thm;
                             from_string "`, stated with exactly these binders; a missing or mistyped theorem fails the build (a `sorry` is the sorry/axiom gates' job). -/\n";
                             from_string "theorem "; from_string thm; tv_out; cons_out;
                             ambient_binder; inhabited_binder_output ();
-                            reader_binders; arg_binders;
+                            reader_binders; arg_binders; hyp_binder;
                             from_string " (lemFuel : Nat) (lemMeasureLe : ("; from_string measure_out;
                             from_string ") ≤ lemFuel) :\n    "; from_string worker; from_string " lemFuel";
                             reader_args; arg_names; from_string " = "; from_string base_name;
                             reader_args; arg_names; from_string " :=\n  ";
                             from_string proofs_module; from_string "."; from_string thm;
-                            reader_args; arg_names; from_string " lemFuel lemMeasureLe\n"]) in
+                            reader_args; arg_names; hyp_arg; from_string " lemFuel lemMeasureLe\n"]) in
                           St.measure_obligations := obligation :: !St.measure_obligations;
                           wrapper in
                           let wrapper = wrapper_and_obligation in

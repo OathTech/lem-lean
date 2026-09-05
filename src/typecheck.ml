@@ -3119,13 +3119,17 @@ let rec check_def (backend_targets : Targetset.t) (mod_path : Name.t list)
           let c_env' = c_env_update ctxt.ctxt_c_env c_id.descr {c_descr with structural = st'} in
           let def' = Some (Declaration (Decl_structural (sk1, targs, sk2, sk3, c_id))) in
           ({ctxt with ctxt_c_env = c_env'}, def')
-      | Ast.Declaration(Ast.Decl_fuel_measure_decl (sk1, targets_opt, sk2, sk3, id, sk4, (_, measure))) ->
+      | Ast.Declaration(Ast.Decl_fuel_measure_decl (sk1, targets_opt, sk2, sk3, id, sk4, (_, measure), hyp_opt)) ->
           let targs = check_target_opt targets_opt in
           let (c_id, c_descr) = component_term_id_lookup l ctxt (Ast.Component_function None) id in
           let ts = targets_opt_to_set targets_opt in
-          let fm' = Targetset.fold (fun t r -> Targetmap.insert r (t, measure)) ts c_descr.fuel_measure in
+          (* the optional `assuming `H`` (measure-hypothesis slice, 2026-09-05)
+             travels with the measure: one declaration, one Targetmap entry *)
+          let hyp = Option.map (fun (_, (_, h)) -> h) hyp_opt in
+          let hyp_skips = Option.map (fun (sk5, (_, h)) -> (sk5, h)) hyp_opt in
+          let fm' = Targetset.fold (fun t r -> Targetmap.insert r (t, (measure, hyp))) ts c_descr.fuel_measure in
           let c_env' = c_env_update ctxt.ctxt_c_env c_id.descr {c_descr with fuel_measure = fm'} in
-          let def' = Some (Declaration (Decl_fuel_measure (sk1, targs, sk2, sk3, c_id, sk4, measure))) in
+          let def' = Some (Declaration (Decl_fuel_measure (sk1, targs, sk2, sk3, c_id, sk4, measure, hyp_skips))) in
           ({ctxt with ctxt_c_env = c_env'}, def')
       | Ast.Declaration(Ast.Decl_fuel_consumer_decl (sk1, targets_opt, sk2, sk3, id)) ->
           let targs = check_target_opt targets_opt in

@@ -328,7 +328,7 @@ and const_descr =
         target_rep on the same val. Lean backend only (structural-declare
         slice, 2026-09-04). *)
 
-    fuel_measure : string Target.Targetmap.t;
+    fuel_measure : (string * string option) Target.Targetmap.t;
     (** Per-target FUEL MEASURE (declare {targets} fuel_measure val f =
         `expr`): for a fuel-declared constant, a target-syntax expression
         over the constant's own parameters from which the wrapper
@@ -593,7 +593,7 @@ type declare_def =  (** Declarations *)
  | Decl_reader_consumer       of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_fuel_consumer         of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_structural            of lskips * targets_opt * lskips * lskips * const_descr_ref id
- | Decl_fuel_measure          of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
+ | Decl_fuel_measure          of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string * (lskips * string) option
 
 type def_aux =
   | Type_def of lskips * (name_l * tnvar list * Path.t * texp * name_sect option) lskips_seplist

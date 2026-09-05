@@ -172,7 +172,7 @@ let mk_pre_x_l sk1 (sk2,id) sk3 l =
 %token <Ast.terminal * Ulib.Text.t> IN MEM MinusMinusGt
 %token <Ast.terminal> Class_ Do LeftArrow
 %token <Ast.terminal> Inst Inst_default
-%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep ReaderSeed Supply ReaderConsumer FuelConsumer Structural FuelMeasure
+%token <Ast.terminal> Module CompileMessage Field Type Automatic Manual Exhaustive Inexhaustive AsciiRep SetFlag TerminationArgument PatternMatch SkipInstances ExtraImport Effectful Reader Fuel GroundRep ReaderSeed Supply ReaderConsumer FuelConsumer Structural FuelMeasure Assuming
 %token <Ast.terminal> RightAssoc LeftAssoc NonAssoc Infix Special TargetRep TargetSorts
 
 %start file
@@ -219,6 +219,8 @@ x:
     { X_l(($1, r"structural"), loc ()) }
   | FuelMeasure
     { X_l(($1, r"fuel_measure"), loc ()) }
+  | Assuming
+    { X_l(($1, r"assuming"), loc ()) }
   | Lparen Eq Rparen
     { mk_pre_x_l $1 $2 $3 (loc ()) }
   | Lparen IN Rparen
@@ -1077,7 +1079,19 @@ declaration :
   | Declare targets_opt Structural Val id
     { Decl_structural_decl($1, $2, $3, $4, $5) }
   | Declare targets_opt FuelMeasure Val id Eq BacktickString
-    { Decl_fuel_measure_decl($1, $2, $3, $4, $5, fst $6, $7) }
+    { Decl_fuel_measure_decl($1, $2, $3, $4, $5, fst $6, $7, None) }
+  | Declare targets_opt FuelMeasure Val id Eq BacktickString Assuming BacktickString
+    { (* The hypothesis-carrying form (measure-hypothesis slice, 2026-09-05):
+         the backticked Prop over the function's parameters becomes the
+         FIRST hypothesis binder of the generated sufficiency obligation
+         (`lemHyp`); the wrapper is unchanged (fuel-free). *)
+      Decl_fuel_measure_decl($1, $2, $3, $4, $5, fst $6, $7, Some ($8, $9)) }
+  | Declare targets_opt FuelMeasure Val id Assuming BacktickString
+    { (* refused with its reason: a hypothesis qualifies a MEASURE *)
+      raise (Parse_error_locn(loc (), "'declare {lean} fuel_measure val f assuming `H`' has no measure: the hypothesis qualifies the sufficiency obligation OF a measure (`H -> measure <= fuel -> worker = wrapper`), so write declare {lean} fuel_measure val f = `<measure>` assuming `<H>`")) }
+  | Declare targets_opt Fuel Val id Eq BacktickString Assuming BacktickString
+    { (* refused with its reason: `assuming` belongs to fuel_measure *)
+      raise (Parse_error_locn(loc (), "'assuming' is not part of the fuel sentinel declare: a hypothesis qualifies a fuel MEASURE's sufficiency obligation -- keep declare {lean} fuel val f = `sentinel` and write declare {lean} fuel_measure val f = `<measure>` assuming `<H>`")) }
   | Declare targets_opt FuelMeasure Val id Eq Num
     { (* A numeral is not a data measure (fuel-measure slice, 2026-09-04):
          the production exists only to refuse the form with its reason. *)

@@ -141,6 +141,7 @@ let kw_table =
      ("reader_consumer"),        (fun x -> ReaderConsumer(x));
      ("fuel_consumer"),          (fun x -> FuelConsumer(x));
      ("fuel_measure"),           (fun x -> FuelMeasure(x));
+     ("assuming"),               (fun x -> Assuming(x));
      ("structural"),             (fun x -> Structural(x));
      ("supply"),                 (fun x -> Supply(x));
      ("pattern_match"),          (fun x -> PatternMatch(x));

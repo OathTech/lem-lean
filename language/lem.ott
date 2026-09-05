@@ -843,6 +843,7 @@ declare_def :: 'Decl_' ::=
   | declare targets_opt fuel_consumer val id                                                       :: :: fuel_consumer_decl
   | declare targets_opt structural val id                                                          :: :: structural_decl
   | declare targets_opt fuel_measure val id = backtick_string                                      :: :: fuel_measure_decl
+  | declare targets_opt fuel_measure val id = backtick_string assuming backtick_string             :: :: fuel_measure_hyp_decl
 
 val_def :: '' ::= 
   {{ com Value definitions }}

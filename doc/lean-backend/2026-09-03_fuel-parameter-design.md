@@ -329,3 +329,45 @@ get additional properties we want without any trust decrease"). Record:
    function, precondition, the two parser combinators) / same-module 2
    (TODO 15) — derived from the record's table (pre-merge audit M3
    corrected the first tally), the cerberus half's work order.
+
+## R4 (2026-09-05) — a hypothesis on the measure
+
+Revision by the lem-lean worker [AGENT] implementing [USER 2026-09-05]
+("agree, go ahead with option 1", on the orchestrator's D-C2-1
+recommendation): the cerberus C2 census left nine tag-lookup rows, the
+basis recursion and a few others as "P" because their recursion is
+bounded only under a well-formedness fact the unconditional obligation
+cannot carry. Record: `2026-09-05_measure-hypothesis-record.md`. Deltas
+against R3:
+
+1. **``declare {lean} fuel_measure val f = `<measure>` assuming `<H>` ``.**
+   `H` is a Lean Prop over the function's parameters (the measure's scope
+   rules and forbidden names; a parameter-free `H` — `True`, a closed
+   proposition — is refused as vacuous so the two forms stay distinct; the
+   fuel may not be mentioned). Lean-only: the `.lem` body, the OCaml
+   output and every other emitter are unchanged (the standing rule "we
+   don't change the lem structure for ocaml").
+2. **The wrapper stays form (c) and fuel-free** — `def f xs := f_lemFuel
+   (μ xs) xs`, no hypothesis, no `[LemFuel]`; the hypothesis is a
+   proof-side fact only. **The obligation becomes `H xs → μ xs ≤ fuel →
+   f_lemFuel fuel xs = f xs`**, emitted with the hypothesis as the binder
+   NAMED `lemHyp` immediately before `lemFuel` — the deterministic mark a
+   consumer gate reads to tell the conditional form from the unconditional
+   one (the reserved-name contract gains `lemHyp`).
+3. **Operational meaning.** Outside `H` the wrapper may exhaust (the
+   sentinel — loud by convention; with a value sentinel the frames above
+   it compute with that value, the fuel-measure record's §2.2 gap made
+   visible). Admissible because the oracle's behaviour there is not the
+   semantics anyone relies on (the frontend never produces a cyclic tag
+   environment; no caller passes a basis below 2 — the OCaml target loops
+   or raises on exactly those inputs), and the consumer's theorems carry
+   `H` as they already assume well-formedness.
+4. **Hand-written seams** (the six `CerbMem` layout/reconstruct workers)
+   state the same shape by hand, with a fuel-free measured wrapper; the
+   consumer gate's shape check is the only thing that needs to know
+   (record §6, the elaborated witness).
+5. **Renderer changes that reach the measure too**: Unicode operators
+   (`≤ ∧ ∀ → ≠ ∈ ¬ ×`) now pass through the tokenizer (letter-like code
+   points remain identifier characters — before, every non-ASCII byte was
+   one), and a projection on a non-parameter (`env.1` when the parameter
+   is `env1`) is refused instead of passing as a qualified global.

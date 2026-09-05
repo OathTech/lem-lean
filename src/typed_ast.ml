@@ -184,7 +184,7 @@ and const_descr = { const_binding : Path.t;
                     reader_consumer: Targetset.t;
                     fuel_consumer: Targetset.t;
                     structural: Targetset.t;
-                    fuel_measure: string Targetmap.t}
+                    fuel_measure: (string * string option) Targetmap.t}
 
 and v_env = const_descr_ref Nfmap.t
 and f_env = const_descr_ref Nfmap.t
@@ -427,7 +427,7 @@ type declare_def =  (* declarations *)
  | Decl_reader_consumer     of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_fuel_consumer       of lskips * targets_opt * lskips * lskips * const_descr_ref id
  | Decl_structural          of lskips * targets_opt * lskips * lskips * const_descr_ref id
- | Decl_fuel_measure        of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string
+ | Decl_fuel_measure        of lskips * targets_opt * lskips * lskips * const_descr_ref id * lskips * string * (lskips * string) option
 (*
  | Decl_set_flag              of lskips * lskips * Name.lskips_t * lskips * Name.lskips_t
 *)
@@ -828,9 +828,9 @@ let rec def_aux_alter_init_lskips (lskips_f : lskips -> lskips * lskips) d : def
             | Decl_structural (sk1, targs, sk2, sk3, c_id) ->
                 let (sk1', s_ret) = lskips_f sk1 in
                 (Decl_structural (sk1', targs, sk2, sk3, c_id), s_ret)
-            | Decl_fuel_measure (sk1, targs, sk2, sk3, c_id, sk4, m) ->
+            | Decl_fuel_measure (sk1, targs, sk2, sk3, c_id, sk4, m, h) ->
                 let (sk1', s_ret) = lskips_f sk1 in
-                (Decl_fuel_measure (sk1', targs, sk2, sk3, c_id, sk4, m), s_ret)
+                (Decl_fuel_measure (sk1', targs, sk2, sk3, c_id, sk4, m, h), s_ret)
           in
           res (Declaration d') s_ret
         end

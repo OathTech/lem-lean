@@ -92,7 +92,12 @@ the negative/panic test legs — is `tests/comprehensive/`:
   obligation (`f_measure_sufficient`: worker = wrapper at every fuel at
   or above the measure) whose proof you write in
   `<Module>_lemMeasureProofs.lean` — a missing or mistyped theorem fails
-  the build, and a `sorry` fails the suite's token gate. The measure may
+  the build, and a `sorry` fails the suite's token gate. When the measure
+  is sufficient only on well-formed inputs (an acyclic tag environment, a
+  basis `2 ≤ b`), add ``assuming `H` `` — a Lean Prop over the same
+  parameters: the wrapper is unchanged, the obligation gains `H` as the
+  binder `lemHyp` right before `lemFuel` (`H → μ ≤ fuel → worker =
+  wrapper`), and outside `H` the wrapper may exhaust — loudly. The measure may
   be the backend-DERIVED structural size of an argument's type (`lemSize
   x`): every recursive block of generated inductives gets a computable
   `t.lemSize : t → Nat` in its own module, so a function recursing on a
