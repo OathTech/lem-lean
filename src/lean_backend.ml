@@ -795,15 +795,23 @@ let lean_utf8_decode (m : string) (i : int) : int * int =
     (((c0 land 0x07) lsl 18) lor ((b 1 land 0x3F) lsl 12) lor ((b 2 land 0x3F) lsl 6) lor (b 3 land 0x3F), 4)
   else (c0, 1)
 
-(* Lean's `isLetterLike` ∪ `isSubScriptAlnum` (Lean 4 `Init/Meta.lean`) *)
+(* Lean's `isLetterLike` ∪ `isSubScriptAlnum` — `Init/Meta/Defs.lean`
+   (4.28.0 :100–118, 4.32.2 :108–118, identical): Latin-1 supplement
+   letters but × ÷, Latin Extended-A, Greek but λ/Π/Σ, Coptic, polytonic
+   Greek, the letterlike block, script/double-struck/fraktur, the
+   subscript ranges and U+2C7C (pre-merge audit F4 added the first two
+   ranges and U+2C7C; without them `ñ` passed through as an operator). *)
 let lean_is_letter_like (c : int) : bool =
-  (0x3b1 <= c && c <= 0x3c9 && c <> 0x3bb)                    (* lower Greek but λ *)
+  (0xc0 <= c && c <= 0xff && c <> 0xd7 && c <> 0xf7)          (* Latin-1 supplement letters but × ÷ *)
+  || (0x100 <= c && c <= 0x17f)                               (* Latin Extended-A *)
+  || (0x3b1 <= c && c <= 0x3c9 && c <> 0x3bb)                 (* lower Greek but λ *)
   || (0x391 <= c && c <= 0x3a9 && c <> 0x3a0 && c <> 0x3a3)   (* upper Greek but Π, Σ *)
   || (0x3ca <= c && c <= 0x3fb)                               (* Coptic *)
   || (0x1f00 <= c && c <= 0x1ffe)                             (* polytonic Greek *)
   || (0x2100 <= c && c <= 0x214f)                             (* letterlike block *)
   || (0x1d49c <= c && c <= 0x1d59f)                           (* script/double-struck/fraktur *)
   || (0x2080 <= c && c <= 0x2089) || (0x2090 <= c && c <= 0x209c) || (0x1d62 <= c && c <= 0x1d6a)  (* subscripts *)
+  || c = 0x2c7c                                               (* ⱼ, isSubScriptAlnum *)
 
 let lean_measure_tokens (m : string) : lean_measure_token list =
   let n = String.length m in

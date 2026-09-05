@@ -15,7 +15,8 @@ cerberus-lean read-only (the dry run is on a scratch copy under `.tmp/`).
 | Commit | Content |
 |---|---|
 | `c56785a` | the `assuming` clause: lexer/parser/ast/typed_ast/typecheck/echo/Ott; backend (`lean_render_param_expr` — the measure renderer generalised to measure/hypothesis kinds, the `lemHyp` obligation binder, the reserved name `lemHyp`, the UTF-8 letter-like tokenizer, the projection-on-non-parameter refusal); tests (`test_fuel_measure_hyp.lem` + `TestFuelMeasureHypImpl` + proofs + kernel pins, 11 negatives, invariance witness, parity probe + proofs + NEW pin, `assuming` in the contextual-keywords test with `count_list_bounded` + proof); manual, DESIGN, README, TODO rows 20–22 (+ row 18 note), design note R4 |
-| (this commit) | this record |
+| `906ac21` | this record |
+| (audit-response commit) | pre-merge audit response (§10): F4 the three missing letter-like ranges + `neg_fuel_measure_hyp_latin1`; F1 the contradictory-hypothesis erratum in record/manual/DESIGN + TODO row 23 (cerberus-half requirement); F2 TODO row 20's quote; F3 §5.5's count; N11 `#print axioms` pins in the contextual-keywords proofs module |
 
 ## 1. The ruling this slice implements
 
@@ -126,7 +127,23 @@ wrappers are fuel-free either way.
 What the syntactic rules do not catch, by design: a hypothesis that
 mentions a parameter without constraining it (`b = b`) — the proof is
 then no easier; the theorem is the backstop, as for a disguised
-parameter-free measure.
+parameter-free measure. AND (pre-merge audit F1, MAJOR by the scope's
+letter — the first version of this paragraph named only the harmless
+direction): a CONTRADICTORY hypothesis — `b < b`, `b ≠ b`, `(n + 1) ≤
+0`, `2 ≤ b ∧ b ≤ 1` — is accepted (only the literals `True`/`False` and
+a parameter-free hypothesis are refused: the check is token-level, `b =
+b → False` is refused for its `False` token while `b ≠ b` is not) and
+makes the obligation VACUOUSLY provable (`absurd lemHyp (Nat.lt_irrefl
+_)`, `omega`) while the fuel-free wrapper ships with the MEASURED mark
+and `axioms=ok`. Satisfiability of a Lean Prop is undecidable at
+generation and not the backend's to decide; the certificate, not the
+exec cone, is what the hole is in (the wrapper is the same fuel-free
+form either way; an insufficient measure fires the loud sentinel). The
+closure is a REQUIREMENT of the cerberus half, before its first
+`assuming` row: (i) the fuel-forms gate reports `hyp=<H>` for every
+MEASURED row whose obligation has the `lemHyp` binder; (ii) a REVIEWED
+hypothesis register, each hypothesis named with the frontend invariant
+that guarantees it (§10; TODO row 23).
 
 ### 2.4 Two renderer changes that reach the measure too
 
@@ -135,10 +152,17 @@ parameter-free measure.
    (first generation of the test, verbatim: ``Error: Lean backend: free
    variable `≤` in the measure hypothesis (`assuming`) of ndigits (FH-free:
    …``). `lean_measure_tokens` now decodes code points and classifies them
-   by Lean's own `isLetterLike`/`isSubScriptAlnum` (Greek but λ/Π/Σ,
-   Coptic, the letterlike block, script/double-struck/fraktur,
-   subscripts): letter-like → identifier character; every other code
-   point (`≤ ∧ ∀ → ≠ ∈ ¬ ×`) → passes through as an operator. A measure
+   by a table transcribed from Lean's `isLetterLike` ∪ `isSubScriptAlnum`
+   (`Init/Meta/Defs.lean`, identical in 4.28.0 and 4.32.2): Latin-1
+   supplement letters but × ÷, Latin Extended-A, Greek but λ/Π/Σ,
+   Coptic, polytonic Greek, the letterlike block, script/double-struck/
+   fraktur, the subscript ranges and U+2C7C — letter-like → identifier
+   character; every other code point (`≤ ∧ ∀ → ≠ ∈ ¬ ×`) → passes
+   through as an operator. (The first version of the table omitted the
+   Latin-1, Extended-A and U+2C7C entries — pre-merge audit F4 — so `ñ`
+   passed through and `2 ≤ ñ ∧ 2 ≤ b` reached the build; §10 has the
+   plant. One residual divergence, harmless: subscripts START an
+   identifier here, continuation-only in Lean.) A measure
    had no need of Unicode operators, so no existing measure changes
    (§5.6: the cerberus Lean tree is byte-identical).
 2. **Projection on a non-parameter refused.** `env.1` when the parameter
@@ -311,7 +335,7 @@ Test_plant_nonprop_auxiliary.lean:30:68: error(lean.synthInstanceFailed): failed
 byte-identical to golden)` — no rebaseline (no corpus file uses
 `assuming`; the echo change is for the human targets only). `lean-lib`:
 `lake build` green (capped; the library is UNCHANGED by this slice — its
-twelve `#print axioms` lines as before), `grep -rn "^axiom " lean-lib/
+23 `depends on axioms` lines as before — the first version of this sentence said "twelve"; pre-merge audit F3), `grep -rn "^axiom " lean-lib/
 --include='*.lean'`: 0 hits.
 
 ### 5.6 OCaml AND Lean byte-identity of the cerberus tree
@@ -515,3 +539,91 @@ The cerberus `.lem` and `lean_frontend/` were not edited.
 - `.tmp/` (the baseline lem, the cerberus copies and build, the plants,
   the logs) is ephemeral and deleted at slice end; everything load-bearing
   is quoted above.
+
+## 10. Audit response (pre-merge audit `2026-09-05_measure-hypothesis-audit-premerge.md` @ `05a533f`, verdict MERGEABLE; F1 MAJOR-by-letter, F4 MINOR code, F2/F3 errata, N11)
+
+One commit on `arc/measure-hypothesis`. Each item, what changed, and the
+evidence (verbatim from this worktree, `.tmp/build5.log`,
+`.tmp/gate3.log`, `.tmp/nonlean3.log`, `.tmp/plant/f4/`).
+
+- **F4 (code, one line + probe).** `lean_is_letter_like` now carries the
+  three entries the first table omitted — Latin-1 supplement `0x00C0–0x00FF`
+  minus `×` (`0x00D7`) and `÷` (`0x00F7`), Latin Extended-A `0x0100–0x017F`,
+  and `U+2C7C` — transcribed from `Init/Meta/Defs.lean` (4.28.0 :100–118,
+  4.32.2 :108–118, identical). The auditor's p30 is now the negative probe
+  `neg_fuel_measure_hyp_latin1.lem` (``assuming `2 ≤ ñ ∧ 2 ≤ b` ``),
+  refused at generation, verbatim:
+  ```
+    Error: Lean backend: free variable `ñ` in the measure hypothesis (`assuming`) of ndigits (FH-free: a measure or hypothesis mentions only the function's parameters — here b, n — and QUALIFIED Lean names such as `List.length xs`, `Ns.size x` or `Ns.WellFormed env`, or `lemSize x` for the derived size of a parameter's inductive type; Lean's global namespace is not visible at generation, so an unqualified name that is not a parameter is refused)
+  EXIT 1
+  ```
+  and the auditor's p31 (``assuming `2 ≤ bⱼ` ``, `.tmp/plant/f4/p31.lem`)
+  is now read as ONE identifier and refused: ``free variable `bⱼ` ``,
+  `p31 EXIT 1`; the control (`2 ≤ b`, `test_fuel_measure_hyp.lem`)
+  generates (`EXIT 0`). §2.4 item 1 now says "a table transcribed from"
+  Lean's predicates, lists every range, and names the residual
+  divergence (subscripts may START an identifier here). `make build-lem`
+  `BUILD EXIT 0` (the grammar is untouched: no ocamlyacc re-run).
+- **F1 (no lem code change; record, manual, DESIGN, TODO row 23).**
+  §2.3's "what the syntactic rules do not catch" now names the
+  contradictory direction and its consequence — a vacuously provable
+  obligation shipping the fuel-free wrapper with the MEASURED mark;
+  satisfiability of a Lean Prop is undecidable at generation, the
+  literal-only vacuity check is a token-level speedbump — and states the
+  CONSUMER-SIDE REQUIREMENT (a requirement of the cerberus half, not an
+  optional policy; the first version of §2.2/§8.1 said "policy choice"):
+  (i) the fuel-forms gate reports `hyp=<H>` for every MEASURED row whose
+  obligation has the `lemHyp` binder, read by NAME immediately before
+  `lemFuel`; (ii) a reviewed hypothesis register — every hypothesis in
+  force named, its frontend invariant cited (for `Acyclic`: the audit §5
+  — `cabs_to_ail.lem` `check_members` refuses function-typed and
+  incomplete members, `AilTypesAux.is_complete` makes a by-value
+  `Struct`/`Union` member complete only when its tag is already defined,
+  so definition order is a rank; pointers break the recursion). The
+  manual's paragraph, the DESIGN vocabulary row and TODO row 23 say the
+  same; §8 item 1 below is superseded accordingly. The manual also gains
+  the auditor's N2 line (a hypothesis with its own binders is refused as a
+  free variable — write a NAMED consumer-side predicate).
+- **F2.** TODO row 20 now quotes the actual failure —
+  `error(lean.synthInstanceFailed): failed to synthesize instance of type
+  class HAdd Nat Nat (Sort ?u.5)` — and records that its first version
+  said `type expected`.
+- **F3.** §5.5 now says 23 `depends on axioms` lines (the first version
+  said "twelve"); lean-lib is unchanged by the slice.
+- **N11.** `Test_contextual_keywords_lemMeasureProofs.lean` ends with
+  `#print axioms` for both `count_list_measured_measure_sufficient` and
+  `count_list_bounded_measure_sufficient`; verbatim from the build below.
+
+Gates on this tree (clean `make clean` then `make lean`, `.tmp/gate3.log`;
+`tests/nonlean-regress/run.sh`, `.tmp/nonlean3.log`), verbatim:
+
+```
+=== Generation: 54 passed, 0 failed, 0 skipped ===
+Build completed successfully (165 jobs).
+  OK (rejected as declared): negative/neg_fuel_measure_hyp_latin1.lem
+  OK: inv_fuel_measure_hyp.lem (7 artifacts byte-identical across ocaml/hol/isa/coq)
+=== p_fuel_measure_hyp ===
+  OK: parity (9 lines byte-identical to the OCaml reference; pin matches)
+  OK: 10 proofs modules scanned; no sorry/admit/axiom/native_decide/bv_decide token
+  OK: 254 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+make lean  525.72s user 46.92s system 110% cpu 8:39.29 total
+EXIT 0
+```
+```
+info: Test_contextual_keywords_lemMeasureProofs.lean:62:0: 'Test_contextual_keywords_lemMeasureProofs.count_list_measured_measure_sufficient' depends on axioms: [propext,
+ Quot.sound]
+info: Test_contextual_keywords_lemMeasureProofs.lean:63:0: 'Test_contextual_keywords_lemMeasureProofs.count_list_bounded_measure_sufficient' depends on axioms: [propext,
+ Quot.sound]
+```
+```
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+EXIT 0
+```
+Derived: 98 × `OK (rejected as declared)` (97 + the F4 probe), parity 26
+OK / 6 both-fail / 4 XFAIL (the four registered — the run's only `FAIL`
+lines), 8 invariance OK, 680 `PASS:` asserts. The backend change touches
+one table (`lean_is_letter_like`); the grammar is untouched.
+
+**§8 item 1, superseded by F1:** the gate's `hyp=<H>` report and the
+reviewed hypothesis register are REQUIRED of the cerberus half before its
+first `assuming` row, not a policy choice.

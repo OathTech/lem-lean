@@ -58,3 +58,6 @@ theorem count_list_bounded_measure_sufficient (k : Nat) (l : List Nat)
   count_list_bounded_stable l k lemFuel (k + 1) (by omega) (by omega)
 
 end Test_contextual_keywords_lemMeasureProofs
+
+#print axioms Test_contextual_keywords_lemMeasureProofs.count_list_measured_measure_sufficient
+#print axioms Test_contextual_keywords_lemMeasureProofs.count_list_bounded_measure_sufficient
