@@ -10,7 +10,7 @@ LAKE = $(CAPPED) lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-no-sorry-proofs lean-no-fuel-numerals check-capped clean
+.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -19,7 +19,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-fuel-param lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
 
 # Two-target parity (parity-fix slice 2026-09-03; [USER] ruling: the OCaml
 # target is the reference semantics of a lem program, the Lean target
@@ -106,6 +106,26 @@ lean-reader-consumer:
 		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
 	else \
 		echo "  OK: compiled consumer injection holds"; \
+	fi
+
+# N-ary reader_seed compiled pin (program-data-parameters S0.5,
+# 2026-09-19): with three declared readers the seed def's first three
+# arguments seed the readers positionally in the global sorted order
+# (alpha, beta, gamma — not the declaration order); the compiled binary
+# re-asserts the value pins a positional swap of the two same-typed
+# readers would break, the pickup through the consumer and through
+# lifted callees, and the supply composition (elaborator pins live in
+# TestReaderMultiCheck.lean).
+lean-reader-multi:
+	@echo "=== N-ary reader_seed injection pin (compiled) ==="
+	@cd lean-test && $(LAKE) build test-reader-multi > /dev/null
+	@out=$$(cd lean-test && ./.lake/build/bin/test-reader-multi 2>&1); st=$$?; \
+	if [ $$st -ne 0 ]; then \
+		echo "  FAIL (exit $$st):"; echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "reader_multi: OK"; then \
+		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
+	else \
+		echo "  OK: compiled N-ary seed injection holds"; \
 	fi
 
 # Supply-lifting compiled behavioral test (effect-retirement L1): the

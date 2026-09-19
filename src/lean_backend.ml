@@ -339,11 +339,16 @@ module St = struct
      measure renderer. *)
   let size_census : (Path.t * size_status) list ref = ref []
   (* [render] reader_seed (declare {lean} reader_seed val f): while
-     rendering a seed-marked def's body, the name of its first argument,
-     which OVERRIDES the injected reader parameter name at every
+     rendering a seed-marked def's body, the per-reader association
+     (injected reader binder name -> the seed def's own parameter name)
+     that OVERRIDES the injected reader parameter name at every
      injection site within (lexically-scoped seeding, not dynamic
-     rebinding). *)
-  let reader_seed_param : string option ref = ref None
+     rebinding). N-ary rule (doc/lean-backend/2026-09-19_nary-reader-
+     seed-record.md): with N declared readers a seed def's first N
+     parameters are the seeds, positionally in the GLOBAL SORTED reader
+     order — the one order lean_reader_get_params fixes for every
+     lifted binder and consumer stub. None = not inside a seed def. *)
+  let reader_seed_param : (string * string) list option ref = ref None
   (* [invocation] Cache of the (cref, param name) reader list computed
      from the whole constant environment (stable within an invocation). *)
   let reader_params_cache : (Types.const_descr_ref * string) list option ref = ref None
@@ -1186,8 +1191,9 @@ let lean_reader_prepass env (ds : def list) =
       | Module (_, _, _, _, _, inner_ds, _) -> List.fold_left def_infos acc inner_ds
       | Val_def _ ->
         let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
-        (* reader_seed defs are never lifted: they inject their own first
-           argument internally, and their callers pass it explicitly. *)
+        (* reader_seed defs are never lifted: they inject their own leading
+           seed arguments (one per declared reader) internally, and their
+           callers pass them explicitly. *)
         if Types.Cdset.exists (lean_reader_is_seed env) defined then acc
         else
           let used = (add_def_entities target false empty_used_entities d).used_consts_set in
@@ -3154,7 +3160,7 @@ type pat_style = FunParam | MatchArm
     (* reader_consumer scope guard (RC-rel and friends): a consumer call
        site needs reader VALUES to pass — available only inside a
        reader-lifted def (the binders) or a reader_seed def (the seed
-       argument). Everywhere else (indreln rules, lemmas/asserts,
+       arguments). Everywhere else (indreln rules, lemmas/asserts,
        instance methods reach the instance error first) is a fail-closed
        generation-time error. Inert for block comments and vacuous when
        no reader is declared (nothing to inject). *)
@@ -3166,11 +3172,24 @@ type pat_style = FunParam | MatchArm
           "Lean backend: reader_consumer call outside a reader-injection scope (unsupported: indreln rules, lemmas/asserts, and other non-lifted contexts have no reader value to pass — RC-rel/RC-scope)")
 
     (* Injection value name: the enclosing def's injected parameter, or —
-       inside a reader_seed def — its first argument. *)
+       inside a reader_seed def — the seed parameter associated with THIS
+       reader's binder (N-ary seeding: one seed per declared reader, keyed
+       by the injected binder name). The association is total over
+       get_reader_params () by construction (seed_info), so a miss inside
+       a seed def is an internal invariant violation: fail closed, never
+       fall back to the binder there (the binder does not exist in a
+       non-lifted seed def). *)
     let reader_inject_name pname =
       match !St.reader_seed_param with
-      | Some seed -> seed
       | None -> pname
+      | Some assoc ->
+        (match List.assoc_opt pname assoc with
+         | Some seed -> seed
+         | None ->
+           raise (Reporting_basic.err_general true Ast.Unknown
+             (Printf.sprintf
+               "Lean backend: internal error — reader binder '%s' has no seed inside a reader_seed def (the seed association is built over every declared reader; report this)"
+               pname)))
 
     let reader_args_output () =
       Output.flat (List.map (fun (_, pname) ->
@@ -4435,33 +4454,52 @@ type pat_style = FunParam | MatchArm
                                "Lean backend: 'declare {lean} fuel val' on a multi-clause definition (unsupported)")
                            | None -> None)
                       | [] -> None in
-                    (* reader_seed defs: not lifted; their first argument
-                       becomes the injection value for the body. Fail
-                       closed on every unsupported combination. *)
+                    (* reader_seed defs: not lifted; with N declared readers
+                       their first N arguments become the injection values
+                       for the body — one per reader, positionally in the
+                       GLOBAL SORTED reader order (get_reader_params: the
+                       binder order every lifted def and consumer stub
+                       uses, so there is ONE order everywhere). The former
+                       "exactly one declared reader" guard is gone: its
+                       concern — one seed name overriding EVERY reader
+                       binder would silently conflate them — is met by the
+                       per-reader association. Fail closed on every
+                       unsupported combination: no reader at all (a seed
+                       with nothing to seed), fewer parameters than
+                       readers, a non-variable seed pattern. *)
                     let seed_info = match g with
                       | [(_, c, pats, _, _, _)] when is_seed_cref c ->
-                          (match pats with
-                           | p :: _ ->
-                             (match p.term with
-                              | P_var n | P_var_annot (n, _) ->
-                                Some (Name.to_string (Name.strip_lskip n))
+                          let readers = get_reader_params () in
+                          let n = List.length readers in
+                          let reader_name cref =
+                            Name.to_string (Path.get_name
+                              (c_env_lookup Ast.Unknown A.env.c_env cref).const_binding) in
+                          let order () =
+                            String.concat ", " (List.map (fun (cref, _) -> reader_name cref) readers) in
+                          if n = 0 then
+                            raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                              "Lean backend: reader_seed declared but no reader is declared (nothing to seed)");
+                          if List.length pats < n then
+                            raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                              (Printf.sprintf
+                                "Lean backend: reader_seed def must take %d seed argument%s (one per declared reader, in the global sorted reader order: %s)"
+                                n (if n = 1 then "" else "s") (order ())));
+                          let seed_pats = List.filteri (fun i _ -> i < n) pats in
+                          Some (List.mapi (fun i ((cref, pname), p) ->
+                              match p.term with
+                              | P_var v | P_var_annot (v, _) ->
+                                (pname, Name.to_string (Name.strip_lskip v))
                               | _ ->
                                 raise (Reporting_basic.err_general true (locn_of_clause_group g)
-                                  "Lean backend: reader_seed def's first argument must be a simple variable"))
-                           | [] ->
-                             raise (Reporting_basic.err_general true (locn_of_clause_group g)
-                               "Lean backend: reader_seed def must take the seed as its first argument"))
+                                  (Printf.sprintf
+                                    "Lean backend: reader_seed def's seed arguments must be simple variables (argument %d of %d, the seed for reader %s, is not)"
+                                    (i + 1) n (reader_name cref))))
+                            (List.combine readers seed_pats))
                       | (( _, c, _, _, _, _) :: _) when is_seed_cref c ->
                           raise (Reporting_basic.err_general true (locn_of_clause_group g)
                             "Lean backend: reader_seed on a multi-clause or mutual definition (unsupported)")
                       | _ -> None in
                     (match seed_info with
-                     | Some _ when List.length (get_reader_params ()) <> 1 ->
-                       (* The seed name overrides EVERY injected reader
-                          parameter — with more than one reader that would
-                          silently conflate them (audit finding). *)
-                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
-                         "Lean backend: reader_seed requires exactly one declared reader")
                      | Some _ when is_truly_mutual ->
                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: reader_seed in a mutual block (unsupported; the mutual partner would escape lifting)")

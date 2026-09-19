@@ -256,9 +256,11 @@ parameters as extra leading arguments (global sorted reader order,
 before `f`'s own arguments), callers get lifted by the ordinary
 fixpoint, and the hand-written implementation declares the matching
 leading parameters explicitly. Injection routes through the same
-resolver as lifted-def calls, so inside a `reader_seed` def the seed's
-first argument is passed instead of the binder — no new seed
-machinery. Bare/HOF references repair by (type-preserving) partial
+resolver as lifted-def calls, so inside a `reader_seed` def the seed
+argument associated with each reader (N-ary seeding: one seed per
+declared reader, positionally in the global sorted reader order) is
+passed instead of that reader's binder — no new seed machinery.
+Bare/HOF references repair by (type-preserving) partial
 application over the reader parameters, exactly like lifted-def
 references. Fail-closed guards: RC-rep (the val must carry an
 identifier-form Lean target_rep — it is an extern boundary by
@@ -272,7 +274,10 @@ plus an infix-position rejection. Tests:
 `lean-test/TestReaderConsumerCheck.lean`, the compiled
 `lean-test/TestReaderConsumerExec.lean` (phase
 `lean-reader-consumer`), the `neg_rc_*` probes, and
-`invariance/inv_reader_consumer.lem`.
+`invariance/inv_reader_consumer.lem`; the three-reader (N-ary seed)
+family `test_reader_multi.lem`, `lean-test/TestReaderMultiCheck.lean`,
+`lean-test/TestReaderMultiExec.lean` (phase `lean-reader-multi`), the
+`neg_seed_*` probes, and `invariance/inv_reader_multi.lem`.
 
 **`Inhabited` is derived fail-closed; the unsound fallback is gone.**
 Lem programs have failure sites (incomplete matches, `failwith`) whose
@@ -502,7 +507,7 @@ unaffected:
 | `declare {lean} termination_argument f = automatic` | lem's upstream termination vocabulary, honoured: a plain `def` with no clause (Lean tries structural, then well-founded recursion — total either way, kernel computability not promised) |
 | `declare {lean} effectful val f` | RETIRED (effect-retirement arc): refused fail-closed with an error naming supply lifting as the migration path; the annotation is retained in the grammar for other targets' potential use |
 | `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
-| `declare {lean} reader_seed val f` | do not lift `f`; its first argument supplies the reader value to lifted callees in its body |
+| `declare {lean} reader_seed val f` | do not lift `f`; with N declared readers its first N arguments are the seeds — one per reader, positionally in the GLOBAL SORTED reader order (the binder order of every lifted def and consumer stub; one order everywhere) — and supply the reader values to lifted callees and consumer calls in its body (N-ary rule, `2026-09-19_nary-reader-seed-record.md`; the seeds are referenced by name, so the seed positions must be simple variables). Refused fail-closed: no reader declared (nothing to seed), fewer than N arguments (the error names N and the order), a seed position that is not a simple variable, and — unchanged — a multi-clause or mutual def, an instance, combination with `fuel` |
 | `declare {lean} supply val c` | supply-lift the counter `c : unit -> nat`: every function that (transitively) draws takes the current supply as an extra parameter and returns the successor supply paired with its result (deterministic state-passing; draws are `LemLib.supplySplit`) |
 | `declare {lean} reader_consumer val f` | pass all reader parameters as extra leading arguments at `f`'s call sites (callers get reader-lifted); `f` must carry an identifier-form Lean target_rep whose implementation takes the leading reader parameters explicitly |
 

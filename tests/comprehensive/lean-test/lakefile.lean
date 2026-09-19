@@ -72,6 +72,9 @@ lean_lib LemComprehensiveTest where
     `Test_reader_consumer, `Test_reader_consumer_auxiliary,
     `TestReaderConsumerImpl,   -- hand-written consumer implementation (leading reader params)
     `TestReaderConsumerCheck,  -- hand-written reader_consumer pins (effect-retirement L1)
+    `Test_reader_multi, `Test_reader_multi_auxiliary,
+    `TestReaderMultiImpl,   -- hand-written three-reader consumer implementation (N-ary reader_seed slice, 2026-09-19)
+    `TestReaderMultiCheck,  -- hand-written N-ary reader_seed pins (sorted-order binders; per-reader seed pickup; swap sensitivity)
     `Test_records, `Test_records_auxiliary,
     `Test_scope_shadowing, `Test_scope_shadowing_auxiliary,
     `Test_strings_chars, `Test_strings_chars_auxiliary,
@@ -112,6 +115,14 @@ lean_exe «test-supply-draws» where
 -- reader_seed pickup; suite phase lean-reader-consumer).
 lean_exe «test-reader-consumer» where
   root := `TestReaderConsumerExec
+
+-- N-ary reader_seed (program-data-parameters S0.5, 2026-09-19):
+-- compiled-binary behavioral test of the per-reader seed association
+-- with three declared readers (sorted-order binders, seed pickup through
+-- the consumer and through lifted callees, alpha/gamma swap
+-- sensitivity, supply composition; suite phase lean-reader-multi).
+lean_exe «test-reader-multi» where
+  root := `TestReaderMultiExec
 
 -- Fuel-parameter arc (2026-09-04): compiled-binary behavioral test of
 -- the quantified fuel (two sufficient fuels agree; the declared sentinel
