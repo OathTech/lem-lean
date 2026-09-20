@@ -10,7 +10,7 @@ LAKE = $(CAPPED) lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals check-capped clean
+.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -19,7 +19,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
 
 # Two-target parity (parity-fix slice 2026-09-03; [USER] ruling: the OCaml
 # target is the reference semantics of a lem program, the Lean target
@@ -126,6 +126,28 @@ lean-reader-multi:
 		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
 	else \
 		echo "  OK: compiled N-ary seed injection holds"; \
+	fi
+
+# fuel x reader x truly-mutual blocks (program-data-parameters S1.5,
+# 2026-09-20): a fuel'd truly-mutual block whose members are reader-lifted
+# now generates (arc 3 B2's guard is gone); the compiled binary re-asserts
+# that the reader value reaches every member (both-read and one-read
+# blocks), that sibling hops pass the decremented counter (the sentinel of
+# the member hitting 0), that a fuel'd callee reached from a member starts
+# from the FULL ambient, and that the measured pair's fuel-free wrappers
+# follow the reader (kernel pins in TestFuelMutualReaderCheck.lean; the
+# measured pair's obligations proved in
+# Test_fuel_mutual_reader_lemMeasureProofs.lean).
+lean-fuel-mutual-reader:
+	@echo "=== fuel x reader x mutual (compiled): readers reach every member of a fuel'd mutual block ==="
+	@cd lean-test && $(LAKE) build test-fuel-mutual-reader > /dev/null
+	@out=$$(cd lean-test && ./.lake/build/bin/test-fuel-mutual-reader 2>&1); st=$$?; \
+	if [ $$st -ne 0 ]; then \
+		echo "  FAIL (exit $$st):"; echo "$$out"; exit 1; \
+	elif ! echo "$$out" | grep -q "fuel mutual reader: OK"; then \
+		echo "  FAIL: no OK line"; echo "$$out"; exit 1; \
+	else \
+		echo "  OK: compiled fuel x reader x mutual composition holds"; \
 	fi
 
 # Supply-lifting compiled behavioral test (effect-retirement L1): the

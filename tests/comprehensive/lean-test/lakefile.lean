@@ -55,6 +55,9 @@ lean_lib LemComprehensiveTest where
     `TestFuelConsumerImpl,  -- hand-written fuel_consumer implementation ([LemFuel])
     `TestFuelParamCheck,  -- hand-written fuel-parameter kernel pins (fuel-parameter arc)
     `TestFuelMonoExemplar,  -- hand-proved fuel-monotonicity exemplar (Route B: completion predicate; structural-declare slice)
+    `Test_fuel_mutual_reader, `Test_fuel_mutual_reader_auxiliary,  -- fuel x reader x truly-mutual blocks (program-data-parameters S1.5, 2026-09-20); the auxiliary file carries the measured pair's obligations
+    `Test_fuel_mutual_reader_lemMeasureProofs,  -- hand-written proofs of those obligations (reader binder before the parameters; the build fails without it)
+    `TestFuelMutualReaderCheck,  -- hand-written kernel pins (signatures with the reader binder, _zero lemmas, fuel-parametricity, reader-decided values)
     `Test_function_tails, `Test_function_tails_auxiliary,  -- point-free `function` tails hoisted for measured/structural defs (tails-and-pmap-laws slice)
     `Test_function_tails_lemMeasureProofs,  -- hand-written proofs of its obligations (the build fails without it)
     `TestFunctionTailsCheck,  -- hand-written kernel pins (decide/rfl through the hoisted binders; the applied sentinel)
@@ -131,3 +134,12 @@ lean_exe «test-reader-multi» where
 -- lean-fuel-param).
 lean_exe «test-fuel-param» where
   root := `TestFuelParamExec
+
+-- fuel x reader x truly-mutual blocks (program-data-parameters S1.5,
+-- 2026-09-20): compiled-binary behavioral test that the reader value
+-- reaches every member of a fuel'd mutual block, that sibling hops pass
+-- the decremented counter, that a fuel'd callee starts from the full
+-- ambient, and that the measured pair follows the reader (suite phase
+-- lean-fuel-mutual-reader).
+lean_exe «test-fuel-mutual-reader» where
+  root := `TestFuelMutualReaderExec

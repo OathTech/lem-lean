@@ -4440,8 +4440,15 @@ type pat_style = FunParam | MatchArm
                 let obligations_before = !St.measure_obligations in
                 let bodies_raw = List.map (fun g ->
                     (* Fuel emission (declare {lean} fuel val): single-clause,
-                       non-mutual, non-instance, not reader-lifted (extend on
-                       need — fail closed on every unsupported combination). *)
+                       non-instance. Composes with truly-mutual blocks (arc 3,
+                       B2) and with reader lifting — INCLUDING inside a mutual
+                       block (doc/lean-backend/2026-09-20_fuel-mutual-reader-
+                       record.md: B2's "extend when needed" guard is gone; the
+                       prepass lifts a mutual Val_def's members all-or-none,
+                       and the per-member emission below is generic in
+                       `lifted`). Fail closed on the remaining unsupported
+                       combinations: supply x truly-mutual, reader_seed x
+                       mutual, anything inside an instance. *)
                     let fuel_info = match g with
                       | [({term = n}, c, _, _, _, _)] ->
                           (match fuel_sentinel_for c with
@@ -4601,15 +4608,18 @@ type pat_style = FunParam | MatchArm
                      | Some _ when inside_instance ->
                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: 'declare {lean} fuel val' inside an instance (unsupported)")
-                     | Some _ when is_truly_mutual && lifted ->
-                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
-                         "Lean backend: 'declare {lean} fuel val' in a mutual block combined with reader lifting (unsupported; extend when needed)")
                      | _ -> ());
                     (* fuel x reader composes (arc 3, B1): the worker's fuel
                        counter is emitted BEFORE the reader binders, so the
                        point-free wrapper 'worker LemFuel.fuel' has the
                        reader-prefixed type and lifted callers inject into
-                       the wrapper as for any lifted def. *)
+                       the wrapper as for any lifted def. In a truly-mutual
+                       block the same holds per member (2026-09-20): every
+                       member is lifted together (the prepass unions the
+                       block's defined set), each worker/wrapper/obligation/
+                       `_zero` lemma takes the readers through `lifted`, and
+                       a sibling call `(sibling_lemFuel lemFuel <readers>)`
+                       re-injects them at the St.fuel_workers rewrite. *)
                     (* Arc-8 S2: [Inhabited tv] binders for this group,
                        from the threading pre-pass (instance methods are
                        never threaded — the pre-pass guard errors first). *)
