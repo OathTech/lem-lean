@@ -138,3 +138,35 @@ clarifications, roots locale handling, fail-closed totality default and
 fork-drift prerequisite portability. The current early announcement should
 name the supported profile and experimental status, not imply a stable
 release. No tag is created by this remediation.
+
+## Closure addendum — corrections and operator provenance (2026-09-24)
+
+[AGENT] Closure findings F3/F4, checked at Lem `9bb6c6b` and Cerberus
+`0a6d59eed`. The M4 row above says "three excluded CMM reps". That is an
+incorrect tally: **23** target representations were replaced by
+`LemUnsupported.Cmm.*` markers in Cerberus `abe505d3d` (derived from the
+`frontend/concurrency/cmm_csem.lem` diff against `e9f9d049f`). The original
+body is retained as the record of the first checkpoint.
+
+The operator's M1 split, quoted verbatim:
+
+[USER 2026-09-24]
+
+> M1 should be split. The absolute container defaults and the hard GIT_CONFIG_GLOBAL requirement are MUST. The cap wrapper's uncapped fallback is loud and by design, so documenting the cap prerequisites is SHOULD, not MUST.
+
+Verbatim excerpts of the operator's remediation engagement rules:
+
+[USER 2026-09-24]
+
+> Current-facing pages only; dated records and quoted rulings are never edited.
+
+> All lem-lean non-doc changes land before ONE cerberus re-pin at the end.
+
+> Stop and report at the end of the MUST block with verbatim gate tails; merges are ff-only on the operator's per-merge sign-off after a delta review of the range.
+
+[AGENT] The subsequently relayed orchestrator note (Cerberus `aab00b9b6`,
+`lean_frontend/docs/2026-09-24_public-readiness-must-checkpoint-orchestrator-note.md`
+§6) authorizes the closure slice, including these appended corrections and
+one further Cerberus re-pin after the Lem closure. It does not authorize a
+merge or shared-switch update. The [closure record](2026-09-24_public-readiness-closure.md)
+records that slice's exact implementation pin and measurements separately.
