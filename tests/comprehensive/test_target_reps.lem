@@ -204,6 +204,17 @@ assert rep_chain : describe () = "context: 3"
 type myval = Base of nat | Arr of list nat
 val debug_print : unit -> unit
 declare lean target_rep function debug_print u = ()
+val process_val_body : myval -> list nat -> nat
+let rec process_val_body v path =
+  let () = debug_print () in
+  match (v, path) with
+    | (_, []) -> (0 : nat)
+    | (Arr ns, _ :: rest) -> process_val_body (Base (List.length ns)) rest
+    | (Base n, _ :: _) -> n
+  end
+(* Closure F5, 2026-09-24: retain the recursive target-rep route that
+   def_trans turns into process_val_def_lemma in the auxiliary output.
+   The concrete helper also keeps the unit/tuple-match runtime check. *)
 val process_val : myval -> list nat -> nat
 let rec process_val v path =
   let () = debug_print () in
@@ -212,6 +223,7 @@ let rec process_val v path =
     | (Arr ns, _ :: rest) -> process_val (Base (List.length ns)) rest
     | (Base n, _ :: _) -> n
   end
+declare lean target_rep function process_val v path = process_val_body v path
 assert unit_match : process_val (Arr [1; 2; 3]) [0; 1] = (3 : nat)
 
 (* ================================================================== *)

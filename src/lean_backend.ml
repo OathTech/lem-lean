@@ -7174,6 +7174,8 @@ type pat_style = FunParam | MatchArm
         | Typ_len nexp -> src_nexp nexp
         | Typ_backend (p, ts) ->
           let i = Path.to_ident (ident_get_lskip p) p.descr in
+          if String.trim (Ident.to_string i) = "sorry" then
+            raise (lean_sorry_rep_error t.locn "inline backend type");
           let i = Ident.to_output (Type_ctor (false, true)) path_sep i in
           let ts_out = List.map pat_typ ts in
           let space = if ts_out = [] then emp else from_string " " in
@@ -7225,6 +7227,8 @@ type pat_style = FunParam | MatchArm
         | Typ_len nexp -> src_nexp nexp
         | Typ_backend (p, ts) ->
           let i = Path.to_ident (ident_get_lskip p) p.descr in
+          if String.trim (Ident.to_string i) = "sorry" then
+            raise (lean_sorry_rep_error t.locn "inline relation backend type");
           let i = Ident.to_output (Type_ctor (false, true)) path_sep i in
           let ts_out = List.map indreln_typ ts in
           let space = if ts_out = [] then emp else from_string " " in
