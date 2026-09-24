@@ -1,5 +1,9 @@
 # DESIGN — how the Lean backend works
 
+**Checked 2026-09-24:** source implementation at `1235498fa300c79504684a3bf774b902bc3b7458`;
+[cleanup evidence](2026-09-24_public-readiness-remediation.md). This is an
+early experimental backend, not a general correctness proof.
+
 For a newcomer to the code. What the backend emits, and why the
 load-bearing choices look the way they do. History lives in the dated
 records under [`doc/notes/`](../notes/), not here.
@@ -90,10 +94,10 @@ counter from the FULL ambient, never from the caller's remaining
 counter); a leaf worker's only fuel is its counter. No instance exists
 in the library or in generated code, by design: the entry point supplies
 it once (`@f ⟨n⟩ …`, `letI : LemFuel := ⟨n⟩` at a CLI parse) and a
-theorem quantifies over it — `@f ⟨n⟩ = f_lemFuel n` by rfl, and above
-the depth a program needs its value does not depend on the fuel
-(`tests/comprehensive/lean-test/TestFuelParamCheck.lean`
-`spin_fuel_irrelevant`). The fuel bounds recursion *depth* at the
+theorem quantifies over it — `@f ⟨n⟩ = f_lemFuel n` by rfl, and stability above a sufficient bound is a per-function theorem
+(the exemplar `tests/comprehensive/lean-test/TestFuelParamCheck.lean`
+proves `spin_fuel_irrelevant`). General completion and propagation remain
+unproved by the backend (TODO item 13). The fuel bounds recursion *depth* at the
 declared points, never value size. At counter zero the worker returns
 the declared sentinel expression; the convention is `fuelExhausted
 <witness>`, a loud panic, so an inadequate fuel is a visible failure
@@ -288,6 +292,22 @@ family `test_reader_multi.lem`, `lean-test/TestReaderMultiCheck.lean`,
 `lean-test/TestReaderMultiExec.lean` (phase `lean-reader-multi`), the
 `neg_seed_*` probes, and `invariance/inv_reader_multi.lem`.
 
+**Reader seeds have lexical extent.** A seed definition supplies values
+at the lifted calls and consumer references emitted inside its body. It
+does not re-seed closures constructed outside its extent: those closures
+already capture their reader arguments. With N globally declared readers,
+the first N seed parameters are interpreted in globally sorted reader
+order. Adding or renaming a reader can shift ordinary parameters into
+seed positions; swapping same-typed values may still typecheck. Review
+that order and test distinct values at the entry point. The three-reader
+`TestReaderMultiCheck`/`TestReaderMultiExec` pins exercise positional
+injection, not a dynamic rebinding mechanism.
+
+Bare `sorry` target representations are refused, even when unused. The
+backend emits no live placeholder for a missing implementation; arbitrary
+raw Lean text and hand-written imports still require compilation and
+consumer axiom checks.
+
 **`Inhabited` is derived fail-closed; the unsound fallback is gone.**
 Lem programs have failure sites (incomplete matches, `failwith`) whose
 Lean emission needs an inhabitant of the result type. The backend
@@ -315,8 +335,8 @@ those variants (single or mutual) are emitted through the backend's
 2026-09-03; two-target pin
 `tests/comprehensive/parity/probes/p_cmp_order.lem`). Types carrying
 functions — where OCaml's compare raises at runtime — get loud
-`failwithI` residual bodies rather than fake instances. This keeps the
-two backends' observable behavior aligned even in the corners.
+`failwithI` residual bodies rather than fake instances. Finite comparison probes exercise these choices; the failure-erasure
+limits below still apply.
 
 **Set comprehensions: expanded where possible, rejected otherwise.**
 Comprehensions whose binders are `IN`-bounded
@@ -331,8 +351,7 @@ enclosing definition a `target_rep`. Library definitions in that
 corner render only as comments behind their Lean inlines/target reps
 (`set.lem`'s `sigma`).
 
-**Numbers, strings and lists follow the OCaml runtime, failure
-included.** The Lean reps of lem's numeric library mirror
+**Numeric and list operations aim at OCaml parity, with registered exceptions.** The Lean reps of lem's numeric library mirror
 `ocaml-lib/nat_num.ml` and zarith one function at a time (parity-fix
 slice 2026-09-03): `int`/`int32`/`int64` division and remainder are
 `Nat_num.int_div`/`int_mod` (truncating with the sign adjustment — NOT
@@ -345,11 +364,9 @@ OCaml-execution artifact not mirrored ([USER 2026-09-04], D4 below) —
 every division by zero fails loudly instead of
 totalising to 0, `integerSqrt` of a negative fails, and
 `integerOfString`/`naturalOfString` parse zarith's `Z.of_string`
-grammar (signs, `0x`/`0o`/`0b`, underscores). Failure parity is the
-rule: wherever the OCaml reference raises, the Lean side panics
-(`failwithI`; a harness under `LEAN_ABORT_ON_PANIC=1` fail-stops at the
-same program point) — the message text may differ (the [USER
-2026-09-03] exception class (a)), the failure may not be absorbed.
+grammar (signs, `0x`/`0o`/`0b`, underscores). Reached failures are tested under `LEAN_ABORT_ON_PANIC=1`, which
+fail-stops a native executable when it reaches a panic. Pure unused
+failures can be erased, so this is not general failure-order equivalence.
 Deep lists: every library list/string function that overflowed the
 native stack at 300 000 elements has an explicitly tail-recursive LemLib
 rewrite with a kernel-checked equality theorem to the definition it
@@ -357,8 +374,9 @@ replaced (`lean-lib/LemLibTheorems.lean`) — Lean must not fail where the
 OCaml reference succeeds (exception class (b)). The one open
 representation gap is strings (bytes on OCaml, Unicode scalars on
 Lean): `doc/lean-backend/2026-09-03_string-representation-design.md`,
-scheduled as the arc's last slice; its two parity probes are registered
-expected failures until then.
+still open; its two parity probes are registered expected failures.
+The full expected-failure register also includes `f_int_of_big_num` and
+`f_int32_overflow`, the deliberate numeric differences below.
 
 Two OCaml-target behaviours are deliberately NOT mirrored, because they
 are the OCaml backend's own deviations from lem's semantics and the Lean
@@ -410,19 +428,15 @@ declaration-order accident. The table is
 current); a build-failing resolution probe in `tests/comprehensive`
 pins it.
 
-**Sets and maps are the OCaml runtime, ported line for line.** Lem
-`set`/`map` emit onto LemLib's `Pset`/`Pmap` — verbatim ports of
-lem's OCaml runtime AVL trees (`ocaml-lib/pset.ml`, `pmap.ml`; every
-function cites its source line) with explicit comparators
-(`setAddBy`/`fmapAddBy` etc., spliced by the backend from
-`setElemCompare`/`mapKeyCompare`). Because the tree SHAPE evolves
-identically on both targets, every observable agrees by construction
-and not by argument: iteration/fold/toList order (ascending by the
-comparator), which representative of comparator-equal but
-distinguishable elements survives an insert/union/map, `Pmap.add`
-replacing key and value, `Pmap.equal` comparing keys with the map's
-comparator, `choose`/`chooseAndSplit`/`set_case`, and the panic order
-of `for_all`/`exists`. There is no `BEq`-keyed insertion anywhere.
+**Sets and maps translate the OCaml AVL algorithms.** Lem `set`/`map`
+use LemLib's `Pset`/`Pmap`, translated from `ocaml-lib/pset.ml` and
+`pmap.ml`, with explicit comparators (`setAddBy`/`fmapAddBy`, supplied
+from `setElemCompare`/`mapKeyCompare`). Lean needs different termination
+and representation machinery; these are not verbatim copies. Source
+citations, finite parity probes and local kernel-checked laws support
+specific claims about ordering, representatives and lookup. There is no
+general cross-language correspondence theorem. See the runtime
+[notice](../../lean-lib/NOTICE.md) for source attribution and licensing.
 Two-target parity probes (`tests/comprehensive/parity/probes/p_set_ops.lem`,
 `p_map_ops.lem`, `p_map_beq.lem`) pin the observables; AVL invariants
 over bounded-exhaustive operation sequences live in

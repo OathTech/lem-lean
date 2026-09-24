@@ -1,8 +1,17 @@
 ## Lean 4
 
+**Checked 2026-09-24:** implementation `1235498fa300c79504684a3bf774b902bc3b7458`; see the
+[build quickstart and limitations](../lean-backend/README.md).
+
 The command line option `-lean` instructs Lem to generate Lean 4 output. A module with name `Mymodule` generates a file `Mymodule.lean` and an auxiliary file `Mymodule_auxiliary.lean` (see *Auxiliary Files*). In `declare` forms the target is named `lean`: the standard target-representation declarations are written `declare lean target_rep ...`, and the Lean-specific annotations described in this chapter are written `declare {lean} ...`. Every Lean-specific annotation is target-scoped: it changes nothing in the output of any other backend (see *What other targets can rely on*).
 
-The design intent, in one sentence: the Lean output is meant to be an **obviously right** rendering of the Lem model — the same model that generates the OCaml implementation — with no `sorry`, no `unsafe` casts, no axioms, and a **fail-closed** generator that rejects at generation time anything it cannot translate soundly, naming the escape hatch. Where a runtime failure is the honest translation (a `failwith`, an incomplete match, exhausted fuel), the failure is loud and greppable, never a silent default.
+The backend generates executable Lean definitions from the Lem model,
+with opt-in totality declarations and explicit failure leaves. It inserts
+no live proof holes or unsafe casts. Bare `sorry` target representations
+are refused; arbitrary raw Lean snippets remain trusted input. Native
+clients should set `LEAN_ABORT_ON_PANIC=1` for reached panics. An unused
+pure failure may still be erased, so generation alone does not guarantee
+OCaml failure-order equivalence.
 
 ### Compilation
 
@@ -33,7 +42,7 @@ Each Lem source becomes one Lean module. Definitions of user modules are emitted
 - Type classes become `class`, instances become `instance` with an explicit priority (see *Comparison Instances*); class methods are brought into scope with `open ClassName`.
 - Lean syntax is used natively: `→`, `×`, `∀`, `∃`; record update as `{ r with field := value }`; local names that coincide with Lean keywords are escaped with `«»` guillemets.
 - Failure sites — constants whose Lean target representation is `failwith`, and `undefined`-style literals — are emitted as calls to `LemLib.failwithI` (see *Failure Sites*).
-- Neither the generated code nor `LemLib` declares an axiom; generated code contains no `sorry` and no `unsafe` (the one user-controlled exception, a target representation literally spelled `sorry`, is listed under *Known Limitations*). Whatever a downstream `#print axioms` reports comes from Lean itself.
+- The shipped runtime declares no axioms and the backend adds none. Bare `sorry` target representations are rejected. Audit hand-written imports and raw Lean target text in the downstream dependency cone with `#print axioms` and suitable source gates.
 
 ### Auxiliary Files
 
@@ -63,7 +72,7 @@ The backend then emits a *total* worker `f_lemFuel (lemFuel : Nat) ...` that rec
 
     def f [LemFuel] : T := f_lemFuel LemFuel.fuel
 
-`LemFuel` is a one-field class in `LemLib` (`class LemFuel where fuel : Nat`). The ambient fuel is a *parameter* of the generated code, never a numeral: the library declares no instance, the backend emits none, and no default exists anywhere. Every fuel-declared function, and every definition that (transitively) calls one, takes the instance-implicit binder `[LemFuel]` (the *fuel lifting*, computed by the same fixpoint as the reader lifting below); call sites are textually unchanged, because Lean's instance resolution passes the binder along, and bare or higher-order references need no repair. A worker takes `[LemFuel]` only if it passes the ambient on to another fuel-declared function (every callee starts its own counter from the *full* ambient, never from the caller's remaining counter); a leaf worker's only fuel is its counter. The entry point supplies the instance once — `@f ⟨n⟩ …`, or `letI : LemFuel := ⟨n⟩` at a command-line parse — and a theorem quantifies over it (`∀ [LemFuel]`, or over `n` through `⟨n⟩`; `@f ⟨n⟩ = f_lemFuel n` holds by `rfl`). The fuel bounds recursion *depth* at the declared points, never value size; above the depth a program needs, its value does not depend on the fuel. When the counter reaches zero the worker returns the backtick payload, the *sentinel expression*. The convention is `fuelExhausted <witness>`: a loud panic (see *Failure Sites*) that then returns the witness, so an inadequate fuel is a visible failure rather than a silent wrong answer. For every fuel-declared `f` the backend also emits the kernel-transparent exhaustion lemma `theorem f_lemFuel_zero … : f_lemFuel 0 … = <sentinel> := rfl` (when every parameter is a plain variable or wildcard; a destructuring parameter gets an explanatory comment instead), so "exhausted" is recognisable in the kernel wherever it arises.
+`LemFuel` is a one-field class in `LemLib` (`class LemFuel where fuel : Nat`). The ambient fuel is a *parameter* of the generated code, never a numeral: the library declares no instance, the backend emits none, and no default exists anywhere. Every fuel-declared function, and every definition that (transitively) calls one, takes the instance-implicit binder `[LemFuel]` (the *fuel lifting*, computed by the same fixpoint as the reader lifting below); call sites are textually unchanged, because Lean's instance resolution passes the binder along, and bare or higher-order references need no repair. A worker takes `[LemFuel]` only if it passes the ambient on to another fuel-declared function (every callee starts its own counter from the *full* ambient, never from the caller's remaining counter); a leaf worker's only fuel is its counter. The entry point supplies the instance once — `@f ⟨n⟩ …`, or `letI : LemFuel := ⟨n⟩` at a command-line parse — and a theorem quantifies over it (`∀ [LemFuel]`, or over `n` through `⟨n⟩`; `@f ⟨n⟩ = f_lemFuel n` holds by `rfl`). The fuel bounds recursion *depth* at the declared points, never value size; above the depth a program needs, stability requires a per-function argument; the backend does not generate a general completion theorem (TODO 13). When the counter reaches zero the worker returns the backtick payload, the *sentinel expression*. The convention is `fuelExhausted <witness>`: a loud panic (see *Failure Sites*) that then returns the witness, so an inadequate fuel is a visible failure rather than a silent wrong answer. For every fuel-declared `f` the backend also emits the kernel-transparent exhaustion lemma `theorem f_lemFuel_zero … : f_lemFuel 0 … = <sentinel> := rfl` (when every parameter is a plain variable or wildcard; a destructuring parameter gets an explanatory comment instead), so "exhausted" is recognisable in the kernel wherever it arises.
 
 A hand-written Lean implementation that itself reads the ambient fuel declares so:
 
@@ -140,12 +149,12 @@ Lem programs have failure sites (incomplete matches, `failwith`) whose Lean tran
 
 `LemLib` declares **zero axioms** (`grep -rn "^axiom " lean-lib/ --include="*.lean"` is empty). Its failure primitives are:
 
-- `failwithI {α} [Inhabited α] (msg : String) : α` — an `opaque` definition whose logical value is `default`, and whose compiled implementation (`@[implemented_by]`) panics with `msg` and then returns `default`. This mirrors OCaml's `raise` at every `failwith`-mapped constant and every `undefined` literal, while keeping library-call semantics (the caller continues with the default) when panics are non-fatal.
+- `failwithI {α} [Inhabited α] (msg : String) : α` — an `opaque` definition whose logical value is `default`, and whose compiled implementation (`@[implemented_by]`) panics with `msg` and then returns `default`. It represents failure at `failwith`-mapped constants and `undefined` literals, but this is not an OCaml exception: without abort-on-panic, a native caller may continue with the default; unused pure calls may be erased.
 - `fuelExhaustedWith (msg) (witness : α) : α` and `fuelExhausted (witness : α) : α` — the same shape for fuel exhaustion; logically the witness, at run time a panic.
 - `class LemFuel where fuel : Nat` — the ambient fuel (see *Fuel*); a class with no instance anywhere in the library or in generated code.
 - `supplySplit (s : Nat) : Nat × Nat := (s, s + 1)` — a plain definition, the draw primitive of the supply lifting.
 
-These two `opaque`/`implemented_by` pairs (`failwithIImpl`, `fuelExhaustedWithImpl`) are the only ones in the library; nothing else in `LemLib` is `unsafe`. A harness that runs generated code with `LEAN_ABORT_ON_PANIC=1` fail-stops at the first failure site (the `tests/comprehensive` phase `lean-panic` pins both behaviours: message-then-default without the variable, abort with it).
+These two `opaque`/`implemented_by` pairs (`failwithIImpl`, `fuelExhaustedWithImpl`) are the only ones in the library; nothing else in `LemLib` is `unsafe`. A harness that runs generated code with `LEAN_ABORT_ON_PANIC=1` fail-stops at the first reached panic (the `tests/comprehensive` phase `lean-panic` pins both behaviours: message-then-default without the variable, abort with it).
 
 ### Target Representations and Ground-Typed Heads
 
@@ -161,9 +170,9 @@ Lem models often read ambient configuration through a nullary constant whose tar
 
 `declare {lean} reader val c` declares `c` a *reader*: every definition that (transitively) reads `c` takes its value as an extra leading parameter, and every call of a lifted definition passes it on. Bare and higher-order references to lifted definitions are repaired by type-preserving partial application over the reader parameters. With several readers the parameters appear in sorted-name order.
 
-`declare {lean} reader_seed val f` marks an *entry point*: `f` itself is not lifted; its first argument supplies the reader value to the lifted definitions its body calls. Guards: exactly one reader must be declared; the seed's first argument must be a simple variable; the seed may not be multi-clause, mutual, inside an instance, or combined with fuel.
+`declare {lean} reader_seed val f` marks an *entry point*: `f` itself is not lifted; with N declared readers, its first N arguments supply their values in global sorted reader order to lifted calls inside its body. Guards: at least one reader must be declared, there must be at least N parameters, and each seed parameter must be a simple variable; the seed may not be multi-clause, mutual, inside an instance, or combined with fuel.
 
-`declare {lean} reader_consumer val f` closes the lifting over an extern boundary. A value with a hand-written Lean target representation is opaque to the lifting, so a global its implementation reads would silently escape. Marking it a consumer makes its call sites pass **all** declared reader parameters as extra leading arguments (global sorted order, before `f`'s own arguments), lifts its callers by the ordinary fixpoint, and obliges the hand-written implementation to declare the matching leading parameters. Inside a `reader_seed` definition the seed's first argument is passed instead of the binder. Guards, each with a probe: the value must carry an identifier-form Lean target representation — none (`neg_rc_norep`), a parameter-binding one (`neg_rc_paramrep`) or an infix one (`neg_rc_infixrep`) are rejected; a value may not be both a consumer and a reader, seed, or supply (`neg_rc_mix`, `neg_rc_mix_supply`); a consumer call inside an instance method (`neg_rc_instance`), or anywhere no reader value is in scope — inductive relation rules, lemmas and assertions (`neg_rc_indreln`) — is rejected, as is a consumer used in infix position.
+`declare {lean} reader_consumer val f` closes the lifting over an extern boundary. A value with a hand-written Lean target representation is opaque to the lifting, so a global its implementation reads would silently escape. Marking it a consumer makes its call sites pass **all** declared reader parameters as extra leading arguments (global sorted order, before `f`'s own arguments), lifts its callers by the ordinary fixpoint, and obliges the hand-written implementation to declare the matching leading parameters. Inside a `reader_seed` definition each reader's corresponding positional seed is passed instead of its binder. Guards, each with a probe: the value must carry an identifier-form Lean target representation — none (`neg_rc_norep`), a parameter-binding one (`neg_rc_paramrep`) or an infix one (`neg_rc_infixrep`) are rejected; a value may not be both a consumer and a reader, seed, or supply (`neg_rc_mix`, `neg_rc_mix_supply`); a consumer call inside an instance method (`neg_rc_instance`), or anywhere no reader value is in scope — inductive relation rules, lemmas and assertions (`neg_rc_indreln`) — is rejected, as is a consumer used in infix position.
 
 Common to all reader forms: a reader-lifted call inside an instance method is rejected (instance fields cannot take extra parameters); two readers sharing an unqualified name are rejected because their binders would conflate (`neg_reader_dupname`); and the synthesized binder prefix `_lemReader_` is reserved (`neg_reader_shadow`, `neg_reader_shadow_body`).
 
@@ -201,6 +210,14 @@ Some names are reserved by the backend for the code it synthesizes, and a user n
 
 The annotation words this backend adds to the grammar — `fuel`, `fuel_consumer`, `fuel_measure`, `assuming`, `structural`, `reader`, `reader_seed`, `reader_consumer`, `supply`, `ground_rep`, `skip_instances`, `extra_import`, `effectful` — are **contextual** keywords: they act as keywords only directly after `declare [targets]`, a position where an identifier can never occur, and remain ordinary identifiers everywhere else, on every target. `let fuel = (1 : nat)` compiles unchanged for `-ocaml` and `-lean` alike. The standing acceptance test is `tests/comprehensive/test_contextual_keywords.lem` (each word as a let-bound name, function name, parameter, pattern variable and record field).
 
+### Reader seeding extent
+
+A `reader_seed` supplies the first N parameters in global sorted reader
+order at call sites in its body. It cannot re-seed a closure constructed
+outside that extent. Adding or renaming a reader can shift seed positions;
+same-typed swaps can compile, so test distinct reader values as in
+`TestReaderMultiCheck` and `TestReaderMultiExec`.
+
 ### The Retired `effectful` Annotation
 
 `declare {lean} effectful val f` is retained in the grammar but **refused** by the Lean target with a generation-time error that names the migration path: the supply lifting above. The library no longer contains an effect-projection axiom, and no call-site wrapping is emitted. The probe `neg_effectful_retired` pins the refusal and its message. Hand-written impure externs remain possible on the Lean side, but they are the consumer's responsibility (own `opaque`/`implemented_by` and extraction armour); the backend makes no claim about them.
@@ -230,12 +247,13 @@ The runtime is checked by `cd lean-lib && lake build`, which builds `LemLib` tog
 
 - **Lemmata and theorems** in Lem sources are dropped (emitted as comments); only assertions become checks.
 - **`partial def` by default.** Without a `termination_argument` or fuel declaration a recursive definition is kernel-opaque.
+- **Fuel propagation and general completion monotonicity are not proved by the backend** (TODO item 13); a measured wrapper has only its stated per-function stability theorem.
 - **Fuel is a depth bound**, not a proof of termination; the caller chooses it, and exhaustion is loud rather than impossible. A fuel-lifted definition cannot be exercised by a lem `assert` (no fuel is in scope); pin it from Lean with an explicit instance.
 - **Supply lifting is linear**: no partial application, no lambdas, no instance methods, no inductive-relation rules, no truly mutual blocks (see the guard list). Lifting a monadic region is a model change, not a backend transformation, and is rejected.
 - **Supply-lifted top-level value bindings are refused.** The OCaml reference evaluates a value binding once at module initialisation; per-use state passing cannot mirror that, so a drawing value binding is a generation-time error (make it a function of unit).
 - **`supply` accepts `unit -> nat` and `unit -> natural`** (both map to `Nat`).
 - **Short-circuit operators and the paren-split spine.** `a && (f x)` keeps `&&`'s short-circuit under supply threading, but the eta-expanded spine `((&&) a) (f x)` threads *strictly* (the right operand's draw fires even when `a` is false). This matches the OCaml implementation case for case (OCaml is strict for exactly that shape), and is pinned by `rfl` in `tests/comprehensive/lean-test/TestSupplyCheck.lean`; but the agreement rests on Lem's `Paren` node coinciding with OCaml's full-application detection, and any future normalisation of application spines must re-adjudicate it (in-code notes at the supply transform's general-head branch and at `strip_app_exp`).
-- **A target representation spelled `sorry`** is passed through as `(sorry : T)`. This is a user-written escape, not a backend emission — the backend itself never emits `sorry` — but it is a hole in the fail-closed story and is registered for removal (`doc/lean-backend/TODO.md`).
+- **Raw Lean snippets are trusted input.** Bare `sorry` target representations are refused (including unused declarations); a generator cannot establish arbitrary embedded Lean text is sound. Compile and audit it. Negative tests: `neg_target_rep_sorry*`.
 - **`ground_rep`** has no dedicated test beyond the library's `fromJust` (registered in `doc/lean-backend/TODO.md`).
 - **Reserved-name avoidance.** Top-level definitions, values, types and variant constructors whose name is a Lean token or root-namespace declaration (`library/lean_constants`) are renamed (`from` → `from0`, constructor `One` → `One0`: constructors are exported to the root scope and patterns on them would otherwise be ambiguous); record fields are not renamed (they are only emitted as projections and labels), keyword-escaping aside.
 - **Strings are not yet bytes.** Lem `string`/`char` are OCaml bytes but Lean `String`/`Char` (Unicode scalars); non-ASCII bytes diverge (`stringLength`, `toCharList`, `chr`). Design and slice plan: `doc/lean-backend/2026-09-03_string-representation-design.md`; the parity probes `p_str_bytes`/`p_str_escapes` are registered expected failures until it lands.
@@ -252,8 +270,8 @@ The Lean backend is structurally modelled on the Coq backend (the transformation
 - Native record update syntax: `{ r with field := value }`
 - Constructors brought into scope via `export TypeName` after each `inductive` definition
 - `Inhabited` instances derived fail-closed for generated types (no axiom-valued inhabitant; underivable-and-demanded is a generation-time error)
-- `BEq` and `Ord` derived structurally with OCaml polymorphic-compare parity for every type (nullary constructors below block constructors, whatever the declaration order)
-- `LemLib.failwithI` (loud panic, then default) for `failwith`/`undefined` sites instead of Coq's `DAEMON`
+- `BEq` and `Ord` derived structurally for supported first-order types, following OCaml constructor order (nullary constructors below block constructors, whatever the declaration order); function-carrying cases use declared failure leaves
+- `LemLib.failwithI` (opaque failure leaf; native panic aborts only with `LEAN_ABORT_ON_PANIC=1`, otherwise may return a default) for `failwith`/`undefined` sites instead of Coq's `DAEMON`
 - `partial` for recursive definitions by default, overridable with `termination_argument` or a fuel declaration
 
 ### Further Reading

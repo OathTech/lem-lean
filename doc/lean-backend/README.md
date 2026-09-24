@@ -1,5 +1,9 @@
 # The Lean backend for Lem
 
+**Checked 2026-09-24:** source implementation at `1235498fa300c79504684a3bf774b902bc3b7458`;
+[cleanup evidence](2026-09-24_public-readiness-remediation.md). This is an
+early experimental backend, not a general correctness proof.
+
 This fork adds a **Lean 4 backend** to [Lem](https://github.com/rems-project/lem):
 `lem -lean` compiles Lem definitions to Lean 4 source that builds
 against the [LemLib runtime](../../lean-lib/). It was built to port
@@ -27,44 +31,88 @@ Who this is for:
 
 ## Quickstart
 
-```bash
-# Build the lem binary (repo root; needs OCaml + opam deps, see the
-# top-level README's install section)
-make
+Use this fork explicitly: the upstream opam release does not contain the
+Lean backend. The measured platform is Linux x86_64; other platforms are
+unverified. Prerequisites are Git, Bash, GNU make/coreutils/diffutils,
+a C toolchain, opam 2, and elan with the toolchain in `lean-lib/lean-toolchain` installed. The local
+measurement used OCaml 5.4.0, opam 2.1.5 and Lean 4.28.0; Cerberus uses
+Lean 4.32.2. Package constraints are in `opam`. Public repository/ref
+availability and a fresh dependency download remain operator checks in
+the cleanup evidence; offline tests used preinstalled dependencies.
 
-# Compile a Lem file to Lean
-cat > demo.lem <<'EOF'
+If opam has not been initialized, run `opam init --bare --no-setup` once
+before the following commands.
+
+```bash
+git clone --branch mdd/lean-backend https://github.com/OathTech/lem-lean.git
+cd lem-lean
+opam switch create . ocaml-base-compiler.5.4.0 --no-switch --no-install
+opam pin add --switch=. lem . --yes
+opam exec --switch=. -- make
+opam exec --switch=. -- make lean-libs
+
+# Generate, compile, and evaluate a small client against this same LemLib.
+mkdir demo-lean
+cp lean-lib/lean-toolchain demo-lean/lean-toolchain
+cat > demo-lean/demo.lem <<'EOF'
 open import Pervasives
 let double (x : nat) : nat = x * 2
 EOF
-./lem -wl ign -i library/pervasives.lem -lean demo.lem
-# → Demo.lean + Demo_auxiliary.lean, next to the source, importing LemLib
+./lem -wl ign -i library/pervasives.lem -lean demo-lean/demo.lem
+cat > demo-lean/lakefile.lean <<'EOF'
+import Lake
+open Lake DSL
+package Demo
+require LemLib from "../lean-lib"
+lean_lib Demo
+@[default_target]
+lean_lib Check where
+  roots := #[`Check]
+EOF
+cat > demo-lean/Check.lean <<'EOF'
+import Demo
+example : double 21 = 42 := rfl
+#eval double 21
+EOF
+(cd demo-lean && ../scripts/capped lake build)
+# Check compiles, the equation is kernel checked, and #eval prints 42.
 
-# Build the runtime the generated code imports
-cd lean-lib && lake build
+opam exec --switch=. -- make -C tests/comprehensive lean
+opam exec --switch=. -- make nonlean-regress
 ```
 
-A full working setup — generation, compilation against LemLib, and
-the negative/panic test legs — is `tests/comprehensive/`:
-`cd tests/comprehensive && make lean`.
+`scripts/capped` is repository-local; the comprehensive suite uses it by
+default. `CAPPED=/path/to/wrapper` overrides the suite runner. The wrapper
+uses Linux cgroup v2, then a systemd user service. If direct cgroup setup
+fails and `systemd-run` is absent, it warns and runs uncapped. If
+`systemd-run` exists but its user service is unavailable, the command fails. `CERB_MEM_MAX=32G` sets
+the cap on a suitably provisioned machine; it is an upper limit, not a
+minimum RAM requirement. Set `LEAN_ABORT_ON_PANIC=1` when executing native
+clients that must stop on a reached panic. This does not prevent Lean
+from eliminating an unused pure failure (see the limitations below).
+
+The [manual](../manual/backend_lean.md) describes the language and a
+reusable Lake setup. Issues about the fork's Lean backend belong in
+[OathTech/lem-lean issues](https://github.com/OathTech/lem-lean/issues);
+include the commit, toolchain, minimal `.lem` source and exact command.
 
 ## What you can rely on about the output
 
 - **One model, two implementations.** The same Lem source generates
-  both the OCaml and the Lean code, so any semantic divergence between
-  them is a backend bug, not a modelling change. (The heavyweight
-  evidence that divergences are absent in practice lives downstream:
-  the cerberus-lean project runs its generated-Lean
+  both the OCaml and the Lean code, so differences can be investigated against shared source. Known
+  differences and deliberate numeric exceptions are listed below. (Further differential
+  evidence lives downstream: the cerberus-lean project runs its generated-Lean
   semantics differentially against the OCaml implementation across
   thousands-of-programs corpora — see that repository's
   `lean_frontend/VALIDATION.md` for what is compared, against what,
   and what its gates guarantee, and its `lean_frontend/DESIGN.md`.)
-- **No `sorry`, no `unsafe`, fail-closed generation.** The backend
-  never emits `sorry` or unsafe casts. Where it cannot do something
-  soundly — derive an `Inhabited` instance, derive a comparison for a
-  function-carrying type — it fails **at generation time** with an
-  error naming the type and the escape hatches, or emits a loud,
-  greppable runtime failure (`failwithI`), never a silent default.
+- **No inserted live proof holes or unsafe casts.** Bare `sorry` target
+  representations are refused at generation time, including unused
+  declarations and parameterized representations. Unsupported constructs
+  are rejected or receive an explicit `failwithI` failure. Raw Lean
+  snippets and hand-written implementations remain trusted inputs:
+  generation is not a Lean parser or an axiom audit of arbitrary text.
+  Compile and audit the actual downstream dependency cone.
 - **Totality on demand; the fuel is yours.** By default, recursive
   Lem functions emit as Lean `partial def` (executable, but opaque to
   the kernel). A recursion that is structural on its data is marked
@@ -127,9 +175,9 @@ the negative/panic test legs — is `tests/comprehensive/`:
   reaches the fuel takes `[LemFuel]` as an inductive parameter.
   Cerberus applies fuel declares across its whole execution path and
   checks that slice is total in its own build.
-- **Zero axioms; effects are explicit state.** Neither the library
-  nor generated code declares any axiom: everything in a downstream
-  proof's axiom set comes from Lean itself. Ambient counters are
+- **Zero axioms; effects are explicit state.** The shipped runtime declares no axioms, and the backend adds no
+  axiom declarations. A downstream proof still requires an axiom audit
+  of its hand-written imports and target representations. Ambient counters are
   threaded as explicit state ("supply lifting": a definition marked
   ``declare {lean} supply val`` takes and returns the counter; draws
   are `LemLib.supplySplit`, a plain def), and ambient configuration
@@ -154,14 +202,37 @@ the negative/panic test legs — is `tests/comprehensive/`:
   follow the same pattern — see the negative suite in
   `tests/comprehensive/negative/`.
 
+## Known limits
+
+The parity suite at the measured pin has four registered expected failures:
+`p_str_bytes` and `p_str_escapes` expose OCaml byte strings versus Lean
+Unicode strings; `f_int_of_big_num` and `f_int32_overflow` record deliberate
+numeric differences from the OCaml target. Failure tests compare reached
+failures under `LEAN_ABORT_ON_PANIC=1`; unused pure failures can be erased.
+Finite tests and local Pset/Pmap laws are not a general OCaml–Lean
+correspondence theorem. The runtime translations retain their source
+notices and license terms: [NOTICE](../../lean-lib/NOTICE.md).
+
+Lem theorem/lemma statements are emitted as comments, not translated
+proofs; Lem assertions become build-time evaluation checks.
+
+General fuel-completion monotonicity and propagation are **not proved by
+the backend** (TODO item 13). A per-function `fuel_measure` obligation
+proves stability above the measure, optionally under a stated hypothesis;
+it does not by itself prove that execution avoids the exhaustion result.
+Default recursion remains `partial`. Reader seeding affects call sites
+inside the seed definition; it cannot re-seed a closure built outside that
+extent. Seed arguments are positional in globally sorted reader order;
+same-typed swaps need value tests (see DESIGN).
+
 ## How you check it
 
 - `cd tests/comprehensive && make lean` — generation over the test
   corpus, compilation of everything generated against LemLib, a
-  pinned panic-path check (failure sites must raise loudly, never
-  degrade to silent defaults), and a negative suite (programs the
+  pinned panic-path check (a reached panic aborts under
+  `LEAN_ABORT_ON_PANIC=1`; the suite also checks default-return behavior without it), and a negative suite (programs the
   backend must *reject*, rejected for the declared reason).
-- `cd lean-lib && lake build` — the runtime plus `LemLibTest.lean`
+- `cd lean-lib && ../scripts/capped lake build` — the runtime plus `LemLibTest.lean`
   (property tests for the set/map layers, including adversarial-key
   comparator coherence).
 - `grep -rn "^axiom " lean-lib/ --include="*.lean"` — zero hits;
@@ -172,8 +243,10 @@ the negative/panic test legs — is `tests/comprehensive/`:
 
 ## Status
 
-The backend compiles the full Cerberus C semantics (its flagship
-consumer) plus the comprehensive suite. Known residual work, registered
+The backend generates Cerberus’s selected Lean model and the comprehensive
+suite. The consumer has a declared sequential execution profile, concurrency
+stubs, native boundaries and explicit exclusions; this is not support for
+every Cerberus model or C program. Known residual work, registered
 in [TODO.md](TODO.md): emission uses a single module-scoped mutable
 state (`St` in `src/lean_backend.ml`) with per-lifetime reset hooks —
 effect-free emission is a planned refactor; the Ott grammar

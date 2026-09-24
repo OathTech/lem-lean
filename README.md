@@ -50,7 +50,10 @@ This fork adds the **Lean 4 backend** (`lem -lean`) and its runtime
 library (`lean-lib/`) — see [`doc/lean-backend/README.md`](doc/lean-backend/README.md).
 The Lean backend was developed primarily by AI agents (Claude,
 Anthropic) under the direction and review of Mike Dodds; upstream Lem
-is by the authors listed above.
+is by the authors listed above. The fork-specific installation instructions,
+measured versions and limitations (2026-09-24, `1235498fa300c79504684a3bf774b902bc3b7458`) are on that
+backend page; the upstream opam release described below does not include
+the Lean backend. Runtime translation notices: [lean-lib/NOTICE.md](lean-lib/NOTICE.md).
 
 
 ## To install and build
@@ -201,4 +204,6 @@ emersion.
 
 Lem is made available under the BSD 3-clause license, with the
 exception of a few files derived from OCaml, which are under the
-GNU Library GPL.
+GNU Library GPL. The fork runtime translations retain those source terms
+([NOTICE](lean-lib/NOTICE.md)); `scripts/capped` retains its inline
+Cerberus BSD-2-Clause notice (2026-09-24 provenance check, `38f87d5`).
