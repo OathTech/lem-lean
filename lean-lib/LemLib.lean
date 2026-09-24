@@ -1,13 +1,58 @@
+/-
+Third-party provenance (public-readiness M8, 2026-09-24; source notices
+checked at Lem 38f87d5fa6b29ec90edfa457faba8a309e32c118).
+The Pset and Pmap implementations below are Lean translations of
+ocaml-lib/pset.ml and ocaml-lib/pmap.ml, including their AVL algorithms.
+They retain the upstream GNU Library General Public License terms in
+../LICENSE; the rest of this file follows Lem's BSD-3-Clause default.
+The source notices are retained below. This is not a relicensing grant.
+
+From ocaml-lib/pset.ml:
+(***********************************************************************)
+(*                                                                     *)
+(*                           Objective Caml                            *)
+(*                                                                     *)
+(*            Xavier Leroy, projet Cristal, INRIA Rocquencourt         *)
+(*                                                                     *)
+(*  Copyright 1996 Institut National de Recherche en Informatique et   *)
+(*  en Automatique.  All rights reserved.  This file is distributed    *)
+(*  under the terms of the GNU Library General Public License, with    *)
+(*  the special exception on linking described in file ../LICENSE.     *)
+(*                                                                     *)
+(***********************************************************************)
+
+(* Modified by Scott Owens 2010-10-28 *)
+
+
+From ocaml-lib/pmap.ml:
+(***********************************************************************)
+(*                                                                     *)
+(*                           Objective Caml                            *)
+(*                                                                     *)
+(*            Xavier Leroy, projet Cristal, INRIA Rocquencourt         *)
+(*                                                                     *)
+(*  Copyright 1996 Institut National de Recherche en Informatique et   *)
+(*  en Automatique.  All rights reserved.  This file is distributed    *)
+(*  under the terms of the GNU Library General Public License, with    *)
+(*  the special exception on linking described in file ../LICENSE.     *)
+(*                                                                     *)
+(***********************************************************************)
+
+(* Modified by Susmit Sarkar 2010-11-30 *)
+
+-/
+
 /-!
 # LemLib — Lean 4 runtime library for Lem
 
 Provides the core types and operations that Lem-generated Lean 4 code depends on:
 - `LemOrdering`: three-way comparison type used by set/map operations
 - Comparison, arithmetic, and string helpers
-- Set and finite-map operations: `Pset`/`Pmap`, VERBATIM PORTS of lem's OCaml
-  runtime AVL trees (ocaml-lib/pset.ml, pmap.ml) so that every observable —
-  iteration order, representative choice, failure points — is the OCaml
-  reference's by construction (parity-fix slice 2026-09-03)
+- Set and finite-map operations: `Pset`/`Pmap`, translations of Lem's OCaml
+  runtime AVL trees (ocaml-lib/pset.ml, pmap.ml). The parity probes and
+  LemLibPmapLaws check specific observations and local laws; they are not
+  a general correspondence proof. See README.md for the dated validation
+  pins and failure/representation limits.
 
 **Convention**: Functions suffixed with `By` take an explicit `(cmp : α → α → LemOrdering)`
 comparator. Functions without `By` use Lean's `BEq` or `Ord` type classes.
@@ -290,9 +335,10 @@ def sort_by_ordering (cmp : α → α → LemOrdering) (l : List α) : List α :
   l.mergeSort leanCmp
 
 /- ============================================================================
-   Sets and finite maps: VERBATIM PORTS of lem's OCaml runtime
-   (ocaml-lib/pset.ml, ocaml-lib/pmap.ml — the OCaml stdlib AVL trees as
-   modified by Scott Owens 2010-10-28), parity-fix slice 2026-09-03.
+   Sets and finite maps: Lean translations of Lem's OCaml runtime
+   (ocaml-lib/pset.ml, modified by Scott Owens 2010-10-28;
+   ocaml-lib/pmap.ml, modified by Susmit Sarkar 2010-11-30),
+   parity-fix slice 2026-09-03. Source notices are at the top of this file.
    ============================================================================
 
    [USER 2026-09-03] ruling: the OCaml target is the reference semantics
@@ -305,17 +351,19 @@ def sort_by_ordering (cmp : α → α → LemOrdering) (l : List α) : List α :
    (F3), Pmap.equal comparing keys with the map's comparator (F3),
    Set.choose_and_split / set_case / union representatives, and every
    panic-order nuance of for_all/exists. Rather than approximate them
-   one by one, the two AVL modules are ported line for line: the tree
-   SHAPE is then identical after every operation sequence, so every
-   shape-dependent observable (which representative of comparator-equal
+   one by one, the two AVL modules follow the source algorithms. Tree
+   shape affects observables: which representative of comparator-equal
    but distinguishable elements a `union` keeps depends on subtree
-   HEIGHTS in pset.ml) agrees by construction. Each function cites its
-   OCaml source line. Comparators are lem's `LemOrdering`; `c = 0`,
+   HEIGHTS in pset.ml. Each function cites its OCaml source line. This
+   translation and the finite parity probes are evidence, not a theorem
+   about every operation sequence. Comparators are lem's `LemOrdering`; `c = 0`,
    `c < 0`, `c > 0` in the OCaml read `.EQ`, `.LT`, `.GT`.
 
    Failure parity: where the OCaml raises (Not_found on choose/min_elt of
    the empty set, Invalid_argument in bal/remove_min_elt on ill-formed
-   input) the port fails loudly with failwithI (exception class (a)).
+   input) the port uses failwithI (exception class (a)). Native execution
+   must set LEAN_ABORT_ON_PANIC=1 to abort on a reached panic. Lean may
+   erase unused pure failures; general strict-failure parity is not proved.
 
    Termination: structural where the OCaml is structural on one tree.
    The functions whose OCaml recursion is not structural on one argument

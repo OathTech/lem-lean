@@ -2356,6 +2356,39 @@ let rec exp_backend_idents (e : exp) : string list =
     List.concat_map (fun (Do_line (_, _, rhs, _)) -> exp_backend_idents rhs) dls
     @ exp_backend_idents e1
 
+(* Public-readiness M4: a bare `sorry` target representation is a proof
+   hole, not a runtime boundary. Check declarations as well as uses, so
+   an unused or partially applied constant cannot hide this escape.
+   Raw Lean snippets remain trusted input, not a Lean parser/typechecker. *)
+let lean_sorry_rep_error l name =
+  Reporting_basic.err_general true l
+    (Printf.sprintf
+      "Lean backend: target representation `sorry` is forbidden (%s); provide a real Lean implementation, use failwithI for a declared runtime failure, or use a LemUnsupported. marker for an unsupported operation"
+      name)
+
+let lean_sorry_rep_check env =
+  List.iter (fun cref ->
+    let cd = c_env_lookup Ast.Unknown env.c_env cref in
+    let names =
+      match Target.Targetmap.apply_target cd.target_rep
+              (Target.Target_no_ident Target_lean) with
+      | Some (CR_simple (_, _, _, e)) | Some (CR_inline (_, _, _, e)) -> exp_backend_idents e
+      | Some (CR_infix (_, _, _, i)) -> [String.trim (Ident.to_string i)]
+      | Some (CR_special (_, _, CR_special_rep (strs, _), _)) -> List.map String.trim strs
+      | _ -> [] in
+    if List.mem "sorry" names then
+      raise (lean_sorry_rep_error cd.spec_l (Path.to_string cd.const_binding)))
+    (c_env_all_consts env.c_env);
+  Types.Pfmap.fold (fun () path td ->
+    match td with
+    | Types.Tc_type d ->
+      (match Target.Targetmap.apply_target d.Types.type_target_rep
+               (Target.Target_no_ident Target_lean) with
+       | Some (Types.TYR_simple (l, _, i)) when String.trim (Ident.to_string i) = "sorry" ->
+         raise (lean_sorry_rep_error l (Path.to_string path))
+       | _ -> ())
+    | _ -> ()) () env.t_env
+
 (* (what the constant renders as, the constant's lem name) for every
    constant an expression references, plus the body's own Backend idents *)
 let lean_referenced_lean_names env (e : exp) : (string * string) list =
@@ -5793,6 +5826,8 @@ type pat_style = FunParam | MatchArm
           | Var v ->
               name_var_output v
           | Backend (sk, i) ->
+              if String.trim (Ident.to_string i) = "sorry" then
+                raise (lean_sorry_rep_error (exp_to_locn e) "backend expression");
               ws sk ^
               Ident.to_output (Term_const (false, true)) path_sep i
           | Lit l -> literal l
@@ -5922,12 +5957,7 @@ type pat_style = FunParam | MatchArm
                     end in
                     raw_output
                   | Backend (_, i) when Ident.to_string i = "sorry" ->
-                    (* sorry is a term, not a function — drop applied arguments.
-                       Annotate with the expression's type so Lean can infer it
-                       in contexts like let bindings. *)
-                    let typ = Typed_ast.exp_to_typ e in
-                    let src_t = C.t_to_src_t typ in
-                    [Output.flat [from_string "(sorry : "; pat_typ src_t; from_string ")"]]
+                    raise (lean_sorry_rep_error (exp_to_locn e) "applied backend expression")
                   | _ ->
                     List.map trans (e0 :: args)
               end in
@@ -8382,6 +8412,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
        dependencies are defined (e.g., abbrev mword after class Size). *)
     let lean_defs ((ds : def list), end_lex_skips) =
       St.reset_per_file ();
+      lean_sorry_rep_check A.env;
       (* Set callback for per-file CR_simple import collection *)
       Backend_common.on_cr_simple_applied := collect_cr_simple_import;
       (* Note: St.mutual_records is NOT reset — [invocation] lifetime: it

@@ -36,7 +36,8 @@ Thomas Williams,
 Victor Gomes, and
 emersion.
 
-All files except ocaml-lib/pmap.{ml,mli}, ocaml-libpset.{ml,mli} and src/ulib
+All files except ocaml-lib/pmap.{ml,mli}, ocaml-lib/pset.{ml,mli}, src/ulib,
+the Pset/Pmap translations in lean-lib/LemLib.lean, and scripts/capped
 are distributed under the following license: 
 
 Redistribution and use in source and binary forms, with or without
@@ -74,6 +75,15 @@ ocaml-lib/pmap.mli
 ocaml-lib/pmap.ml
 ocaml-lib/pset.mli
 ocaml-lib/pset.ml
+
+The Lean translations of these implementations (the Pset and Pmap
+namespaces in lean-lib/LemLib.lean) retain these GNU Library General Public
+License terms and the source notices reproduced in that file. See
+lean-lib/NOTICE.md for the source provenance and the scope of this notice.
+
+scripts/capped is adapted from Cerberus's scripts/capped and retains the
+BSD 2-clause notice reproduced in that script; it is not under Lem's
+BSD 3-clause default.
 
 
                   GNU LIBRARY GENERAL PUBLIC LICENSE

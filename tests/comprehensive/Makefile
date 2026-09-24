@@ -4,9 +4,9 @@ LEMFLAGS = -wl ign -i $(LEMLIB)/pervasives.lem
 # Every lake invocation runs through the cgroup cap (parity-fix audit
 # response, 2026-09-03: "never run a Lean build uncapped"); the same
 # variables the parity runner honours. Fail-noisy if the cap is absent.
-CAPPED ?= /home/dev/projects/cerberus-lean-proj/cerberus-lean/scripts/capped
+export CAPPED ?= $(abspath ../../scripts/capped)
 export CERB_MEM_MAX ?= 16G
-LAKE = $(CAPPED) lake
+LAKE = "$(CAPPED)" lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
@@ -27,7 +27,7 @@ lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws le
 # an OCaml binary AND a Lean binary from each parity/probes/*.lem, runs
 # both, diffs stdout byte-for-byte, and checks the OCaml output against
 # its committed pin (parity/expected/). Failure probes (f_*) must fail on
-# both targets. Needs the opam switch in PATH (scripts/ce) — the OCaml
+# both targets. Needs the complete opam environment (opam exec --) — the OCaml
 # leg is what makes this a parity test rather than a self-consistency
 # check (the retired M2 scaffold compared hand-measured values).
 lean-parity:
@@ -314,18 +314,19 @@ lean-generate: $(TESTS)
 			fi; \
 		fi; \
 	done; \
-	echo "=== Generation: $$pass passed, $$fail failed, $$skip skipped ==="
+	echo "=== Generation: $$pass passed, $$fail failed, $$skip skipped ==="; \
+	test "$$fail" -eq 0
 	@# Multi-file tests: files that must be compiled together (like Cerberus)
 	@# so that lean_mutual_records accumulates across files.
 	@if $(LEM) $(LEMFLAGS) -lean test_cross_recup_base.lem test_cross_recup_import.lem > /dev/null 2>&1; then \
 		echo "  OK: test_cross_recup_base.lem + test_cross_recup_import.lem (joint)"; \
 	else \
-		echo "  FAIL: test_cross_recup_base.lem + test_cross_recup_import.lem (joint)"; \
+		echo "  FAIL: test_cross_recup_base.lem + test_cross_recup_import.lem (joint)"; exit 1; \
 	fi
 	@if $(LEM) $(LEMFLAGS) -lean test_cross_field_access.lem test_cross_field_access_import.lem > /dev/null 2>&1; then \
 		echo "  OK: test_cross_field_access.lem + test_cross_field_access_import.lem (joint)"; \
 	else \
-		echo "  FAIL: test_cross_field_access.lem + test_cross_field_access_import.lem (joint)"; \
+		echo "  FAIL: test_cross_field_access.lem + test_cross_field_access_import.lem (joint)"; exit 1; \
 	fi
 
 # Symlink generated files into lean-test/ and compile with Lake

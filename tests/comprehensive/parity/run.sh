@@ -46,14 +46,18 @@
 # expected failure now passes: remove it from the list"), so the list
 # cannot go stale and a fix cannot land silently.
 # Usage: ./run.sh [<name>...]   (default: every probes/*.lem), from any cwd,
-#        with the opam switch in PATH (scripts/ce). Env: CAPPED, CERB_MEM_MAX.
+#        with the complete opam environment (opam exec --). Env: CAPPED, CERB_MEM_MAX.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../../.." && pwd)
 LEM="$ROOT/lem"
 LEMFLAGS="-wl ign -i $ROOT/library/pervasives_extra.lem"
 OCAMLLIB="$ROOT/ocaml-lib/_build_zarith"
-CAPPED=${CAPPED:-/home/dev/projects/cerberus-lean-proj/cerberus-lean/scripts/capped}
+CAPPED=${CAPPED:-$ROOT/scripts/capped}
+if [ ! -x "$CAPPED" ]; then
+  echo "FAIL: capped Lean runner not executable: $CAPPED (set CAPPED to an executable wrapper)" >&2
+  exit 1
+fi
 export CERB_MEM_MAX=${CERB_MEM_MAX:-16G}
 OUT="$HERE/_out"
 LT="$HERE/lean-test"
