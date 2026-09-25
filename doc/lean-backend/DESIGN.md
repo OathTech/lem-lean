@@ -1,7 +1,7 @@
 # DESIGN — how the Lean backend works
 
-**Checked 2026-09-24:** source implementation at `1235498fa300c79504684a3bf774b902bc3b7458`;
-[cleanup evidence](2026-09-24_public-readiness-remediation.md). This is an
+**Checked 2026-09-25:** source implementation at `fd048dbaeed9e0031496aa6ae4a56bb20c07841a`;
+[follow-up evidence](2026-09-25_public-readiness-followup.md). This is an
 early experimental backend, not a general correctness proof.
 
 For a newcomer to the code. What the backend emits, and why the
@@ -444,12 +444,12 @@ over bounded-exhaustive operation sequences live in
 list and a `Std.TreeMap`-indexed map reproduced the retired Lean
 assoc-list observables — the parity-fix slice 2026-09-03 replaced them.)
 
-**Backend state lives in one module.** All mutable emission state is
-in `St` (`src/lean_backend.ml`), fields classified by lifetime
-(per-file / per-invocation / per-render) with explicit reset hooks.
-Effect-free emission is a planned refactor; until then the
-discipline is: one module, documented lifetimes, no hidden globals
-elsewhere.
+**Backend state and callbacks.** The emitter's state is grouped in `St`
+(`src/lean_backend.ml`), with per-file / per-invocation / per-render
+lifetimes and reset hooks. `Backend_common.on_cr_simple_applied` is a
+separate process-global callback, installed on entry to `lean_defs`;
+`process_file.ml` supplies `St.current_module_name` before emission.
+Threading these through explicit arguments remains TODO 6.
 
 ## No magic values
 
@@ -519,6 +519,8 @@ unaffected:
 |---|---|
 | ``declare lean target_rep function f = `Lean.Name` `` | map a Lem function to a hand-written Lean definition |
 | ``declare lean target_rep type t = `Lean.Type` `` | map a Lem type to a hand-written Lean type |
+| ``declare {lean} ground_rep val f = `Lean.Name` `` | replace applications of `f` whose result type has no free type variables; preserve arguments and ascribe that ground result type. Non-ground applications keep the ordinary representation. Supply-drawing arguments are refused; bind draws first. |
+| ``declare {lean} extra_import `MyModule` `` | add an explicit module import, including hand-written instances or computable measures; Lean validates availability and types at build time. |
 | `declare {lean} skip_instances type t` | suppress all instance generation for `t` (pair with hand-written instances) |
 | `declare {lean} rename module = Name` | rename the generated module |
 | ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total worker recursing on a fuel counter (returning `sentinel` at zero) + a wrapper `f [LemFuel] := f_lemFuel LemFuel.fuel` starting the counter from the ambient fuel + the exhaustion lemma `f_lemFuel_zero`; `f` and everything reaching it take `[LemFuel]` (the fuel lifting). The numeric form `= N` is refused (a magic value). Composes with truly-mutual blocks (all members fuel'd, all-or-none; wrappers after `end`) and with reader lifting — also inside a mutual block, every member lifted together and each worker/wrapper/obligation/`_zero` lemma carrying the reader binders (S1.5, `2026-09-20_fuel-mutual-reader-record.md`); supply lifting in a truly-mutual block and `reader_seed` in a mutual block remain refused |
@@ -533,6 +535,14 @@ unaffected:
 | `declare {lean} reader_seed val f` | do not lift `f`; with N declared readers its first N arguments are the seeds — one per reader, positionally in the GLOBAL SORTED reader order (the binder order of every lifted def and consumer stub; one order everywhere) — and supply the reader values to lifted callees and consumer calls in its body (N-ary rule, `2026-09-19_nary-reader-seed-record.md`; the seeds are referenced by name, so the seed positions must be simple variables). Refused fail-closed: no reader declared (nothing to seed), fewer than N arguments (the error names N and the order), a seed position that is not a simple variable, and — unchanged — a multi-clause or mutual def, an instance, combination with `fuel` |
 | `declare {lean} supply val c` | supply-lift the counter `c : unit -> nat`: every function that (transitively) draws takes the current supply as an extra parameter and returns the successor supply paired with its result (deterministic state-passing; draws are `LemLib.supplySplit`) |
 | `declare {lean} reader_consumer val f` | pass all reader parameters as extra leading arguments at `f`'s call sites (callers get reader-lifted); `f` must carry an identifier-form Lean target_rep whose implementation takes the leading reader parameters explicitly |
+
+Qualified identifier target representations use a syntactic import heuristic:
+external `MyModule.f` references request `import MyModule`; known namespace
+heads already provided by Lean's prelude (including `Nat`) do not. This is
+not general Lean name resolution. For a namespace nested in a differently
+named module, import that module explicitly with `extra_import` and use a
+Lean expression representation if the automatic first-component import
+would be wrong. The S11 regression checks applied and bare `Nat.succ`.
 
 ## Why this makes generated code trustworthy
 

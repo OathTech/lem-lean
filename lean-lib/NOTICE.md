@@ -1,7 +1,7 @@
 # Runtime provenance and notices
 
-Recorded 2026-09-24 against Lem source `38f87d5fa6b29ec90edfa457faba8a309e32c118`
-and the cleanup's notice restoration (M8). This records source provenance;
+Checked 2026-09-25 against Lem implementation `fd048dbaeed9e0031496aa6ae4a56bb20c07841a`
+after M8 notice restoration. This records source provenance;
 it does not grant a new license or claim a legal review.
 
 `LemLib.lean` contains Lean translations of the AVL set/map algorithms in
@@ -14,15 +14,24 @@ termination arguments, so “verbatim ports” was not a precise description.
 
 The root [LICENSE](../LICENSE) assigns the OCaml source files the GNU
 Library General Public License, Version 2, and includes its full text.
-The translated portions retain those terms. The original headers also
-refer to a linking exception; that wording is preserved, without inventing
-an additional exception for Lean or asserting that the separate LGPL 2.1
-exception attached to `src/ulib` applies to these portions. Maintainers
-should resolve that inherited exception-reference ambiguity before making
-more specific downstream licensing assurances, and reconcile the inherited
-package-level SPDX metadata at that point. The `opam` license list is not
-a replacement for these per-file terms. The remaining original
-runtime code follows Lem's BSD-3-Clause default.
+The translated portions retain those terms. The linking exception referenced
+by their original headers is now reproduced there from the
+[OCaml 3.12.0 LICENSE](https://github.com/ocaml/ocaml/blob/3.12.0/LICENSE),
+checked 2026-09-25. The corresponding
+[map](https://github.com/ocaml/ocaml/blob/3.12.0/stdlib/map.ml) and
+[set](https://github.com/ocaml/ocaml/blob/3.12.0/stdlib/set.ml) headers carry
+the same INRIA attribution and exception reference as Lem's copies.
+Lem's initial Git import is `c99e3f59b5b7963c00f827e3634985dcdf23e43b`
+(2013-03-06); this is source-notice restoration, not a new licensing grant
+or a legal conclusion about a particular downstream distribution.
+The separate `src/ulib` LGPL 2.1-or-later terms are unchanged.
+
+The `opam` metadata lists the base licenses BSD-3-Clause, BSD-2-Clause,
+LGPL-2.0-only and LGPL-2.1-or-later; per-file scope and exceptions remain in
+LICENSE. Original runtime code follows Lem's BSD-3-Clause default. The
+copied cap wrapper carries Cerberus's BSD-2-Clause notice. `make install`
+ships LICENSE beside `lean-lib`, so its relative notice links survive an
+opam installation.
 
 Distributions of the runtime should carry the root LICENSE and these
 source notices. Neither the Lean port nor its proof/test results erase the

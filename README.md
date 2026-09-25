@@ -206,4 +206,4 @@ Lem is made available under the BSD 3-clause license, with the
 exception of a few files derived from OCaml, which are under the
 GNU Library GPL. The fork runtime translations retain those source terms
 ([NOTICE](lean-lib/NOTICE.md)); `scripts/capped` retains its inline
-Cerberus BSD-2-Clause notice (2026-09-24 provenance check, `38f87d5`).
+Cerberus BSD-2-Clause notice (introduced by the 2026-09-24 cleanup, `1235498fa300c79504684a3bf774b902bc3b7458`).

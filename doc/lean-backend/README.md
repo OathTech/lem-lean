@@ -1,7 +1,7 @@
 # The Lean backend for Lem
 
-**Checked 2026-09-24:** source implementation at `1235498fa300c79504684a3bf774b902bc3b7458`;
-[cleanup evidence](2026-09-24_public-readiness-remediation.md). This is an
+**Checked 2026-09-25:** source implementation at `fd048dbaeed9e0031496aa6ae4a56bb20c07841a`;
+[follow-up evidence](2026-09-25_public-readiness-followup.md). This is an
 early experimental backend, not a general correctness proof.
 
 This fork adds a **Lean 4 backend** to [Lem](https://github.com/rems-project/lem):
@@ -83,7 +83,12 @@ opam exec --switch=. -- make nonlean-regress
 
 `scripts/capped` is repository-local; the comprehensive suite uses it by
 default. `CAPPED=/path/to/wrapper` overrides the suite runner. The wrapper
-uses Linux cgroup v2, then a systemd user service. If direct cgroup setup
+uses Linux cgroup v2, then a systemd user service. Direct invocations
+default to 64G; the comprehensive/parity harness defaults to 16G.
+`CERB_MEM_MAX=none` is an explicit, loudly reported uncapped opt-out.
+`CERB_JOB_CGROUP=/delegated/path` requests a caller-owned cgroup subtree;
+setup failure in that mode is fatal. These mechanisms require Linux cgroup
+v2 delegation or a working systemd user service to enforce a cap. If direct cgroup setup
 fails and `systemd-run` is absent, it warns and runs uncapped. If
 `systemd-run` exists but its user service is unavailable, the command fails. `CERB_MEM_MAX=32G` sets
 the cap on a suitably provisioned machine; it is an upper limit, not a
@@ -95,6 +100,31 @@ The [manual](../manual/backend_lean.md) describes the language and a
 reusable Lake setup. Issues about the fork's Lean backend belong in
 [OathTech/lem-lean issues](https://github.com/OathTech/lem-lean/issues);
 include the commit, toolchain, minimal `.lem` source and exact command.
+
+## Validation levels
+
+1. **Newcomer smoke:** the quickstart builds Lem, generates LemLib and a
+   small client, and compiles/evaluates `double 21`. This checks installation
+   and integration, not comprehensive language support.
+2. **Backend regression:** `make -C tests/comprehensive lean` checks generated
+   Lean, negative refusals, invariance and OCaml/Lean parity with panic-abort enabled
+   for native probes; four registered
+   parity XFAILs remain. A build/setup failure is a failure even on a registered
+   XFAIL probe. `make nonlean-regress` compares the nine other
+   emitters' outputs and exit statuses with committed goldens.
+   `bash scripts/test_version.sh` checks the version recipe using isolated
+   scratch tags. `make lean-tests` is an older, broader aggregate including
+   historical examples; its existence is not a claim that all examples pass.
+3. **Consumer/release validation:** Cerberus has its own toolchain, fork-drift
+   prerequisites, lanes and release evidence. A Lem test pass does not certify
+   that consumer or its full release ladder. Neither fork currently has a
+   GitHub Actions Lean certification workflow; the dated manual gate records
+   are the evidence for these claims.
+
+`lem -v` includes a Git hash even at an exact annotated tag
+(`tag-0-g<hash>`, optionally `-dirty`). An archive without Git metadata falls
+back to `LEMRELEASE`; it cannot attest a commit, and a consumer requiring a
+hash must reject that fallback.
 
 ## What you can rely on about the output
 
