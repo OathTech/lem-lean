@@ -27,6 +27,7 @@ install:
 #	cp -R html-lib "$(INSTALL_DIR)/share/lem"
 	cp -R isabelle-lib "$(INSTALL_DIR)/share/lem"
 	cp -R lean-lib "$(INSTALL_DIR)/share/lem"
+	cp LICENSE "$(INSTALL_DIR)/share/lem/LICENSE"
 #	cp -R tex-lib "$(INSTALL_DIR)/share/lem"
 
 uninstall:
