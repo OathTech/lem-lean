@@ -36,3 +36,5 @@ opam installation.
 Distributions of the runtime should carry the root LICENSE and these
 source notices. Neither the Lean port nor its proof/test results erase the
 upstream attribution or turn the entire runtime into BSD-only code.
+
+Maintainer confirmation of the Lean-translation classification under the inherited exception remains open (public-readiness sweep, 2026-09-25 [AGENT]; the review's T3 note). No ruling is recorded here.

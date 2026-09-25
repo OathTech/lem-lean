@@ -190,3 +190,13 @@ ref and its peeled `^{}` ref, fetch/checkout each tag and rebuild. `lem -v`
 and the OCaml `cerberus --version` must carry the checked-out commit prefix;
 the in-repo version tests establish the generator behavior, not published-tag
 availability. No tag was created in either project repository here.
+
+## Sweep addendum (2026-09-25, orchestrator [AGENT])
+
+Consumer consequence of S13 (review T2): `lean-lib/LemLib.lean` itself changed — the `never_extract` attribute on the
+public `fuelExhausted` wrapper — so the LemLib RUNTIME every consumer links changed even though no generated model text
+did (cerberus-lean's regenerated OCaml and Lean trees are byte-identical to the previous pin's under this lem). Every
+consumer must move its Lake `LemLib` rev to this lem-lean head or later; cerberus-lean did so at its five pin sites.
+Landed on `mdd/lean-backend` at `67ec5de` on [USER 2026-09-25] "Great, go ahead with the whole merge and sweep as
+proposed"; this sweep adds the in-file rationale (T1), the NOTICE line (T3) and brings the independent delta reviews
+(`2026-09-24_public-readiness-must-delta-review.md`, `2026-09-25_public-readiness-should-delta-review.md`) onto the mainline.

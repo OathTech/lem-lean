@@ -258,7 +258,14 @@ end Vector
 
 /- Message-less variant for 'declare {lean} fuel val' sentinels: the lem
    backtick lexer excludes double quotes, so declares cannot carry a
-   message string. Unfolds to the opaque core — same cone hygiene. -/
+   message string. Unfolds to the opaque core.
+   `never_extract` (public-readiness S13, 2026-09-25): without it the
+   compiler lifts a CLOSED application `fuelExhausted w` to a module-init
+   constant and evaluates the sentinel eagerly (silently, panic messages
+   are suppressed during initialisation), so a sufficient-fuel run could
+   abort on the sentinel it never reached. Regression: the strict native
+   parity probe `tests/comprehensive/parity` `p_lem_size` under
+   LEAN_ABORT_ON_PANIC=1 (doc/lean-backend/2026-09-25_public-readiness-followup.md). -/
 @[never_extract] def fuelExhausted {α : Type} (witness : α) : α :=
   fuelExhaustedWith "lem: fuel exhausted" witness
 
