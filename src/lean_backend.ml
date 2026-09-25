@@ -1303,8 +1303,20 @@ let collect_cr_simple_import (is_library : bool) (id_str : string) =
   match String.index_opt id_str '.' with
     | Some dot_pos when dot_pos > 0 ->
       let mod_name = String.sub id_str 0 dot_pos in
+      (* Namespace heads provided by Lean's Init/LemLib import are not
+         module filenames: e.g. Nat.succ must not cause `import Nat`.
+         This is a syntactic convenience, not Lean name resolution; other
+         namespace/module mismatches need an explicit extra_import. *)
+      let prelude_namespaces =
+        ["Nat"; "Int"; "Bool"; "String"; "Char"; "List"; "Option";
+         "Array"; "ByteArray"; "Except"; "Sum"; "Prod"; "Unit";
+         "PUnit"; "Empty"; "PEmpty"; "Ordering"; "Fin"; "Float";
+         "UInt8"; "UInt16"; "UInt32"; "UInt64"; "USize";
+         "Int8"; "Int16"; "Int32"; "Int64"; "ISize";
+         "LemUnsupported"] in
       if String.length mod_name > 0 &&
          Char.uppercase_ascii mod_name.[0] = mod_name.[0] &&
+         not (List.mem mod_name prelude_namespaces) &&
          not (List.mem mod_name !St.collected_imports) then
         St.collected_imports := mod_name :: !St.collected_imports
     | _ -> ()
@@ -6902,17 +6914,7 @@ type pat_style = FunParam | MatchArm
               | Some (Types.TYR_simple (_, _, target_ident)) ->
                 (* Collect import for the type target rep's module *)
                 let target_id_str = Ident.to_string target_ident in
-                (match String.index_opt target_id_str '.' with
-                  | Some dot_pos when dot_pos > 0 ->
-                    let mod_name = String.sub target_id_str 0 dot_pos in
-                    if String.length mod_name > 0 &&
-                       Char.uppercase_ascii mod_name.[0] = mod_name.[0] &&
-                       (* the unsupported-construct markers are a NAMESPACE
-                          inside LemLib, not a module *)
-                       String.concat "" [mod_name; "."] <> lean_unsupported_prefix &&
-                       not (List.mem mod_name !St.collected_imports) then
-                      St.collected_imports := mod_name :: !St.collected_imports
-                  | _ -> ());
+                collect_cr_simple_import false target_id_str;
                 let name = B.type_path_to_name n0 t_path in
                 let name_out = Name.to_output (Type_ctor (false, false)) name in
                 let tyvars_out = type_def_type_variables tyvars in

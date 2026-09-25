@@ -259,7 +259,7 @@ end Vector
 /- Message-less variant for 'declare {lean} fuel val' sentinels: the lem
    backtick lexer excludes double quotes, so declares cannot carry a
    message string. Unfolds to the opaque core — same cone hygiene. -/
-def fuelExhausted {α : Type} (witness : α) : α :=
+@[never_extract] def fuelExhausted {α : Type} (witness : α) : α :=
   fuelExhaustedWith "lem: fuel exhausted" witness
 
 /- fromJustI: ground-site head for msg-carrying fromJust helpers

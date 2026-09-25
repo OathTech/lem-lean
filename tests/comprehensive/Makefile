@@ -10,7 +10,7 @@ LAKE = "$(CAPPED)" lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals check-capped clean
+.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -19,7 +19,13 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+lean: lean-version lean-parity-admission lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+
+lean-parity-admission:
+	@bash parity/test_failure_admission.sh
+
+lean-version:
+	@bash ../../scripts/test_version.sh
 
 # Two-target parity (parity-fix slice 2026-09-03; [USER] ruling: the OCaml
 # target is the reference semantics of a lem program, the Lean target
@@ -248,7 +254,7 @@ lean-tuple-once:
 lean-panic:
 	@echo "=== Panic-path pin (failwithI raise at the L_undefined arm) ==="
 	@cd lean-test && $(LAKE) build test-failwith-panic > /dev/null
-	@out=$$(cd lean-test && ./.lake/build/bin/test-failwith-panic 2>&1); st=$$?; \
+	@out=$$(cd lean-test && env -u LEAN_ABORT_ON_PANIC ./.lake/build/bin/test-failwith-panic 2>&1); st=$$?; \
 	if [ $$st -ne 0 ]; then \
 		echo "  FAIL (leg 1): nonzero exit $$st without LEAN_ABORT_ON_PANIC"; \
 		echo "$$out"; exit 1; \

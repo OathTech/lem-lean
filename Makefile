@@ -1,7 +1,8 @@
 # Attempt to ask git for a version (tag or hash) but fall back on LEMRELEASE.
 # Note that opam builds from a tar ball so LEMRELEASE will be used in that case.
 LEMRELEASE:=2026-05-01
-LEMVERSION:=$(shell git describe --dirty --always 2>/dev/null || echo $(LEMRELEASE))
+# --long keeps the commit suffix even at an exact annotated release tag.
+LEMVERSION:=$(shell git describe --long --dirty --always 2>/dev/null || echo $(LEMRELEASE))
 
 DDIR=lem-$(LEMVERSION)
 
@@ -98,11 +99,12 @@ coq-libs:
 lean-libs:
 	$(MAKE) -C library lean-libs
 
-# Run the full Lean backend test suite:
+# Extended Lean targets, including historical examples; see the backend
+# README for the separately measured comprehensive gate and its limits.
 #   1. Build the compiler
 #   2. Regenerate and compile the Lean library (lean-lib/)
 #   3. Backend tests (tests/backends/ — 12 .lem files)
-#   4. Comprehensive tests (tests/comprehensive/ — 48 .lem files, 300+ assertions)
+#   4. Comprehensive tests (tests/comprehensive/)
 #   5. ppcmem-model example (examples/ppcmem-model/ — 10 .lem files)
 #   6. cpp example (examples/cpp/ — 1 large .lem file, ~1930 lines generated)
 lean-tests: bin/lem lean-libs

@@ -417,3 +417,12 @@ let rec fuel_constrained n x y =
 declare {lean} fuel val fuel_constrained = `fuelExhausted x`
 
 let uses_fuel_constrained (k : nat) : nat = fuel_constrained 0 k (k + 1)
+
+(* Public-readiness S11, 2026-09-25: a core namespace is not a module.
+   Both applied and bare/higher-order references must elaborate. *)
+val core_successor : nat -> nat
+declare lean target_rep function core_successor = `Nat.succ`
+let {lean} core_successor_applied = core_successor 41
+let {lean} core_successor_bare : nat -> nat = core_successor
+assert {lean} core_successor_applied_ok : core_successor_applied = (42:nat)
+assert {lean} core_successor_bare_ok : core_successor_bare 41 = (42:nat)

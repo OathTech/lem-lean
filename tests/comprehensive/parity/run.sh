@@ -52,7 +52,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../../.." && pwd)
 LEM="$ROOT/lem"
 LEMFLAGS="-wl ign -i $ROOT/library/pervasives_extra.lem"
-OCAMLLIB="$ROOT/ocaml-lib/_build_zarith"
+LEM_OCAML_RUNTIME="$ROOT/ocaml-lib/_build_zarith"
 CAPPED=${CAPPED:-$ROOT/scripts/capped}
 if [ ! -x "$CAPPED" ]; then
   echo "FAIL: capped Lean runner not executable: $CAPPED (set CAPPED to an executable wrapper)" >&2
@@ -100,6 +100,7 @@ cp "$HERE/../lean-test/lean-toolchain" "$LT/lean-toolchain"
 status=0
 xfail_status=0
 run_one() {
+  parity_mismatch=0
   name=$1
   src="$HERE/probes/$name.lem"
   pin="$HERE/expected/$name.out"
@@ -115,7 +116,7 @@ run_one() {
   else echo "let () = List.iter print_endline $Mod.results" > "$OUT/ocaml/$name/main.ml"; fi
   ext=""
   if [ -f "$HERE/probes/$name.ext.ml" ]; then cp "$HERE/probes/$name.ext.ml" "$OUT/ocaml/$name/parity_ext.ml"; ext="parity_ext.ml"; fi
-  if ! ( cd "$OUT/ocaml/$name" && ocamlfind ocamlopt -package zarith -linkpkg -I "$OCAMLLIB" "$OCAMLLIB/extract.cmxa" $ext "$name.ml" main.ml -o run.native ) > "$OUT/ocaml/$name/build.log" 2>&1; then
+  if ! ( cd "$OUT/ocaml/$name" && ocamlfind ocamlopt -package zarith -linkpkg -I "$LEM_OCAML_RUNTIME" "$LEM_OCAML_RUNTIME/extract.cmxa" $ext "$name.ml" main.ml -o run.native ) > "$OUT/ocaml/$name/build.log" 2>&1; then
     echo "  FAIL: OCaml build failed:"; sed -n 1,20p "$OUT/ocaml/$name/build.log"; return 1; fi
   ( cd "$OUT/ocaml/$name" && ./run.native ) > "$OUT/ocaml/$name.out" 2> "$OUT/ocaml/$name.err"; oc_st=$?
   if [ $failure_probe = 1 ]; then
@@ -144,18 +145,19 @@ run_one() {
   if [ ! -x "$exe" ]; then echo "  FAIL (vacuous): Lean exe $exe was not built"; return 1; fi
   if [ $failure_probe = 1 ]; then
     LEAN_ABORT_ON_PANIC=1 "$exe" > "$OUT/lean/$name.out" 2> "$OUT/lean/$name.err"; ln_st=$?
-    if [ $ln_st -eq 0 ]; then echo "  FAIL: failure probe, but the Lean binary SUCCEEDED (exit 0) where the OCaml reference fails"; return 1; fi
+    if [ $ln_st -eq 0 ]; then parity_mismatch=1; echo "  FAIL: failure probe, but the Lean binary SUCCEEDED (exit 0) where the OCaml reference fails"; return 1; fi
     if diff "$OUT/ocaml/$name.out" "$OUT/lean/$name.out" > "$OUT/$name.diff"; then
       echo "  OK: both fail (lean exit $ln_st: $(head -c 120 "$OUT/lean/$name.err" | tr '\n' ' ')); stdout prefix identical ($(wc -l < "$OUT/lean/$name.out") lines)"; return 0
     else
-      echo "  FAIL: both fail but the stdout prefixes differ (< OCaml, > Lean):"; head -20 "$OUT/$name.diff"; return 1
+      parity_mismatch=1; echo "  FAIL: both fail but the stdout prefixes differ (< OCaml, > Lean):"; head -20 "$OUT/$name.diff"; return 1
     fi
   else
-    "$exe" > "$OUT/lean/$name.out" 2>&1; ln_st=$?
+    LEAN_ABORT_ON_PANIC=1 "$exe" > "$OUT/lean/$name.out" 2>&1; ln_st=$?
     if diff "$OUT/ocaml/$name.out" "$OUT/lean/$name.out" > "$OUT/$name.diff"; then
       if [ $ln_st -ne 0 ]; then echo "  FAIL: Lean binary exited $ln_st (output identical)"; return 1
       else echo "  OK: parity ($(wc -l < "$OUT/lean/$name.out") lines byte-identical to the OCaml reference; pin matches)"; return 0; fi
     else
+      [ "$ln_st" -eq 0 ] && parity_mismatch=1
       echo "  FAIL: PARITY DIFF (< OCaml reference, > Lean; lean exit $ln_st):"; head -40 "$OUT/$name.diff"; return 1
     fi
   fi
@@ -167,7 +169,12 @@ for name in "$@"; do
   if run_one "$name"; then
     if [ -n "$xreason" ]; then echo "  FAIL: EXPECTED FAILURE NOW PASSES ($xreason) — remove it from expected_failures.txt"; status=1; fi
   else
-    if [ -n "$xreason" ]; then echo "  XFAIL (expected, registered): $xreason"; xfail_status=1; else status=1; fi
+    if [ -n "$xreason" ] && [ "$parity_mismatch" -eq 1 ]; then
+      echo "  XFAIL (expected, registered): $xreason"; xfail_status=1
+    else
+      [ -z "$xreason" ] || echo "  FAIL: registered probe did not reach its expected parity disagreement (not XFAIL)"
+      status=1
+    fi
   fi
 done
 exit $status
