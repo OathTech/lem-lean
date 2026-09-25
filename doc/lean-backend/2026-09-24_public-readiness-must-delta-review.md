@@ -602,3 +602,10 @@ P2 or P3 remains on the lem-lean side; two notes (C1, C2). The two-repo
 sequencing fact from R-F stands: cerberus must re-pin to the final lem
 head together with its `cmm_csem.lem` marker replacement. Merge authority
 rests with the operator.
+
+## Pointer — third pass (SHOULD block)
+
+[AGENT 2026-09-25] The SHOULD-block range `6b20bfd..67ec5de` is reviewed in
+a separate dated file, [`2026-09-25_public-readiness-should-delta-review.md`](2026-09-25_public-readiness-should-delta-review.md)
+(different range, day and mainline base). First-pass F2 is recorded there as
+closed on the cerberus SHOULD branch.
