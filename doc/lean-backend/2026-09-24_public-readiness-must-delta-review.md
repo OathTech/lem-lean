@@ -429,3 +429,176 @@ Operationally the re-pin is a hard two-repo step: mainline cerberus at
 e9f9d049f cannot generate against this lem until its companion
 (`0a6d59eed`, 23 markers) lands with it. Merge authority rests with the
 operator.
+
+## Closure delta — second pass at 6b20bfd
+
+[AGENT — independent delta review, second pass, Claude Fable subagent,
+2026-09-25 (closure commits dated 2026-09-24)]. Same method and same
+limits as above: read-only `git show`/`diff`/`grep`/`cmp`/`sha256sum`
+from my worktree; no builds; the orchestrator's marker
+`.tmp/orch-ALL-DONE` and `.tmp/orch-gates-closure.log` were both ABSENT
+in the cleanup worktree when checked, so every gate line quoted from the
+closure record is the remediator's CLAIM.
+
+```
+$ git log --oneline 9bb6c6b..6b20bfd
+6b20bfd MUST closure F3/F4: append provenance corrections and verified F1/F5 record
+292db8b M4 closure F1/F5: refuse substituted sorry types and restore recursive rep coverage
+$ git merge-base --is-ancestor 38f87d5 6b20bfd && echo yes   → yes
+$ git merge-base --is-ancestor 9bb6c6b 6b20bfd && echo yes   → yes
+$ git diff --stat 9bb6c6b 6b20bfd
+ .../2026-09-24_public-readiness-closure.md         | 92 ++++++++++++++++++++++
+ .../2026-09-24_public-readiness-remediation.md     | 32 ++++++++
+ src/lean_backend.ml                                |  4 +
+ .../negative/neg_inline_relation_type_sorry.lem    |  6 ++
+ .../negative/neg_inline_type_sorry.lem             |  5 ++
+ tests/comprehensive/test_target_reps.lem           | 12 +++
+ 6 files changed, 151 insertions(+)
+```
+
+### (1) The `src/lean_backend.ml` +4 — PASS
+
+Exactly the two `Typ_backend` render arms named in F1, nothing else
+(verbatim from `git show 292db8b -- src/lean_backend.ml`):
+```
+@@ -7174,6 +7174,8 @@           (pat_typ)
+         | Typ_backend (p, ts) ->
+           let i = Path.to_ident (ident_get_lskip p) p.descr in
++          if String.trim (Ident.to_string i) = "sorry" then
++            raise (lean_sorry_rep_error t.locn "inline backend type");
+@@ -7225,6 +7227,8 @@           (indreln_typ)
+         | Typ_backend (p, ts) ->
+           let i = Path.to_ident (ident_get_lskip p) p.descr in
++          if String.trim (Ident.to_string i) = "sorry" then
++            raise (lean_sorry_rep_error t.locn "inline relation backend type");
+```
+Both arms sit under `and pat_typ t = match t.term with` and `and
+indreln_typ t = match t.term with`, so `t.locn` is the rendered
+`src_t`'s location. The existing diagnostic is reused. Census of
+`Typ_backend` at 6b20bfd: `:1377`, `:1469`, `:3033`, `:6668` (analysis
+only), `:7175` and `:7228` (the two renderers, now guarded), `:7296`
+(renders the literal `default`, not the type). No other type renderer
+exists, so the two guards close the type-position route.
+
+### (2) The two fixtures reach those sites and are wired — PASS (with a correction to my first pass)
+
+```
+neg_inline_type_sorry.lem
+  (* EXPECT: forbidden (inline backend type) *)
+  declare lean target_rep type nat = (`sorry`)
+  type inline_hole = Hole of nat
+neg_inline_relation_type_sorry.lem
+  (* EXPECT: forbidden (inline relation backend type) *)
+  declare lean target_rep type nat = (`sorry`)
+  indreln [inline_relation : nat -> bool]
+    inline_rule : forall x. true ==> inline_relation x
+```
+Route: the parenthesised backend type makes the declared rep a
+`TYR_subst` whose `src_t` is a `Typ_backend` — bypassing the
+declaration-level `TYR_simple` guard — and the substitution at a use site
+(a constructor field → `pat_typ`; a relation type → `indreln_typ`) lands
+on exactly the two guarded arms. The `EXPECT:` fragments are substrings of
+the diagnostic ("… is forbidden (inline backend type); provide …"), matched
+by `grep -qF` (`Makefile:289`); wiring is automatic through the
+`negative/neg_*.lem` glob (`Makefile:284`; the Makefile is unchanged in
+this range). The closure record explains why the fixtures are not the
+*direct* `val x : `sorry`` form I named: that form "rejected … in the
+typechecker before the renderer" (closure record `:72-75`), i.e. it is
+already refused upstream of emission.
+
+**Erratum to my first pass (R-B, appended, not rewritten):** I wrote
+"`TYR_subst` carries a Lem `src_t`, so a Lean `sorry` can only enter
+through a constructor whose own rep is checked". That was wrong: a
+parenthesised backend type is a `Typ_backend` `src_t` directly, so a
+`TYR_subst` rep can carry a bare `sorry` without any constructor. The
+remediator's fixtures demonstrate exactly this; the new render-site
+guards are the right place to close it.
+
+### (3) `process_val` let-rec coverage restored with a concrete rep — PASS
+
+`test_target_reps.lem:207-215` adds `val process_val_body : myval -> list
+nat -> nat` / `let rec process_val_body v path = …` (the same
+unit-match-then-tuple-match body), and `:226` adds, after the definition,
+`declare lean target_rep function process_val v path = process_val_body v
+path` — a parameter-binding (`CR_inline`) rep on a `let rec`, which is the
+`def_trans.ml:245` `_def_lemma` trigger. `assert unit_match` is retained.
+`grep -n -i sorry` over the file at 6b20bfd hits only three comment lines
+(`:2-3`, `:87`); no `sorry` rep remains. The closure record's statement
+that the auxiliary now contains, verbatim, `/- removed theorem
+process_val_def_lemma -/` is a CLAIM not re-run here.
+
+### (4) Appendices: verbatim [USER] rulings and the 3→23 erratum, appended — PASS
+
+```
+$ git show 9bb6c6b:…remediation.md | wc -l → 140 ;  6b20bfd → 172
+$ cmp <(git show 9bb6c6b:…remediation.md) <(git show 6b20bfd:…remediation.md | head -140)
+first 140 lines IDENTICAL to 9bb6c6b copy (append-only)
+```
+The appended `## Closure addendum — corrections and operator provenance
+(2026-09-24)` (`:142-172`) states, verbatim: "The M4 row above says
+"three excluded CMM reps". That is an incorrect tally: **23** target
+representations were replaced by `LemUnsupported.Cmm.*` markers in
+Cerberus `abe505d3d` (derived from the `frontend/concurrency/cmm_csem.lem`
+diff against `e9f9d049f`). The original body is retained as the record of
+the first checkpoint." Two `[USER 2026-09-24]` blocks follow with
+block-quoted rulings (the M1 MUST/SHOULD split; three engagement-rule
+excerpts). Cross-references verified read-only in cerberus-lean:
+`abe505d3d`, `aab00b9b6`, `0a6d59eed` are commits;
+`aab00b9b6:lean_frontend/docs/2026-09-24_public-readiness-must-checkpoint-orchestrator-note.md`
+exists; `cmm_csem.lem` @ `abe505d3d` has 0 `` `sorry` `` reps and 23
+`LemUnsupported` lines (derived) — consistent with the erratum and with
+my `0a6d59eed` measurement. The 07b709e review body and the first
+remediation body are untouched. New dated record
+`2026-09-24_public-readiness-closure.md` (92 lines) is headed `[AGENT]`,
+names its implementation pin `292db8b…`, labels its 438.45 s wall time
+"not a performance claim", and records its two failed development runs
+(exit 2) as not counted. Its derived "107 negative cases" = 105 + 2 (this
+review's count).
+
+### (5) Review document — PASS
+
+```
+$ git show 6b20bfd:doc/lean-backend/2026-09-24_public-readiness-review.md | sha256sum
+829b78d822878242023f4354a7f29f20031ee0fd77882f206bbc8f67f7c58641  -
+$ git log --oneline 07b709e..6b20bfd -- doc/lean-backend/2026-09-24_public-readiness-review.md
+(no output)
+```
+
+### (6) Ancestry and pin-moving set — PASS
+
+`38f87d5` is an ancestor of `6b20bfd` (above). Non-doc files in
+`9bb6c6b..6b20bfd`: `src/lean_backend.ml` (+4, the only tool change) and
+tests (`negative/neg_inline_type_sorry.lem`,
+`negative/neg_inline_relation_type_sorry.lem`, `test_target_reps.lem`
++12). Docs: the new closure record and the +32 appendix. LemLib, LICENSE,
+NOTICE, wrapper, Makefiles, front pages: unchanged in this range.
+
+### Closure findings
+
+| # | Grade | Where (at 6b20bfd) | Finding | One-line fix |
+|---|---|---|---|---|
+| C1 | N | `src/lean_backend.ml:2369-2390` | Declaration-level asymmetry remains: an UNUSED `TYR_simple` `sorry` type rep is refused at declaration, but an UNUSED parenthesised `TYR_subst` `sorry` type rep is refused only when a use site renders it. Emission-time fail-closed holds (nothing is emitted for an unused rep), so no live hole; symmetry only. | Walk `TYR_subst` `src_t`s for a `Typ_backend` `sorry` in `lean_sorry_rep_check`. |
+| C2 | N | remediation record `:144-148` | The addendum says "checked at Lem `9bb6c6b` and Cerberus `0a6d59eed`" but attributes the 23 to `abe505d3d`; both cerberus commits exist and both carry 23 markers, so the numbers agree — the double citation is a wording wrinkle only. | None required; optional one-word clarification in a future addendum. |
+
+F1 and F5 (first pass) are CLOSED by 292db8b; F3 and F4 are CLOSED by
+6b20bfd's appendix. F2 (cerberus fork-drift prefix compare) is
+cerberus-side and remains open there; F6–F10 notes stand.
+
+## VERDICT (updated for 6b20bfd)
+
+[AGENT] **Merge-ready as is at 6b20bfd**, conditional on the
+orchestrator's independent green gate on that head (this review ran
+nothing; the orchestrator's closure log and marker were absent at my
+check). The closure delta is exactly the four-line render-site refusal I
+asked for, two negative fixtures that demonstrably reach both sites
+through the `TYR_subst` bypass (a route my first pass mis-assessed —
+erratum above), a concrete-rep restoration of the `process_val`
+`_def_lemma` route with no `sorry`, and an append-only remediation
+appendix that carries the 3→23 erratum and two verbatim
+`[USER 2026-09-24]` rulings without touching any dated body. The review
+document is still byte-identical to 07b709e; `38f87d5` is still an
+ancestor; the pin-moving set is `src/lean_backend.ml` plus tests. No P1,
+P2 or P3 remains on the lem-lean side; two notes (C1, C2). The two-repo
+sequencing fact from R-F stands: cerberus must re-pin to the final lem
+head together with its `cmm_csem.lem` marker replacement. Merge authority
+rests with the operator.
