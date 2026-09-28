@@ -210,19 +210,30 @@ with the original error, this branch compiles and its assert passes).
 
 ## Impact on the Cerberus tree (measured, not re-pinned)
 
-The Cerberus Lean tree (`LEM_SRC_LEAN`, 85 sources, 170 files) generated
-into scratch directories with pristine c2a68e7 and with this branch, same
-flags as `make lean-prelude-src`; the cerberus checkout was not touched.
-Differences, all in the categories above:
-- B9: `set_option compiler.extract_closed false` in all 170 files;
-- B8: 9 `@[never_extract]` (nullary polymorphic definitions, e.g. `empty_sigma`);
-- B11: ~120 local lambda lets gain a type annotation;
-- B4: a few constructor arguments print an abbreviation expanded
-  (`continuation_element`'s `Kunseq`/`Kwseq`/`Ksseq`).
-No `.mk` literal changes (B7 does not affect Cerberus: no mutual-record
-literal lists its fields out of declaration order), no B3 chunking, no
-renames. Before any re-pin: measure the B9 performance effect on the
-Cerberus lanes (closed subterms are recomputed rather than cached; Cerberus
-runs on 4.32, whose lazy closed-term initialisation already avoids the
-load-time evaluation B9 addresses, so B9 buys it semantics-independence
-from the toolchain at a possible runtime cost). Operator decision.
+Generated with this branch (lem `65389aa`) in a scratch clone of cerberus-lean
+`d62f52121` (the container checkout untouched): 170 files; differences from
+c2a68e7 output are B4 expansions, B8 attributes (9), B9's option (170 files),
+B11 annotations (~120) and B13 `lem_if` (414). No `.mk` literal reorderings
+(B7 does not affect Cerberus). The tree COMPILES (395 jobs, Lean 4.32.2,
+LemLib from this branch by path).
+
+B9 cost, A/B on that one tree (only difference: the `set_option` lines in
+the 170 modules and LemLib's generated modules), csmith corpus lane via
+`scripts/measure_csmith_cpu.py --max 200` (CPU = user+sys, GNU time):
+- Lean CPU over the 97 inputs Lean ran and matched in both: A (extraction
+  on) 32.61 s, B (B9) 39.45 s: +21.0 %; per input over the 10 inputs with
+  >= 0.5 s: median +12.6 %, range +2.3 % .. +73.2 % (sa_csmith_272:
+  5.38 s -> 9.32 s); max RSS +4.2 %.
+- control, the unchanged OCaml oracle binary: B/A = 0.992 (the load moved
+  between 3.7 and 58 across the runs; CPU is comparable to ~1 %).
+- lane statuses identical in both variants.
+
+Toolchain check of the hazard B9 removes (`if b then g 10 else 0`, `g 10`
+panicking, run with `LEAN_ABORT_ON_PANIC=1` and no arguments): Lean 4.28.0
+aborts at start-up (exit 134); Lean 4.32.2 exits 0 (closed terms are
+initialised lazily at first use), and still aborts when the branch is taken.
+So B9 is required on LemLib's pinned 4.28.0 and buys nothing on 4.32.2,
+where it costs ~21 % CPU on this lane. Options (operator decision): keep B9
+unconditional; or move lem-lean's toolchain pin to 4.32.2 (Cerberus's) and
+drop the option, keeping `lean-untaken-failure` as the guard that fails if a
+toolchain with eager closed-term initialisation comes back.
