@@ -194,3 +194,22 @@ admission test failed loudly. Now `$(abspath ../../library)`.
   operator decision): render Lem's Bool `if` as `bif`/`cond` (no Decidable
   search at all; changes every conditional and ite-based proof style), or
   emit non-dependent local lets as `have`.
+
+## Impact on the Cerberus tree (measured, not re-pinned)
+
+The Cerberus Lean tree (`LEM_SRC_LEAN`, 85 sources, 170 files) generated
+into scratch directories with pristine c2a68e7 and with this branch, same
+flags as `make lean-prelude-src`; the cerberus checkout was not touched.
+Differences, all in the categories above:
+- B9: `set_option compiler.extract_closed false` in all 170 files;
+- B8: 9 `@[never_extract]` (nullary polymorphic definitions, e.g. `empty_sigma`);
+- B11: ~120 local lambda lets gain a type annotation;
+- B4: a few constructor arguments print an abbreviation expanded
+  (`continuation_element`'s `Kunseq`/`Kwseq`/`Ksseq`).
+No `.mk` literal changes (B7 does not affect Cerberus: no mutual-record
+literal lists its fields out of declaration order), no B3 chunking, no
+renames. Before any re-pin: measure the B9 performance effect on the
+Cerberus lanes (closed subterms are recomputed rather than cached; Cerberus
+runs on 4.32, whose lazy closed-term initialisation already avoids the
+load-time evaluation B9 addresses, so B9 buys it semantics-independence
+from the toolchain at a possible runtime cost). Operator decision.
