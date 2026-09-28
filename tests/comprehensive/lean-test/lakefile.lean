@@ -33,6 +33,7 @@ lean_lib LemComprehensiveTest where
     `Test_either_maybe, `Test_either_maybe_auxiliary,
     `Test_expressions, `Test_expressions_auxiliary,
     `Test_integer_div, `Test_integer_div_auxiliary,
+    `Test_if_bool_cond, `Test_if_bool_cond_auxiliary,  -- Bool if via lem_if where Lean`s if gets stuck (linksem B13)
     `Test_instance_priority, `Test_instance_priority_auxiliary,
     `Test_name_capture, `Test_name_capture_auxiliary,
     `Test_failwith_threading, `Test_failwith_threading_auxiliary,

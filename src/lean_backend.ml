@@ -160,6 +160,7 @@ let lean_syntax_keywords = [
   "none"; "some"; "true"; "false"; "default";
   "this"; "rfl"; "calc"; "decide"; "sorry";
   "pure"; "get"; "set"; "throw"; "panic"; "admit"; "trivial";
+  "lem_if";  (* LemLib's Bool-conditional token (B13) *)
   (* linksem 2026-09-28 (B5): every identifier-shaped core-grammar token
      that fails as a binder on the pinned toolchain (linksem hit `matches`);
      derived and checked by scripts/lean_keyword_probe.sh, which fails if
@@ -3242,6 +3243,20 @@ let field_ident_to_output fd ascii_alternative =
 (* B3 (linksem 2026-09-28): if/else-if chains longer than this are split
    into blocks of [lean_if_chain_block] arms (see the If renderer). Lean's
    limit is ~128 levels; the margin covers chains nested in other terms. *)
+(* linksem 2026-09-28 (B13): Lem's `if` takes a `bool`. Emitted as Lean's
+   `if c then ...`, it relied on the Bool->Prop coercion plus a Decidable
+   instance search, both instance problems that Lean elaborates behind
+   `wait_if_type_mvar%` and that can get STUCK depending on context
+   (linksem link.lem: "Application type mismatch ... Bool ... expected
+   Prop"; the coercion problem `CoeT Bool c Prop` mentions the condition
+   term, which mentioned a let-variable whose value still had a postponed
+   match). LemLib's `lem_if c then t else e` expands to
+   `@ite _ (c = true) (instDecidableEqBool _ _) t e`: no instance search,
+   the condition written once, and the SAME kernel term Lean elaborates for
+   a Bool `if` (pinned in LemLibTest). Where conditions are rendered as
+   Prop (indreln premises, St.prop_equality) the builtin `if` stays. *)
+let lean_if_kw () = if !St.prop_equality then "if" else "lem_if"
+
 let lean_if_chain_max = 96
 let lean_if_chain_block = 64
 
@@ -5536,10 +5551,10 @@ type pat_style = FunParam | MatchArm
       let vl = lean_sv_out vl in
       let rhs =
         if kind = "&&" then
-          Output.flat [from_string "if "; vl; from_string " then "; arm_r;
+          Output.flat [from_string "lem_if "; vl; from_string " then "; arm_r;
                        from_string " else "; const_arm "false"]
         else
-          Output.flat [from_string "if "; vl; from_string " then "; const_arm "true";
+          Output.flat [from_string "lem_if "; vl; from_string " then "; const_arm "true";
                        from_string " else "; arm_r] in
       let (bind, v, senv') = supply_join senv1 rhs in
       (bs1 @ [bind], v, senv')
@@ -5615,14 +5630,14 @@ type pat_style = FunParam | MatchArm
         let v0 = lean_sv_out v0 in
         if not (exp_needs_supply et || exp_needs_supply ef) then
           (bs0,
-           SPure (Output.flat [from_string "(if "; v0; from_string " then "; pure_out et;
+           SPure (Output.flat [from_string "(lem_if "; v0; from_string " then "; pure_out et;
                         from_string " else "; pure_out ef; from_string ")"]),
            senv0)
         else begin
           let armT = supply_arm inside_instance senv0 et in
           let armF = supply_arm inside_instance senv0 ef in
           let (bind, v, senv') = supply_join senv0
-            (Output.flat [from_string "if "; v0; from_string " then "; armT;
+            (Output.flat [from_string "lem_if "; v0; from_string " then "; armT;
                           from_string " else "; armF]) in
           (bs0 @ [bind], v, senv')
         end
@@ -6461,7 +6476,7 @@ type pat_style = FunParam | MatchArm
               in
               let render_arm (skips, test, skips', t, skips'') =
                 Output.flat [
-                  ws skips; from_string "if";
+                  ws skips; from_string (lean_if_kw ());
                   from_string " "; render_cond test;
                   ws skips'; from_string "then"; from_string " ";
                   exp inside_instance t;

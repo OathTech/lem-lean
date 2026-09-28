@@ -18,7 +18,7 @@ namespace Lem_Assert_extra
 /- removed value specification -/
 
 def  ensure  (test : Bool) (msg : String)  : Unit := 
-  if  test then 
+  lem_if  test then 
     ()
    else (failwithI  msg : Unit)
 

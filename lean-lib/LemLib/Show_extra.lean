@@ -53,9 +53,9 @@ def  stringFromSet  {a : Type} [SetType a]  (showX : a → String) (xs : Pset a)
 
 /-  Abbreviates the representation if the relation is transitive.  -/
 def  stringFromRelation  {a : Type} [Eq0 a] [SetType a]  (showX : (a ×a) → String) (rel1 : Pset ((a ×a)))  : String := 
-  if  isTransitive  rel1 then 
+  lem_if  isTransitive  rel1 then 
     let  pruned_rel   := withoutTransitiveEdges  rel1; 
-    if  (setForAll  (fun (e : (a ×a)) =>  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) e  pruned_rel)))  rel1) then 
+    lem_if  (setForAll  (fun (e : (a ×a)) =>  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) e  pruned_rel)))  rel1) then 
       /-  The relations are the same (there are no transitive edges),
          so we can just as well print the original one.  -/
       stringFromSet  showX  rel1

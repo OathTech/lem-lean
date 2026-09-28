@@ -132,6 +132,23 @@ inductive LemOrdering where
   | GT : LemOrdering
   deriving Repr, BEq, Inhabited, DecidableEq
 
+/- Lem's Bool conditional (linksem 2026-09-28, B13). Generated code writes
+   `lem_if c then t else e` for a Lem `if` (whose condition is a `bool`).
+   It expands to exactly the kernel term Lean elaborates for a Bool `if`
+   (`ite (c = true)` with the `instDecidableEqBool` instance, pinned in
+   LemLibTest), but builds it directly: no Bool->Prop coercion search and no
+   Decidable instance search, which Lean runs behind `wait_if_type_mvar%`
+   and which can get stuck in context (linksem link.lem). The instance's
+   arguments are filled by unification, so the condition is written once.
+   For a Prop-valued condition (only possible through a target rep that
+   produces a Prop) Lean coerces with `decide`: same behaviour, different
+   term. -/
+syntax (name := lemIfThenElse)
+  ppRealGroup(ppRealFill(ppIndent("lem_if " term " then") ppSpace term)
+    ppDedent(ppSpace) ppRealFill("else " term)) : term
+macro_rules
+  | `(lem_if $c then $t else $e) => `(@ite _ ($c = true) (instDecidableEqBool _ _) $t $e)
+
 /- Ordering predicates -/
 def isLess (o : LemOrdering) : Bool := o == .LT
 def isLessEqual (o : LemOrdering) : Bool := o != .GT

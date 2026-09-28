@@ -154,7 +154,7 @@ def  splitMember  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : Pset a)  : (Pset
 def  bigunion  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a := (sorry /- Lean backend: set comprehension binding not supported -/) -/
 /- removed value specification -/
 
-def  bigintersection  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a :=  let  x2   := (setEmpty);  setFold  (fun (x : a) (x2 : Pset a) =>  if  setForAll  (fun (s : Pset a) =>  (setMemberBy  (@setElemCompare (a) _)  x  s))  bs then setAddBy  setElemCompare  x  x2  else  x2)  ((setBigunionBy  (@setElemCompare (a) _)  bs))  x2
+def  bigintersection  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a :=  let  x2   := (setEmpty);  setFold  (fun (x : a) (x2 : Pset a) =>  lem_if  setForAll  (fun (s : Pset a) =>  (setMemberBy  (@setElemCompare (a) _)  x  s))  bs then setAddBy  setElemCompare  x  x2  else  x2)  ((setBigunionBy  (@setElemCompare (a) _)  bs))  x2
 /- removed value specification -/
 
 /- removed value specification -/
@@ -225,7 +225,7 @@ def  cross  {a : Type} {b : Type} [SetType a] [SetType b]  (s1 : Pset a) (s2 : P
 
 /- 
  partial def  leastFixedPoint  {a : Type} [SetType a]  (bound : Nat) (f : Pset a → Pset a) (x : Pset a)  : Pset a := 
-  match  bound with  |  0 =>  x | (bound' + 1) => ( let  fx   := f  x;                    if  subset  fx  x then  x                    else  lemLeastFixedPoint  setElemCompare  bound'  f  (union  fx  x))
+  match  bound with  |  0 =>  x | (bound' + 1) => ( let  fx   := f  x;                    lem_if  subset  fx  x then  x                    else  lemLeastFixedPoint  setElemCompare  bound'  f  (union  fx  x))
    -/
 end Lem_Set
  

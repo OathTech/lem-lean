@@ -52,7 +52,7 @@ open Lem_Num
 
 /- 
 
- def  insertBy  {a : Type}  (cmp : a → a → Bool) (e : a) (l : List a)  : List a :=  match  l with  |  [] =>  [e] |  x  ::  xs => ( if  cmp  x  e then  x  ::  (lemInsertBy  cmp  e  xs)  else  (e  ::  x  ::  xs))
+ def  insertBy  {a : Type}  (cmp : a → a → Bool) (e : a) (l : List a)  : List a :=  match  l with  |  [] =>  [e] |  x  ::  xs => ( lem_if  cmp  x  e then  x  ::  (lemInsertBy  cmp  e  xs)  else  (e  ::  x  ::  xs))
  -/
 
 

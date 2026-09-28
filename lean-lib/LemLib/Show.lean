@@ -67,7 +67,7 @@ instance (a b : Type) [Show a] [Show b] : Show ((a  × b)) where
 
 instance   : Show Bool where
 
-    show0   b  :=  if  b then  "true"  else  "false"
+    show0   b  :=  lem_if  b then  "true"  else  "false"
 
 end Lem_Show
 

@@ -77,8 +77,8 @@ def  orderingIsEqual  (r : LemOrdering)       : Bool :=  (match  r with |  LemOr
 
 
 def  ordering_cases  {a : Type}  (r : LemOrdering) (lt : a) (eq : a) (gt : a)  : a := 
-  if  orderingIsLess  r then  lt  else 
-  if  orderingIsEqual  r then  eq  else  gt
+  lem_if  orderingIsLess  r then  lt  else 
+  lem_if  orderingIsEqual  r then  eq  else  gt
 /- removed value specification -/
 
 
@@ -118,17 +118,17 @@ export Ord0 (isLess isLessEqual isGreater isGreaterEqual)
 
 
 def  genericCompare  {a : Type}   (less : a →  a →  Bool)  (equal : a →  a →  Bool)  (x  : a)  (y  : a)  : LemOrdering := 
-  if  less  x  y then 
+  lem_if  less  x  y then 
     LemOrdering.LT
-   else  if  equal  x  y then 
+   else  lem_if  equal  x  y then 
     LemOrdering.EQ
    else 
     LemOrdering.GT
 /- removed value specification -/
 
 def  ordCompare  {a : Type} [Eq0 a] [Ord0 a]  (x : a) (y : a)  : LemOrdering := 
-  if  ( isLess x  y) then  LemOrdering.LT  else 
-  if  (x  ==  y) then  LemOrdering.EQ  else  LemOrdering.GT
+  lem_if  ( isLess x  y) then  LemOrdering.LT  else 
+  lem_if  (x  ==  y) then  LemOrdering.EQ  else  LemOrdering.GT
 
 class OrdMaxMin (a : Type) where 
  
@@ -141,10 +141,10 @@ open OrdMaxMin
 
 /- removed value specification -/
 
-def  minByLessEqual  {a : Type}  (le : a → a → Bool) (x : a) (y : a)  : a :=  if  (le  x  y) then  x  else  y
+def  minByLessEqual  {a : Type}  (le : a → a → Bool) (x : a) (y : a)  : a :=  lem_if  (le  x  y) then  x  else  y
 /- removed value specification -/
 
-def  maxByLessEqual  {a : Type}  (le : a → a → Bool) (x : a) (y : a)  : a :=  if  (le  y  x) then  x  else  y
+def  maxByLessEqual  {a : Type}  (le : a → a → Bool) (x : a) (y : a)  : a :=  lem_if  (le  y  x) then  x  else  y
 /- removed value specification -/
 
 

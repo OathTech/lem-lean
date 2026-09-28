@@ -34,37 +34,37 @@ open Lem_List_extra
 
 /- 
  partial def  stringFromNatHelper  (n : Nat) (acc : List (Char))  : List (Char) := 
-  if  n  =  0 then 
+  lem_if  n  =  0 then 
     acc
    else 
     lemStringFromNatHelper  (/  n  10)  (Char.ofNat  (mod  n  10  +  48)  ::  acc) -/
 /- removed value specification -/
 
 def  stringFromNat  (n : Nat)  : String :=  
-  if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNatHelper  n  [])
+  lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNatHelper  n  [])
 /- removed value specification -/
 
 /- 
  partial def  stringFromNaturalHelper  (n : Nat) (acc : List (Char))  : List (Char) := 
-  if  n  =  0 then 
+  lem_if  n  =  0 then 
     acc
    else 
     lemStringFromNaturalHelper  (/  n  10)  (Char.ofNat  (lemNatFromNatural  (mod  n  10  +  48))  ::  acc) -/
 /- removed value specification -/
 
 def  stringFromNatural  (n : Nat)  : String :=  
-  if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNaturalHelper  n  [])
+  lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNaturalHelper  n  [])
 /- removed value specification -/
 
 def  stringFromInt  (i : Int)  : String :=  
-  if  intLtb  i (( 0 :  Int)) then   
+  lem_if  intLtb  i (( 0 :  Int)) then   
     String.append "-"  (stringFromNat  (Int.natAbs  i))
    else 
     stringFromNat  (Int.natAbs  i)
 /- removed value specification -/
 
 def  stringFromInteger  (i : Int)  : String :=  
-  if  intLtb  i (( 0 :  Int)) then   
+  lem_if  intLtb  i (( 0 :  Int)) then   
     String.append "-"  (stringFromNatural  (Int.natAbs  i))
    else 
     stringFromNatural  (Int.natAbs  i)

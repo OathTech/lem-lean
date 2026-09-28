@@ -116,7 +116,7 @@ def  reverse  {a : Type}  (l : List a)  : List a :=  List.reverseAux  l  [] -/
 /- removed value specification -/
 
  def  count_map  {a : Type} {b : Type}  (f : a → b) (l : List a) (ctr : Nat)  : List b :=   
-  match  l with  |  [] =>  [] |  hd  ::  tl =>  f  hd  ::       (if  natLtb  ctr (  5000) then  count_map  f  tl  (ctr  +   1)       else  map_tr  []  f  tl)
+  match  l with  |  [] =>  [] |  hd  ::  tl =>  f  hd  ::       (lem_if  natLtb  ctr (  5000) then  count_map  f  tl  (ctr  +   1)       else  map_tr  []  f  tl)
   
 /- removed value specification -/
 
@@ -164,13 +164,13 @@ def  dest_init  {a : Type}  (l : List a)  : Option ((List a ×a)) :=  match  l w
 
 /- 
 
- def  index  {a : Type}  (l : List a) (n : Nat)  : Option a :=  match  l with  |  [] =>  none |  x  ::  xs => ( if  n  =  0 then  some  x  else  listGetOpt  xs  (n - 1))
+ def  index  {a : Type}  (l : List a) (n : Nat)  : Option a :=  match  l with  |  [] =>  none |  x  ::  xs => ( lem_if  n  =  0 then  some  x  else  listGetOpt  xs  (n - 1))
  -/
 /- removed value specification -/
 
 
  def  findIndices_aux  {a : Type}   (i :Nat) (P : a → Bool) (l : List a)  : List (Nat) := 
-  match  l with  |  [] =>  [] |  x  ::  xs => ( if  P  x then  i  ::  findIndices_aux  (i  +   1)  P  xs  else  findIndices_aux  (i  +   1)  P  xs)
+  match  l with  |  [] =>  [] |  x  ::  xs => ( lem_if  P  x then  i  ::  findIndices_aux  (i  +   1)  P  xs  else  findIndices_aux  (i  +   1)  P  xs)
  
 def  findIndices  {a : Type}  (P : a → Bool) (l : List a)  : List (Nat) :=  findIndices_aux (  0)  P  l
 /- removed value specification -/
@@ -200,7 +200,7 @@ def  findIndex  {a : Type}  (P : a → Bool) (l : List a)  : Option (Nat) :=  ma
 /- removed value specification -/
 
  def  splitAtAcc  {a : Type}  (revAcc : List a) (n : Nat) (l : List a)  : (List a ×List a) :=  
-  match  l with  |  [] =>  (List.reverse  revAcc, []) |  x :: xs => ( if  natLteb  n (  0) then  (List.reverse  revAcc, l)  else  splitAtAcc  (x :: revAcc)  (n -   1)  xs)
+  match  l with  |  [] =>  (List.reverse  revAcc, []) |  x :: xs => ( lem_if  natLteb  n (  0) then  (List.reverse  revAcc, l)  else  splitAtAcc  (x :: revAcc)  (n -   1)  xs)
   
 /- removed value specification -/
 
@@ -216,7 +216,7 @@ def  take  {a : Type}  (n : Nat) (l : List a)  : List a :=  Prod.fst  (splitAt  
 def  drop  {a : Type}  (n : Nat) (l : List a)  : List a :=  Prod.snd  (splitAt  n  l) -/
 /- removed value specification -/
 
- def  splitWhile_tr  {a : Type}  (p : a → Bool) (xs : List a) (acc : List a)  : (List a ×List a) :=  match  xs with  |  [] =>      (List.reverse  acc, []) |  x :: xs => (     if  p  x then        splitWhile_tr  p  xs  (x :: acc)      else        (List.reverse  acc, (x :: xs)))
+ def  splitWhile_tr  {a : Type}  (p : a → Bool) (xs : List a) (acc : List a)  : (List a ×List a) :=  match  xs with  |  [] =>      (List.reverse  acc, []) |  x :: xs => (     lem_if  p  x then        splitWhile_tr  p  xs  (x :: acc)      else        (List.reverse  acc, (x :: xs)))
 
 /- removed value specification -/
 
@@ -235,7 +235,7 @@ def  dropWhile  {a : Type}  (p : a → Bool) (l : List a)  : List a :=  Prod.snd
 
 /- 
  def  update  {a : Type}  (l : List a) (n : Nat) (e : a)  : List a :=  
-  match  l with  |  [] =>  [] |  x  ::  xs => ( if  n  =  0 then  e  ::  xs  else  x  ::  (lemListUpdate  xs  (n  -  1)  e))
+  match  l with  |  [] =>  [] |  x  ::  xs => ( lem_if  n  =  0 then  e  ::  xs  else  x  ::  (lemListUpdate  xs  (n  -  1)  e))
  -/
 /- removed value specification -/
 
@@ -247,7 +247,7 @@ def  elemBy  {a : Type}  (eq : a → a → Bool) (e : a) (l : List a)  : Bool :=
 def  elem  {a : Type} [Eq0 a]   : a → List a → Bool :=  listMemberBy  (fun x y => x == y)
 /- removed value specification -/
  /-  previously not of maybe type  -/
- def  find  {a : Type}  (P : a → Bool) (l : List a)  : Option a :=  match  l with  |  [] =>  none |  x  ::  xs => ( if  P  x then  some  x  else  find  P  xs)
+ def  find  {a : Type}  (P : a → Bool) (l : List a)  : Option a :=  match  l with  |  [] =>  none |  x  ::  xs => ( lem_if  P  x then  some  x  else  find  P  xs)
 
 /- removed value specification -/
 
@@ -260,7 +260,7 @@ def  lookupBy  {a : Type} {b : Type}  (eq : a → a → Bool) (k : a) (m : List 
 /- removed value specification -/
 
 /- 
- def  filter  {a : Type}  (P : a → Bool) (l : List a)  : List a :=  match  l with  |  [] =>  [] |  x  ::  xs => ( if  (P  x) then  x  ::  (List.filter  P  xs)  else  List.filter  P  xs)
+ def  filter  {a : Type}  (P : a → Bool) (l : List a)  : List a :=  match  l with  |  [] =>  [] |  x  ::  xs => ( lem_if  (P  x) then  x  ::  (List.filter  P  xs)  else  List.filter  P  xs)
                       -/
 /- removed value specification -/
 
@@ -271,7 +271,7 @@ def  reversePartition  {a : Type}  (P : a → Bool) (l : List a)  : (List a ×Li
 /- removed value specification -/
 
 /-  
- def  deleteFirst  {a : Type}  (P : a → Bool) (l : List a)  : Option (List a) :=  match  l with  |  [] =>  none |  x  ::  xs => ( if  (P  x) then  some  xs  else  Option.map  (fun (xs' : List a) =>  x  ::  xs')  (lemListDeleteFirst  P  xs))
+ def  deleteFirst  {a : Type}  (P : a → Bool) (l : List a)  : Option (List a) :=  match  l with  |  [] =>  none |  x  ::  xs => ( lem_if  (P  x) then  some  xs  else  Option.map  (fun (xs' : List a) =>  x  ::  xs')  (lemListDeleteFirst  P  xs))
                            -/
 /- removed value specification -/
 

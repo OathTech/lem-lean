@@ -1,4 +1,5 @@
 import LemLib
+import Lean
 /-!
 # LemLibTest — property tests for the `Pset`/`Pmap` ports
 
@@ -197,5 +198,18 @@ example : Pset.elements (Pset.fromList (fun a b => defaultCompare a b)
     [LemOrdering.GT, .LT, .EQ, .LT]) = [.LT, .EQ, .GT] := by decide
 example : Pset.mem (fun a b => defaultCompare a b) LemOrdering.EQ
     (Pset.fromList (fun a b => defaultCompare a b) [LemOrdering.LT, .EQ]) = true := by decide
+
+/-- `lem_if` (B13) elaborates to the SAME kernel term as Lean's `if` on a
+    Bool, nested and in both branches; so proofs about generated code see no
+    difference. Checked on the elaborated definitions, not just by `rfl`. -/
+def lemIfRef (b : Bool) (n : Nat) : Nat := if b then n + 1 else if !b then 7 else n
+def lemIfNew (b : Bool) (n : Nat) : Nat := lem_if b then n + 1 else lem_if !b then 7 else n
+open Lean Elab Command in
+#eval show CommandElabM Unit from do
+  let env ← getEnv
+  unless (env.find? ``LemLibTest.lemIfRef).get!.value! == (env.find? ``LemLibTest.lemIfNew).get!.value! do
+    throwError "lem_if does not elaborate to the builtin Bool `if` term"
+example : lemIfNew true 3 = 4 := rfl
+example : lemIfNew false 3 = 7 := rfl
 
 end LemLibTest

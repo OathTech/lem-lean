@@ -173,27 +173,40 @@ recipes that change directory (`parity/run.sh`): before B10 the parity
 probes then silently compiled with no reserved-name list; after B10 the
 admission test failed loudly. Now `$(abspath ../../library)`.
 
-## Open
+## B13. Lem `if` emitted as Lean `if` got stuck in context (fixed; was L1)
 
-- **L1** `Link.lean` (linksem's linker, outside the `main_elf` cone):
-  `if binding_is_final options b then ...` fails with "Application type
-  mismatch ... Bool ... expected Prop" (`Decidable (... = true)` reported
-  "stuck" with no visible metavariables). Established by bisection on the
-  generated file:
-  - emitting the local `let binding_is_final : T := v` as `have` fixes it;
-  - replacing `v` by a trivial function fixes it;
-  - `v` containing ANY nested `match` on its `Option` component (even with
-    constant arms) triggers it;
-  - ascribing either `match`'s type, or the operands, does not help;
-  - `bif` in place of `if` compiles;
-  - standalone reconstructions of the same shape (including inside a
-    `List.foldl` lambda and with type abbreviations) do NOT reproduce it.
-  So instance synthesis for the `if` sees a let-variable whose value still
-  has a pending elaboration problem, in a context-dependent way. Candidate
-  backend fixes, each with broad output impact (hence not taken without an
-  operator decision): render Lem's Bool `if` as `bif`/`cond` (no Decidable
-  search at all; changes every conditional and ite-based proof style), or
-  emit non-dependent local lets as `have`.
+linksem's `link.lem` (`mark_fate_of_relocs`) failed with "Application type
+mismatch: `binding_is_final options b` has type Bool but is expected to have
+type Prop in `@ite ...`". Root cause, from a `trace.Meta.synthInstance` run
+on a delta-debugged reduction (12k -> 2k characters, every step re-checked
+for the same error): Lean's `if c then t else e` expands to `let_mvar% ?m :=
+c; wait_if_type_mvar% ?m; ite ?m t e`; for a Bool `c` the elaborator must
+solve the coercion problem `CoeT Bool c Prop` (whose goal CONTAINS the term
+`c`) and then `Decidable ?m`. Here `c` mentioned a let-variable whose value
+still carried a postponed `match`, the coercion problem failed with an
+internal stuck exception, `Decidable ?m` stayed unsolved, and `ite` was typed
+with the uncoerced Bool. Standalone reproduction (plain Lean, no Lem): a
+`List.foldl` lambda with tuple matches, a let-bound typed lambda whose body
+matches on an `Option`, a value from a polymorphic helper with instance
+arguments, a destructuring `match` on it, then `if f x b then ...`.
+
+Every Lem `if` has a `bool` condition, so the backend now emits LemLib's
+`lem_if c then t else e`, which expands to `@ite _ (c = true)
+(instDecidableEqBool _ _) t e`: no coercion and no instance search (the
+instance's arguments are solved by unification), the condition written
+once, and the SAME kernel term Lean elaborates for a Bool `if` (checked on
+the elaborated definitions in `LemLibTest`, plant-tested with a `cond`
+expansion), so proofs over generated code are unaffected. Caveat, stated
+exactly: the identity holds when the RENDERED condition is a Bool, which it
+is for every live conditional in LemLib, linksem and the tests (checked: the
+only Prop-rendered conditions are in commented-out bodies of definitions
+with target reps); a condition whose Lean target rep produced a Prop would
+elaborate as `decide p = true`: same behaviour, not the same term. Prop contexts
+(indreln premises, `St.prop_equality`) keep the builtin `if`. `lem_if` is a
+token, reserved in both avoid lists. With it the whole linksem model
+compiles, `Link.lean` included (214 jobs). Test: `test_if_bool_cond.lem`
+(the linksem shape in Lem; plant: pristine c2a68e7 output fails to compile
+with the original error, this branch compiles and its assert passes).
 
 ## Impact on the Cerberus tree (measured, not re-pinned)
 

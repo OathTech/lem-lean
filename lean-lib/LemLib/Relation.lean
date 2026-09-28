@@ -79,10 +79,10 @@ def  relIdOn  {a : Type} [SetType a] [Eq0 a]  (s : Pset a)  : Pset ((a ×a)) := 
 
 /- removed value specification -/
 
-def  relComp  {a : Type} {b : Type} {c : Type} [SetType a] [SetType b] [SetType c] [Eq0 a] [Eq0 b]  (r1 : Pset ((a ×b))) (r2 : Pset ((b ×c)))  : Pset ((a ×c)) :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : Pset ((a ×c))) =>  match p, x2 with | (e1, e2),  x2 =>  setFold  (fun (p : (b ×c)) (x2 : Pset ((a ×c))) =>  match p, x2 with | (e2', e3),  x2 => ( if  e2  ==  e2' then setAddBy  setElemCompare  (e1, e3)  x2  else  x2) )  (r2)  x2 )  (r1)  x2
+def  relComp  {a : Type} {b : Type} {c : Type} [SetType a] [SetType b] [SetType c] [Eq0 a] [Eq0 b]  (r1 : Pset ((a ×b))) (r2 : Pset ((b ×c)))  : Pset ((a ×c)) :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : Pset ((a ×c))) =>  match p, x2 with | (e1, e2),  x2 =>  setFold  (fun (p : (b ×c)) (x2 : Pset ((a ×c))) =>  match p, x2 with | (e2', e3),  x2 => ( lem_if  e2  ==  e2' then setAddBy  setElemCompare  (e1, e3)  x2  else  x2) )  (r2)  x2 )  (r1)  x2
 /- removed value specification -/
 
-def  relRestrict  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Pset ((a ×a)) :=  (let  x2   := (setEmpty);  setFold  (fun (a1 : a) (x2 : Pset ((a ×a))) =>  setFold  (fun (b : a) (x2 : Pset ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (a1, b)  r) then setAddBy  setElemCompare  (a1, b)  x2  else  x2)  s  x2)  s  x2)
+def  relRestrict  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Pset ((a ×a)) :=  (let  x2   := (setEmpty);  setFold  (fun (a1 : a) (x2 : Pset ((a ×a))) =>  setFold  (fun (b : a) (x2 : Pset ((a ×a))) =>  lem_if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (a1, b)  r) then setAddBy  setElemCompare  (a1, b)  x2  else  x2)  s  x2)  s  x2)
 /- removed value specification -/
 
 def  relConverse  {a : Type} {b : Type} [SetType a] [SetType b]  (r : Pset ((a ×b)))  : Pset ((b ×a)) :=  ((setMapBy  (pairCompare  (@setElemCompare (b) _)  (@setElemCompare (a) _))  swap  (r)))
@@ -100,7 +100,7 @@ def  relRange  {a : Type} {b : Type} [SetType a] [SetType b]  (r : Pset ((a ×b)
 def  relOver  {a : Type} [SetType a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  ( (setSubsetBy  (@setElemCompare (a) _) (( (setUnionBy  (@setElemCompare (a) _) (relDomain  r)  (relRange  r))))  s))
 /- removed value specification -/
 
-def  relApply  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a]  (r : Pset ((a ×b))) (s : Pset a)  : Pset b :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : Pset b) =>  match p, x2 with | (x,  y),  x2 => ( if  (setMemberBy  (@setElemCompare (a) _)  x  s) then setAddBy  setElemCompare  y  x2  else  x2) )  (r)  x2
+def  relApply  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a]  (r : Pset ((a ×b))) (s : Pset a)  : Pset b :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : Pset b) =>  match p, x2 with | (x,  y),  x2 => ( lem_if  (setMemberBy  (@setElemCompare (a) _)  x  s) then setAddBy  setElemCompare  y  x2  else  x2) )  (r)  x2
 /- removed value specification -/
 
 
@@ -193,7 +193,7 @@ def  isStrictTotalOrderOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) 
 
 
 def  transitiveClosureAdd  {a : Type} [SetType a] [Eq0 a]  (x : a) (y : a) (r : Pset ((a ×a)))  : Pset ((a ×a)) :=  
-  (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (((setAddBy  setElemCompare  (x,y)  (r))))  ((( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : Pset ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (y, z)  r) then setAddBy  setElemCompare  (x, z)  x2  else  x2)  (relRange  r)  x2))  ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : Pset ((a ×a))) =>  if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (z, x)  r) then setAddBy  setElemCompare  (z, y)  x2  else  x2)  (relDomain  r)  x2)))))))))
+  (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (((setAddBy  setElemCompare  (x,y)  (r))))  ((( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : Pset ((a ×a))) =>  lem_if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (y, z)  r) then setAddBy  setElemCompare  (x, z)  x2  else  x2)  (relRange  r)  x2))  ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : Pset ((a ×a))) =>  lem_if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (z, x)  r) then setAddBy  setElemCompare  (z, y)  x2  else  x2)  (relDomain  r)  x2)))))))))
 /- removed value specification -/
 
 def  reflexiveTransitiveClosureOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Pset ((a ×a)) :=  (set_tcByCmp  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (r)  ((relIdOn  s))))))
@@ -203,6 +203,6 @@ def  reflexiveTransitiveClosureOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a
 
 def  withoutTransitiveEdges  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a)))  : Pset ((a ×a)) := 
   let  tc   := (set_tcByCmp  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  r); 
-  let  x2   := (setEmpty);  setFold  (fun (p : (a ×a)) (x2 : Pset ((a ×a))) =>  match p, x2 with | (a1,  c),  x2 => ( if  setForAll  (fun (b : a) =>  ((not  ((a1  !=  b)  &&  (b  !=  c)))  ||  not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (a1, b)  tc)  &&  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (b, c)  tc))))  (relRange  r) then setAddBy  setElemCompare  (a1, c)  x2  else  x2) )  r  x2
+  let  x2   := (setEmpty);  setFold  (fun (p : (a ×a)) (x2 : Pset ((a ×a))) =>  match p, x2 with | (a1,  c),  x2 => ( lem_if  setForAll  (fun (b : a) =>  ((not  ((a1  !=  b)  &&  (b  !=  c)))  ||  not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (a1, b)  tc)  &&  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (b, c)  tc))))  (relRange  r) then setAddBy  setElemCompare  (a1, c)  x2  else  x2) )  r  x2
 end Lem_Relation
 

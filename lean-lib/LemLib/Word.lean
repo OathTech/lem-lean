@@ -60,7 +60,7 @@ instance   : Eq0 bitSequence where
 
 
  def  boolListFrombitSeqAux  {a : Type}  (n : Nat) (s : a) (bl : List a)  : List a := 
-  if  n  ==   0 then  []  else 
+  lem_if  n  ==   0 then  []  else 
   match  bl with  |  [] =>  List.replicate  n  s |  b  ::  bl' =>  b  ::  (boolListFrombitSeqAux  (n -   1)  s  bl')
   
 
@@ -75,14 +75,14 @@ def  bitSeqFromBoolList  (bl : List (Bool))  : Option (bitSequence) :=
 def  cleanBitSeq  (b : bitSequence)  : bitSequence := match b with | ( BitSeq  len  s  bl) => ( match  len with  |  none =>  (BitSeq  len  s  (List.reverse  (dropWhile  ((fun x y => x == y)  s)  (List.reverse  bl)))) |  some  n =>  (BitSeq  len  s  (List.reverse  (dropWhile  ((fun x y => x == y)  s)  (List.reverse  (List.take  (n -   1)  bl))))) ) 
 /- removed value specification -/
 
-def  bitSeqTestBit  (b : bitSequence) (pos : Nat)  : Option (Bool) := match b, pos with | ( BitSeq  len  s  bl),  pos => ( match  len with  |  none => ( if  natLtb  pos  (List.length  bl) then  listGetOpt  bl  pos  else  some  s) |  some  l => ( if  ( natGteb pos  l) then  none  else                  if  ((pos  ==  (l  -   1))  ||  natGteb  pos  (List.length  bl)) then  some  s  else                  listGetOpt  bl  pos)   ) 
+def  bitSeqTestBit  (b : bitSequence) (pos : Nat)  : Option (Bool) := match b, pos with | ( BitSeq  len  s  bl),  pos => ( match  len with  |  none => ( lem_if  natLtb  pos  (List.length  bl) then  listGetOpt  bl  pos  else  some  s) |  some  l => ( lem_if  ( natGteb pos  l) then  none  else                  lem_if  ((pos  ==  (l  -   1))  ||  natGteb  pos  (List.length  bl)) then  some  s  else                  listGetOpt  bl  pos)   ) 
 /- removed value specification -/
 
-def  bitSeqSetBit  (b : bitSequence) (pos : Nat) (v : Bool)  : bitSequence := match b, pos, v with | ( BitSeq  len  s  bl),  pos,  v => ( let  bl'  := if  ( natLtb pos  (List.length  bl)) then  bl  else  bl  ++  List.replicate  pos  s;    let  bl''  := lemListUpdate  bl'  pos  v;    let  bs'  := BitSeq  len  s  bl'';    cleanBitSeq  bs') 
+def  bitSeqSetBit  (b : bitSequence) (pos : Nat) (v : Bool)  : bitSequence := match b, pos, v with | ( BitSeq  len  s  bl),  pos,  v => ( let  bl'  := lem_if  ( natLtb pos  (List.length  bl)) then  bl  else  bl  ++  List.replicate  pos  s;    let  bl''  := lemListUpdate  bl'  pos  v;    let  bs'  := BitSeq  len  s  bl'';    cleanBitSeq  bs') 
 /- removed value specification -/
 
 def  resizeBitSeq  (new_len : Option (Nat)) (bs : bitSequence)  : bitSequence := 
-  match  cleanBitSeq  bs with | (  BitSeq  len  s  bl) => (   let  shorten_opt  := match new_len,  len with  | none,  _ =>  none | some  l1,  none =>  some  l1 | some  l1,  some  l2 => ( if  ( natLtb l1  l2) then  some  l1  else  none)   ;    match  shorten_opt with  |  none =>  BitSeq  new_len  s  bl |  some  l1 =>  (         let  bl'  := List.take  l1  (bl  ++  [s]);          match  dest_init  bl' with  |  none =>  (BitSeq  len  s  bl) |  some  (bl'',  s') =>  cleanBitSeq  (BitSeq  new_len  s'  bl'')  )   ) 
+  match  cleanBitSeq  bs with | (  BitSeq  len  s  bl) => (   let  shorten_opt  := match new_len,  len with  | none,  _ =>  none | some  l1,  none =>  some  l1 | some  l1,  some  l2 => ( lem_if  ( natLtb l1  l2) then  some  l1  else  none)   ;    match  shorten_opt with  |  none =>  BitSeq  new_len  s  bl |  some  l1 =>  (         let  bl'  := List.take  l1  (bl  ++  [s]);          match  dest_init  bl' with  |  none =>  (BitSeq  len  s  bl) |  some  (bl'',  s') =>  cleanBitSeq  (BitSeq  new_len  s'  bl'')  )   ) 
 /- removed value specification -/
 
 def  bitSeqNot  (b : bitSequence)  : bitSequence := match b with | ( BitSeq  len  s  bl) =>  BitSeq  len  (not  s)  (List.map  not  bl) 
@@ -112,7 +112,7 @@ def  bitSeqArithmeticShiftRight  (bs : bitSequence) (n : Nat)  : bitSequence :=
 /- removed value specification -/
 
 def  bitSeqLogicalShiftRight  (bs : bitSequence) (n : Nat)  : bitSequence :=  
-  if  (n  ==   0) then  cleanBitSeq  bs  else 
+  lem_if  (n  ==   0) then  cleanBitSeq  bs  else 
   match  cleanBitSeq  bs with | (  BitSeq  len  s  bl) => (   match  len with  |  none =>  cleanBitSeq  (BitSeq  len  s  (List.drop  n  bl)) |  some  l =>  cleanBitSeq  (BitSeq  len  false  ((List.drop  n  bl)  ++  List.replicate  l  s))   ) 
 /- removed value specification -/
 
@@ -121,20 +121,20 @@ def  bitSeqLogicalShiftRight  (bs : bitSequence) (n : Nat)  : bitSequence :=
   match  bl with  |  [] =>  acc | ( true  ::  bl') =>  integerFromBoolListAux  ((acc  * ( 2 :  Int))  + ( 1 :  Int))  bl' | ( false  ::  bl') =>  integerFromBoolListAux  (acc  * ( 2 :  Int))  bl'
   
 
-def  integerFromBoolList  (p : (Bool ×List (Bool)))  : Int := match p with |  (sign,  bl) => ( if  sign then        (Int.neg  (integerFromBoolListAux (( 0 :  Int))  (List.reverse  (List.map  not  bl))  + ( 1 :  Int)))     else  integerFromBoolListAux (( 0 :  Int))  (List.reverse  bl)) 
+def  integerFromBoolList  (p : (Bool ×List (Bool)))  : Int := match p with |  (sign,  bl) => ( lem_if  sign then        (Int.neg  (integerFromBoolListAux (( 0 :  Int))  (List.reverse  (List.map  not  bl))  + ( 1 :  Int)))     else  integerFromBoolListAux (( 0 :  Int))  (List.reverse  bl)) 
 /- removed value specification -/
 
 /- 
 
  def  boolListFromNatural  (acc : List (Bool))  (remainder  : Nat)  : List (Bool) := 
- if  (>  remainder  0) then  
+ lem_if  (>  remainder  0) then  
    (boolListFromNatural  (((mod  remainder  2)  =  1)  ::  acc)  
       (/  remainder  2))
   else 
    List.reverse  acc -/
 
 def  boolListFromInteger   (i  : Int)  : (Bool ×List (Bool)) :=  
-  if  ( intLtb i (( 0 :  Int))) then 
+  lem_if  ( intLtb i (( 0 :  Int))) then 
     (true, List.map  not  (boolListFromNatural  []  (Int.natAbs  ((Int.neg  (i  + ( 1 :  Int)))))))
    else 
     (false, boolListFromNatural  []  (Int.natAbs  i))

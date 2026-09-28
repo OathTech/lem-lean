@@ -60,7 +60,7 @@ instance (a : Type) [SetType a] : SetType (Pset  a) where
 
  partial def  leastFixedPointUnbounded  {a : Type} [SetType a]  (f : Pset a → Pset a) (x : Pset a)  : Pset a := 
    let  fx   := f  x; 
-   if  (setSubsetBy  (@setElemCompare (a) _)  fx  x) then  x
+   lem_if  (setSubsetBy  (@setElemCompare (a) _)  fx  x) then  x
     else  leastFixedPointUnbounded  f  ( (setUnionBy  (@setElemCompare (a) _) fx  x))
 end Lem_Set_extra
 

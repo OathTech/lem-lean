@@ -305,12 +305,12 @@ instance   : NumRemainder Nat where
 
 /- 
  def  gen_pow_aux  {a : Type}   (mul  : a →  a →  a)  (a  : a)  (b  : a)  (e  : Nat)  : a := 
-   match  e with  |  0 =>  a |  1 =>  mul  a  b | (  (e' + 2)) => ( let  e''  := /  e  2;                     let  a'   := (if  (mod  e  2)  =  0 then  a  else  mul  a  b);                     gen_pow_aux  mul  a'  (mul  b  b)  e'')
+   match  e with  |  0 =>  a |  1 =>  mul  a  b | (  (e' + 2)) => ( let  e''  := /  e  2;                     let  a'   := (lem_if  (mod  e  2)  =  0 then  a  else  mul  a  b);                     gen_pow_aux  mul  a'  (mul  b  b)  e'')
     -/
        
 def  gen_pow  {a : Type}   (one  : a)  (mul  : a →  a →  a)  (b  : a)  (e  : Nat)   :  a :=  
-  if  natLtb  e (  0) then  one  else  
-  if  (e  ==   0) then  one  else  gen_pow_aux  mul  one  b  e
+  lem_if  natLtb  e (  0) then  one  else  
+  lem_if  (e  ==   0) then  one  else  gen_pow_aux  mul  one  b  e
 /- removed value specification -/
 
 
@@ -648,7 +648,7 @@ instance   : NumNegate Int32 where
 /- removed value specification -/
 
 /- 
-def  int32Abs  (i : Int32)  : Int32 :=  (if  <=  0  i then  i  else  ~ i) -/
+def  int32Abs  (i : Int32)  : Int32 :=  (lem_if  <=  0  i then  i  else  ~ i) -/
 
 instance   : NumAbs Int32 where
 
@@ -789,7 +789,7 @@ instance   : NumNegate Int64 where
 /- removed value specification -/
 
 /- 
-def  int64Abs  (i : Int64)  : Int64 :=  (if  <=  0  i then  i  else  ~ i) -/
+def  int64Abs  (i : Int64)  : Int64 :=  (lem_if  <=  0  i then  i  else  ~ i) -/
 
 instance   : NumAbs Int64 where
 
@@ -1086,7 +1086,7 @@ instance   : NumNegate LemUnsupported.rational where
 
 instance   : NumAbs LemUnsupported.rational where
 
-    abs   :=  (fun  n=> (if  unsupportedRationalGreater  n (LemUnsupported.rationalFromNumeral  0) then  n  else LemUnsupported.rationalFromNumeral  0  -  n))
+    abs   :=  (fun  n=> (lem_if  unsupportedRationalGreater  n (LemUnsupported.rationalFromNumeral  0) then  n  else LemUnsupported.rationalFromNumeral  0  -  n))
 
 /- removed value specification -/
 
@@ -1128,8 +1128,8 @@ def  rationalFromFrac  (n : Int) (d : Int)  : LemUnsupported.rational :=  (LemUn
 
 /- 
  partial def  rationalPowInteger  (b : LemUnsupported.rational) (e : Int)  : LemUnsupported.rational := 
-  if  e  =  0 then  1  else 
-  if  >  e  0 then  b  ^  (e  -  1)  *  b  else 
+  lem_if  e  =  0 then  1  else 
+  lem_if  >  e  0 then  b  ^  (e  -  1)  *  b  else 
   b  ^  (e  +  1)  /  b -/
 /- removed value specification -/
 
@@ -1268,8 +1268,8 @@ def  realFromFrac  (n : Int) (d : Int)  : LemUnsupported.real :=  (LemUnsupporte
 
 /- 
  partial def  realPowInteger  (b : LemUnsupported.real) (e : Int)  : LemUnsupported.real := 
-  if  e  =  0 then  1  else 
-  if  >  e  0 then  b  ^  (e  -  1)  *  b  else 
+  lem_if  e  =  0 then  1  else 
+  lem_if  >  e  0 then  b  ^  (e  -  1)  *  b  else 
   b  ^  (e  +  1)  /  b -/
 /- removed value specification -/
 
@@ -1332,7 +1332,7 @@ def  integerSqrt  (i : Int)  : Int :=  realFloor  (realSqrt  (LemUnsupported.rea
 /- 
 def  int32FromInteger  (i : Int)  : Int32 :=  (
   let  abs_int32  := lemInt32OfNat  (Int.natAbs  i); 
-  if  (<  i  0) then  (~  abs_int32)  else  abs_int32 
+  lem_if  (<  i  0) then  (~  abs_int32)  else  abs_int32 
 ) -/
 /- removed value specification -/
 
@@ -1351,7 +1351,7 @@ def  int32FromInt64  (i : Int64)  : Int32 :=  lemInt32OfInt  (lemInt64ToInt  i) 
 /- 
 def  int64FromInteger  (i : Int)  : Int64 :=  (
   let  abs_int64  := lemInt64OfNat  (Int.natAbs  i); 
-  if  (<  i  0) then  (~  abs_int64)  else  abs_int64 
+  lem_if  (<  i  0) then  (~  abs_int64)  else  abs_int64 
 ) -/
 /- removed value specification -/
 
