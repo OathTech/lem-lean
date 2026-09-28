@@ -3,6 +3,7 @@
 import LemLib
 
 import LemLib.Bool
+set_option compiler.extract_closed false
 
 namespace Lem_Basic_classes
 /- **************************************************************************** -/

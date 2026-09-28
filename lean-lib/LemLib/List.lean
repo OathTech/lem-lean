@@ -8,6 +8,7 @@ import LemLib.Basic_classes
 import LemLib.Function
 import LemLib.Tuple
 import LemLib.Num
+set_option compiler.extract_closed false
 
 namespace Lem_List
  

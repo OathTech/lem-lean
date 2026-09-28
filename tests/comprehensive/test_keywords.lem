@@ -214,3 +214,21 @@ let kw_f8_use (y : nat) : nat =
   from y + termination_by y + decreasing_by y + elab y + main y + dite y
 assert kw_f8_from : (from 0 = 1)
 assert kw_f8_use : (kw_f8_use 0 = 288)
+
+(* ---- linksem 2026-09-28 (B5): core tokens the table used to miss ----
+   linksem's load.lem binds `let matches = List.filter ...`; each of these
+   was a Lean parse error when emitted bare (scripts/lean_keyword_probe.sh
+   derives the full set from the toolchain). *)
+let kw_b5_locals (xs : list nat) =
+  let matches = List.filter (fun x -> x > 1) xs in
+  let repeat = List.length matches in
+  let while = repeat + 1 in
+  let mut = while * 2 in
+  let until = mut + 1 in
+  until
+
+let matches (x : nat) = x + 100
+let repeat_top = matches 1
+
+assert kw_b5_locals_ok : (kw_b5_locals [1; 2; 3] = 7)
+assert kw_b5_top_ok : (repeat_top = 101)

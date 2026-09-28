@@ -9,6 +9,7 @@ import LemLib.Function
 import LemLib.Num
 import LemLib.List
 import LemLib.Set_helpers
+set_option compiler.extract_closed false
 
 namespace Lem_Set
 /- **************************************************************************** -/

@@ -188,4 +188,14 @@ example : fmapElements (fmapDeleteBy cNat 3 (fmapAddBy cNat 1 10 (fmapAddBy cNat
 example : (setEmpty : Pset Nat) = Pset.Empty := rfl
 example : (fmapEmpty : Fmap Nat Nat) = Fmap.empty := rfl
 
+/-- `Ord LemOrdering` is the OCaml int order LT(-1) < EQ(0) < GT(1) (B2), and
+    a set of orderings built from it behaves as a set. -/
+example : compare LemOrdering.LT LemOrdering.EQ = .lt := by decide
+example : compare LemOrdering.GT LemOrdering.EQ = .gt := by decide
+example : compare LemOrdering.EQ LemOrdering.EQ = .eq := by decide
+example : Pset.elements (Pset.fromList (fun a b => defaultCompare a b)
+    [LemOrdering.GT, .LT, .EQ, .LT]) = [.LT, .EQ, .GT] := by decide
+example : Pset.mem (fun a b => defaultCompare a b) LemOrdering.EQ
+    (Pset.fromList (fun a b => defaultCompare a b) [LemOrdering.LT, .EQ]) = true := by decide
+
 end LemLibTest

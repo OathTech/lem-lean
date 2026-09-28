@@ -7,6 +7,7 @@ import LemLib.Num
 import LemLib.Basic_classes
 import LemLib.Show
 import LemLib.Function
+set_option compiler.extract_closed false
 
 namespace Lem_Machine_word
 

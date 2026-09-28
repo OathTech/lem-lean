@@ -159,7 +159,33 @@ let lean_syntax_keywords = [
   "notation"; "prefix"; "postfix"; "infixl"; "infixr"; "infix";
   "none"; "some"; "true"; "false"; "default";
   "this"; "rfl"; "calc"; "decide"; "sorry";
-  "pure"; "get"; "set"; "throw"; "panic"; "admit"; "trivial"
+  "pure"; "get"; "set"; "throw"; "panic"; "admit"; "trivial";
+  (* linksem 2026-09-28 (B5): every identifier-shaped core-grammar token
+     that fails as a binder on the pinned toolchain (linksem hit `matches`);
+     derived and checked by scripts/lean_keyword_probe.sh, which fails if
+     this list or library/lean_constants misses one. *)
+  "add_decl_doc"; "assert_not_exists"; "assert_not_imported"; "bif";
+  "binder_predicate"; "builtin_dsimproc"; "builtin_dsimproc_decl";
+  "builtin_grind_propagator"; "builtin_simproc"; "builtin_simproc_decl";
+  "by_elab"; "coinductive_fixpoint"; "dbg_trace";
+  "declare_bitwise_int_theorems"; "declare_bitwise_uint_theorems";
+  "declare_int_theorems"; "declare_simp_like_tactic";
+  "declare_uint_theorems"; "docs_to_verso"; "dsimproc"; "dsimproc_decl";
+  "eval_prec"; "eval_prio"; "exists"; "export"; "generalizing";
+  "grind_annotated"; "grind_pattern"; "grind_propagator"; "haveI"; "hiding";
+  "include_str"; "inductive_fixpoint"; "init_grind_norm"; "init_quot";
+  "leading_parser"; "let_delayed"; "let_expr"; "let_fun"; "letI"; "let_tmp";
+  "logNamedError"; "logNamedErrorAt"; "logNamedWarning"; "logNamedWarningAt";
+  "matches"; "match_expr"; "max_prec"; "mod_cast"; "mut"; "nat_lit";
+  "no_index"; "norm_cast_add_elim"; "partial_fixpoint"; "Prop";
+  "recommended_spelling"; "register_error_explanation";
+  "register_tactic_tag"; "renaming"; "repeat"; "run_cmd"; "run_elab";
+  "run_meta"; "seal"; "set_library_suggestions"; "show_term";
+  "show_term_elab"; "simproc"; "simproc_decl"; "Sort"; "StateRefT";
+  "tactic_alt"; "tactic_extension"; "tactic_name"; "tactic_tag";
+  "throwNamedError"; "throwNamedErrorAt"; "trailing_parser"; "Type";
+  "unif_hint"; "unseal"; "until"; "using"; "while"; "without_expected_type";
+  "with_weak_namespace"
 ]
 
 (* Supply transform (parity-fix F5/F6, 2026-09-03): a threaded VALUE is
@@ -388,6 +414,10 @@ module St = struct
      arc-10 set-comprehension rejection) must not fire for such dead
      text; they emit the historical inert placeholder instead. *)
   let rendering_comment = ref false
+  (* B3: unique suffixes for `_lemIfTailN` continuations *)
+  (* B4: the type paths of the type_def group being emitted *)
+  let current_type_block : Path.t list ref = ref []
+  let if_tail_counter = ref 0
   (* [invocation] Threaded-def census: cref -> ([Inhabited]-bound
      type-parameter positions (indices into const_tparams, for call-site
      propagation), bound tyvar names in parameter-declaration order (for
@@ -3150,8 +3180,51 @@ let lean_default_instance_extra_constraints class_name =
   | _ -> []
 ;;
 
+(* Symbolic constant names (linksem 2026-09-28, B1). Lean cannot define or
+   reference a constant named `>>=`: `def >>= ...` is a parse error, and an
+   infix `x >>= f` silently resolves to Lean's own `Bind` operator instead of
+   the Lem constant. A SHOWN constant (no Lean target rep) whose Lean name is
+   not a Lean identifier is therefore always rendered by its ASCII
+   representation (`declare {lean} ascii_rep function (>>=) = `bind_name``),
+   at its definition AND at every use (Lem's generic machinery applies ASCII
+   names only at definition sites, the backend's `ascii_rep_set`, since the
+   other targets accept symbolic names at uses). Without an ASCII rep the
+   definition is refused at generation time: `lean_symbolic_def_check`. *)
+(* A Lean 4 atomic identifier: a letter or `_` first, then letters, digits,
+   `_`, `'`, `!`, `?` (Lean's `isIdFirst`/`isIdRest`); bytes >= 0x80 are
+   accepted as parts of Unicode letters. Deliberately NOT Lem's
+   `Util.is_simple_ident_string`, which rejects the `'` Lean allows. *)
+let is_lean_ident_string (s : string) : bool =
+  let first c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_' || Char.code c >= 0x80 in
+  let rest c = first c || (c >= '0' && c <= '9') || c = '\'' || c = '!' || c = '?' in
+  String.length s > 0 && first s.[0] &&
+  (let ok = ref true in String.iteri (fun i c -> if i > 0 && not (rest c) then ok := false) s; !ok)
+;;
+
+let lean_symbolic_name (cd : const_descr_ref) : (string * bool) option =
+  let c_descr = c_env_lookup Ast.Unknown A.env.c_env cd in
+  let (is_shown, n, n_ascii_opt) =
+    constant_descr_to_name (Target.Target_no_ident Target.Target_lean) c_descr in
+  let s = Name.to_string n in
+  if is_shown && not (is_lean_ident_string s) then Some (s, n_ascii_opt <> None)
+  else None
+;;
+
 let use_ascii_rep_for_const (cd : const_descr_ref) : bool =
-  Types.Cdset.mem cd A.ascii_rep_set
+  Types.Cdset.mem cd A.ascii_rep_set ||
+  (match lean_symbolic_name cd with Some (_, has_ascii) -> has_ascii | None -> false)
+;;
+
+let lean_symbolic_def_check (cd : const_descr_ref) : unit =
+  match lean_symbolic_name cd with
+  | Some (s, false) when not !St.rendering_comment ->
+    let l = (c_env_lookup Ast.Unknown A.env.c_env cd).spec_l in
+    raise (Reporting_basic.err_general true l
+      (String.concat "" ["Lean backend: constant `"; s;
+        "` has a symbolic name, which is not a Lean identifier (a definition `def "; s;
+        "` does not parse, and an infix use would resolve to a Lean operator); give it an ASCII name with `declare {lean} ascii_rep function ("; s;
+        ") = `name``"]))
+  | _ -> ()
 ;;
 
 let field_ident_to_output fd ascii_alternative =
@@ -3166,6 +3239,12 @@ let field_ident_to_output fd ascii_alternative =
    - function arguments: f (match ...) instead of f match ...
    - match arm bodies: | p => (match ...) to avoid consuming outer | arms
    - if conditions: if (match ...) then ... to avoid misparsing *)
+(* B3 (linksem 2026-09-28): if/else-if chains longer than this are split
+   into blocks of [lean_if_chain_block] arms (see the If renderer). Lean's
+   limit is ~128 levels; the margin covers chains nested in other terms. *)
+let lean_if_chain_max = 96
+let lean_if_chain_block = 64
+
 let needs_parens term =
   match term with
     | Case _ | If _ | Let _ | Fun _ -> true
@@ -4349,7 +4428,35 @@ type pat_style = FunParam | MatchArm
                           "Lean backend: internal error — designated structural parameter is not a variable") in
                     Output.flat [from_string "\ntermination_by structural "; from_string pname; from_string "\n"]
                   | _ -> emp in
-                let def_keyword_for g =
+                (* linksem 2026-09-28 (B8): a POLYMORPHIC definition with no
+                   explicit parameters (`def fail {a} [Inhabited a] : a :=
+                   failwithI "fail"`, LemLib's Assert_extra.fail) compiles to a
+                   function of erased/instance arguments, so every USE
+                   `@fail Char inst` is a closed term. Lean's closed-term
+                   extraction hoists it into a module-initialisation constant:
+                   evaluated when the module LOADS, not when the branch is
+                   reached (linksem's hex_char_of_nibble `else fail` made every
+                   program importing missing_pervasives panic at start-up; the
+                   message is suppressed during initialisation, so under
+                   LEAN_ABORT_ON_PANIC=1 it was a silent SIGABRT). OCaml
+                   inlines `fail` as `assert false` at the use. `never_extract`
+                   keeps each use where it is, as `failwithI` itself has. *)
+                let never_extract_for g =
+                  if inside_instance then emp
+                  else match g with
+                    | ((_, c, _, _, _, _) :: _) when
+                        (let cty = (c_env_lookup Ast.Unknown A.env.c_env c).const_type in
+                         List.for_all (fun (_, _, pats, _, _, _) -> pats = []) g &&
+                         not (Types.TNset.is_empty (Types.free_vars cty)) &&
+                         (* a point-free function (`elem = listMemberBy ...`)
+                            only builds a closure: nothing to protect *)
+                         (match (Types.head_norm A.env.t_env cty).Types.t with
+                          | Types.Tfn _ -> false | _ -> true)) ->
+                      from_string "@[never_extract] "
+                    | _ -> emp
+                in
+                let rec def_keyword_for g = Output.flat [never_extract_for g; def_keyword_base g]
+                and def_keyword_base g =
                   if inside_instance then emp
                   else if any_structural && structural_for g then
                     from_string "def"
@@ -5198,8 +5305,27 @@ type pat_style = FunParam | MatchArm
                 from_string " ", tv_set
             in
             let tv_set = let_type_variables top_level tv_set in
+            (* linksem 2026-09-28 (B11): a LOCAL `let f = fun (a, b) -> ...`
+               with no annotation. Lem's pattern compiler turns the tuple
+               parameter into `fun p => match p with | (a, b) => ...`; with no
+               expected type Lean infers a DEPENDENT motive for that match,
+               and `f` gets a type like `?m img p` that cannot be applied
+               further (linksem link.lem `apply_reloc`: "Function expected").
+               The binding is annotated with the right-hand side's Lem type,
+               which fixes the motive. A type variable the annotation needs
+               but Lean does not have in scope is a loud error, never a
+               silent one. *)
+            let rec is_lambda (x : exp) = match C.exp_to_term x with
+              | Fun _ -> true
+              | Paren (_, x', _) | Typed (_, x', _, _, _) -> is_lambda x'
+              | _ -> false in
+            let annotate_lambda =
+              not top_level && topt = None && typ_from_pat = None &&
+              (match p.term with P_var _ -> true | _ -> false) && is_lambda e in
             let topt =
               match topt with
+                | None when annotate_lambda ->
+                    Output.flat [from_string " : "; pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e))]
                 | None ->
                     (match typ_from_pat with
                       | None -> emp
@@ -5808,8 +5934,10 @@ type pat_style = FunParam | MatchArm
                       raise (Reporting_basic.err_general true Ast.Unknown
                         (String.concat "" ["Lean backend: instance method not found for '"; method_name; "'"]))
               end
-        else
+        else begin
+          lean_symbolic_def_check c;
           B.const_ref_to_name n true c
+        end
       in
         funcl_aux inside_instance i_ref_opt constraints tv_set (n, pats, typ_opt, skips, e)
     and let_type_variables top_level tv_set =
@@ -6120,11 +6248,32 @@ type pat_style = FunParam | MatchArm
             (match mutual_record_path typ with
             | Some path ->
               (* Mutual records are rendered as inductives, not structures.
-                 Use constructor syntax: TypeName.mk val1 val2 ... *)
+                 Use constructor syntax: TypeName.mk val1 val2 ...
+                 The `mk` arguments are POSITIONAL in the type's field
+                 DECLARATION order; the literal may list its fields in any
+                 order (linksem 2026-09-28, B7: dwarf.lem's sdt_subroutine
+                 literal lists ss_unspecified_parameters before ss_pc_ranges;
+                 emitting in literal order was a type error there, and a
+                 SILENT field swap wherever the swapped fields share a type). *)
               let field_vals = Seplist.to_list fields in
-              let vals = List.map (fun (_, _, e_val, _) ->
-                Output.flat [from_string " ("; exp inside_instance e_val; from_string ")"]
-              ) field_vals in
+              let decl_fields =
+                match Types.type_defs_lookup_typ Ast.Unknown A.env.t_env typ with
+                | Some { Types.type_fields = Some fs; _ } -> fs
+                | _ ->
+                  raise (Reporting_basic.err_general true (Typed_ast.exp_to_locn e)
+                    "Lean backend: mutual record literal: could not find the record type's field list")
+              in
+              if List.length decl_fields <> List.length field_vals then
+                raise (Reporting_basic.err_general true (Typed_ast.exp_to_locn e)
+                  "Lean backend: mutual record literal does not give every field exactly once");
+              let vals = List.map (fun f_ref ->
+                match List.find_opt (fun (fd, _, _, _) -> fd.descr = f_ref) field_vals with
+                | Some (_, _, e_val, _) ->
+                  Output.flat [from_string " ("; exp inside_instance e_val; from_string ")"]
+                | None ->
+                  raise (Reporting_basic.err_general true (Typed_ast.exp_to_locn e)
+                    "Lean backend: mutual record literal is missing a declared field")
+              ) decl_fields in
               let n0 = Name.add_lskip (Path.get_name path) in
               let n = B.type_path_to_name n0 path in
               let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n)) in
@@ -6282,6 +6431,18 @@ type pat_style = FunParam | MatchArm
                         if is_eq then Output.flat [l_out; from_string "  =  "; r_out]
                         else Output.flat [l_out; meta_utf8 "  \xe2\x89\xa0  "; r_out]
                       | _ -> begin
+                        (* A symbolic constant rendered by its ASCII name
+                           (B1) is emitted in PREFIX form, `name l r`: an
+                           operand that was fine in infix position (an
+                           application `f x`, a nested infix) must now be
+                           parenthesised as an argument. *)
+                        let trans =
+                          if lean_symbolic_name cd.descr <> None then (fun e ->
+                            match C.exp_to_term e with
+                            | Var _ | Lit _ | Paren _ | Tup _ | List _ | Record _
+                            | Begin _ | Constant _ -> exp inside_instance e
+                            | _ -> Output.flat [from_string "("; exp inside_instance e; from_string ")"])
+                          else trans in
                         let pieces = B.function_application_to_output (exp_to_locn e) trans true e cd [l; r] (use_ascii_rep_for_const cd.descr) in
                         Output.concat sep pieces
                       end
@@ -6293,18 +6454,77 @@ type pat_style = FunParam | MatchArm
                     end
               end
           | If (skips, test, skips', t, skips'', f) ->
-              let cond =
+              let render_cond test =
                 if needs_parens (C.exp_to_term test) then
                   Output.flat [from_string "("; exp inside_instance test; from_string ")"]
                 else exp inside_instance test
               in
-              Output.flat [
-                ws skips; from_string "if";
-                from_string " "; cond;
-                ws skips'; from_string "then"; from_string " ";
-                exp inside_instance t;
-                ws skips''; from_string " else "; exp inside_instance f
-              ]
+              let render_arm (skips, test, skips', t, skips'') =
+                Output.flat [
+                  ws skips; from_string "if";
+                  from_string " "; render_cond test;
+                  ws skips'; from_string "then"; from_string " ";
+                  exp inside_instance t;
+                  ws skips''; from_string " else "
+                ]
+              in
+              (* Long else-if chains (linksem 2026-09-28, B3). Lean cannot
+                 elaborate an if/else-if chain nested more than ~128 deep
+                 ("maximum recursion depth has been reached", independent of
+                 the branch contents; measured on 4.28 at 150 and 600 arms);
+                 linksem's relocation dispatch has 123-arm chains inside
+                 larger terms. A maxRecDepth bump is not a fix. A chain of
+                 more than [lean_if_chain_max] arms is emitted in blocks of
+                 [lean_if_chain_block]: each later block becomes a local
+                 continuation `let _lemIfTailN := fun (_ : Unit) => <block>`
+                 (defined innermost-first), and a block's last `else` calls
+                 the next one. Pure and order-preserving: the conditions are
+                 tested in source order, and a continuation is entered only
+                 when every earlier condition was false; `zeta` unfolds it
+                 in proofs. *)
+              let rec spine e acc =
+                match C.exp_to_term e with
+                | If (sk, c, sk', t, sk'', f) -> spine f ((sk, c, sk', t, sk'') :: acc)
+                | _ -> (List.rev acc, e)
+              in
+              let (arms, final) = spine f [(skips, test, skips', t, skips'')] in
+              if List.length arms <= lean_if_chain_max then
+                Output.flat (List.map render_arm arms @ [exp inside_instance final])
+              else begin
+                (* capture guard: no variable of the chain may use the
+                   synthesized prefix *)
+                Nfmap.iter (fun n _ ->
+                  let ns = Name.to_string n in
+                  if String.length ns >= 10 && String.sub ns 0 10 = "_lemIfTail" then
+                    raise (Reporting_basic.err_general true (Typed_ast.exp_to_locn e)
+                      (Printf.sprintf "Lean backend: variable '%s' uses the reserved '_lemIfTail' prefix (synthesized continuations of long if/else-if chains; the reserved-name contract) — rename it" ns)))
+                  (C.exp_to_free e);
+                let rec split_at k l =
+                  if k = 0 then ([], l) else
+                  match l with [] -> ([], []) | x :: xs -> let (a, b) = split_at (k - 1) xs in (x :: a, b)
+                in
+                let rec blocks l =
+                  if List.length l <= lean_if_chain_block then [l]
+                  else let (a, b) = split_at lean_if_chain_block l in a :: blocks b
+                in
+                let bs = blocks arms in
+                let names = List.map (fun _ ->
+                  let n = !St.if_tail_counter in
+                  St.if_tail_counter := n + 1;
+                  Printf.sprintf "_lemIfTail%d" n) bs in
+                let call i = from_string (Printf.sprintf "%s ()" (List.nth names i)) in
+                let nb = List.length bs in
+                let block_out i b =
+                  Output.flat (List.map render_arm b @
+                    [if i + 1 < nb then call (i + 1) else exp inside_instance final]) in
+                (* continuations for blocks 1..nb-1, innermost (last) first *)
+                let lets = List.rev (List.init (nb - 1) (fun j ->
+                  let i = j + 1 in
+                  Output.flat [from_string "let "; from_string (List.nth names i);
+                    from_string " := fun (_ : Unit) => "; block_out i (List.nth bs i);
+                    from_string "; "])) in
+                Output.flat ([from_string "("] @ lets @ [block_out 0 (List.hd bs); from_string ")"])
+              end
           | Quant (quant, quant_binding_list, skips, e) ->
             let quant =
               match quant with
@@ -6628,7 +6848,20 @@ type pat_style = FunParam | MatchArm
         | P_paren (skips, p, skips') ->
             (match style with
             | FunParam ->
-              Output.flat [ws skips; from_string "("; self p; ws skips'; from_string ")"]
+              (* linksem 2026-09-28 (B6): a parenthesised variable `(ev)` in
+                 parameter position rendered as `((ev : T))`, which Lean
+                 rejects ("expected '_' or identifier"). The shapes below
+                 already render as a parenthesised binder `(x : T)`, so the
+                 source parentheses add nothing and are dropped (through any
+                 nesting: `((z))`). *)
+              let rec binder_shaped (q : pat) = match q.term with
+                | P_var _ | P_wild _ | P_typ _ | P_var_annot _ -> true
+                | P_lit { term = L_unit _ } -> true
+                | P_paren (_, q', _) -> binder_shaped q'
+                | _ -> false
+              in
+              if binder_shaped p then Output.flat [ws skips; self p; ws skips']
+              else Output.flat [ws skips; from_string "("; self p; ws skips'; from_string ")"]
             | MatchArm ->
               Output.flat [from_string "("; ws skips; self p; ws skips'; from_string ")"])
         | P_const(cd, ps) ->
@@ -6746,6 +6979,7 @@ type pat_style = FunParam | MatchArm
           from_string " where\n"; body; from_string "\n"; deriving_clause;
         ]
     and type_def inside_module defs =
+      St.current_type_block := List.map (fun (_, _, t_path, _, _) -> t_path) (Seplist.to_list defs);
       (* Collect type names and their constructor names for "export" declarations.
          Using "export" instead of "open" ensures constructors are visible
          in files that import this module, not just in the defining file. *)
@@ -7029,7 +7263,7 @@ type pat_style = FunParam | MatchArm
     and constructor_indexed ind_name (ty_vars : variable list) ty_vars_names ty_vars_names_space ((name0, _), c_ref, skips, args) =
       let ctor_name = B.const_ref_to_name name0 false c_ref in
       let ctor_name = Name.to_output (Type_ctor (false, false)) ctor_name in
-      let body = flat @@ Seplist.to_sep_list pat_typ (sep @@ from_string " → ") args in
+      let body = flat @@ Seplist.to_sep_list ctor_arg_typ (sep @@ from_string " → ") args in
       (* For indexed inductives, constructors must bind all type variables implicitly *)
       let implicit_bindings =
         if List.length ty_vars = 0 then emp
@@ -7092,7 +7326,7 @@ type pat_style = FunParam | MatchArm
               Output.flat [
                 from_string " (";
                 Name.to_output Term_field fname;
-                from_string " :"; pat_typ t;
+                from_string " :"; ctor_arg_typ t;
                 from_string ")"
               ]
             ) field_list in
@@ -7121,7 +7355,7 @@ type pat_style = FunParam | MatchArm
     and constructor ind_name (ty_vars : variable list) ((name0, _), c_ref, skips, args) =
       let ctor_name = B.const_ref_to_name name0 false c_ref in
       let ctor_name = Name.to_output (Type_ctor (false, false)) ctor_name in
-      let body = flat @@ Seplist.to_sep_list pat_typ (sep @@ from_string " → ") args in
+      let body = flat @@ Seplist.to_sep_list ctor_arg_typ (sep @@ from_string " → ") args in
       let ty_vars_typeset =
         concat_str " " @@ List.map (fun v ->
           match v with
@@ -7143,6 +7377,50 @@ type pat_style = FunParam | MatchArm
           Output.flat [
             from_string "  | "; ctor_name; from_string " :"; ws skips; body; tail
           ]
+    (* Constructor argument types and nested inductives (linksem 2026-09-28,
+       B4). Lean's kernel accepts a nested occurrence `List (X ty)` only when
+       X is an inductive type applied to arguments; a Lem type ABBREVIATION
+       emitted as a Lean `abbrev` is not unfolded there, so
+       `abbrev dim t := Option Nat × Option t`, `| arr : List (dim t) → top t`
+       and later `inductive ty | CT : top ty → ty` fails with "(kernel) arg
+       #1 of '_nested.List_2.cons' contains a non valid occurrence of the
+       datatypes being declared" (linksem's dwarf.lem c_type_top/c_type).
+       In an inductive constructor argument, an abbreviation (without a Lean
+       target rep) whose expansion mentions a type parameter or a type of the
+       group being defined is therefore printed EXPANDED. Closed
+       abbreviations keep their names, so nothing else changes. *)
+    and ctor_arg_typ (t : src_t) =
+      let changed = ref false in
+      let rec mentions_block (ty : Types.t) =
+        match ty.Types.t with
+        | Types.Tapp (ts, p) ->
+          List.exists (fun q -> Path.compare p q = 0) !St.current_type_block
+          || List.exists mentions_block ts
+        | Types.Tfn (a, b) -> mentions_block a || mentions_block b
+        | Types.Ttup ts -> List.exists mentions_block ts
+        | _ -> false
+      in
+      let rec expand (ty : Types.t) : Types.t =
+        match ty.Types.t with
+        | Types.Tapp (ts, p) ->
+          (match Types.type_defs_lookup_tc A.env.t_env p with
+           | Some (Types.Tc_type td)
+             when td.Types.type_abbrev <> None
+               && Target.Targetmap.apply_target td.Types.type_target_rep
+                    (Target.Target_no_ident Target.Target_lean) = None ->
+             let body = match td.Types.type_abbrev with Some b -> b | None -> assert false in
+             let body = Types.type_subst (Types.TNfmap.from_list2 td.Types.type_tparams ts) body in
+             if not (Types.TNset.is_empty (Types.free_vars body)) || mentions_block body then begin
+               changed := true; expand body
+             end else { Types.t = Types.Tapp (List.map expand ts, p) }
+           | _ -> { Types.t = Types.Tapp (List.map expand ts, p) })
+        | Types.Tfn (a, b) -> { Types.t = Types.Tfn (expand a, expand b) }
+        | Types.Ttup ts -> { Types.t = Types.Ttup (List.map expand ts) }
+        | _ -> ty
+      in
+      let e = expand t.typ in
+      if !changed then Output.flat [ws (snd (Types.typ_alter_init_lskips (fun sk -> (sk, sk)) t)); from_string "("; pat_typ (C.t_to_src_t e); from_string ")"]
+      else pat_typ t
     and pat_typ t =
       match t.term with
         | Typ_wild skips -> ws skips ^ from_string "_"
@@ -8600,7 +8878,19 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
           Output.flat (
             from_string "\n/- ===== fuel_measure obligations (generated statements; proofs in the hand-written module above) ===== -/\n"
             :: !St.measure_obligations) in
-        ((to_rope (r"\"") lex_skip need_space @@ imports_output ^ transitive_opens ^ ns_start ^ lean_defs ^ ns_end ^ ws end_lex_skips),
-          to_rope (r"\"") lex_skip need_space @@ measure_import ^ transitive_opens ^ opens_output ^ lean_defs_extra ^ measure_obligations ^ ws end_lex_skips)
+        (* linksem 2026-09-28 (B9): Lean's closed-term extraction hoists
+           every CLOSED subterm out of function bodies into a constant
+           evaluated when the module LOADS. A closed application of a
+           partial function in an untaken branch (`if b then g 10 else 0`,
+           `g` panicking on 10) then panics at start-up (silently: panic
+           messages are off during initialisation), where the OCaml target
+           evaluates it only if the branch is reached. Generated code is
+           therefore compiled with extraction OFF: strict, in-place
+           evaluation, as in OCaml. Top-level constants are unaffected
+           (initialised at load on both targets). Must follow every import
+           (transitive_opens may itself begin with imports). *)
+        let no_closed_extraction = from_string "set_option compiler.extract_closed false\n" in
+        ((to_rope (r"\"") lex_skip need_space @@ imports_output ^ transitive_opens ^ no_closed_extraction ^ ns_start ^ lean_defs ^ ns_end ^ ws end_lex_skips),
+          to_rope (r"\"") lex_skip need_space @@ measure_import ^ transitive_opens ^ no_closed_extraction ^ opens_output ^ lean_defs_extra ^ measure_obligations ^ ws end_lex_skips)
     ;;
   end

@@ -7,6 +7,7 @@ import LemLib.Basic_classes
 import LemLib.Maybe
 import LemLib.Function
 import LemLib.Num
+set_option compiler.extract_closed false
 
 namespace Lem_Set_helpers
 /- **************************************************************************** -/

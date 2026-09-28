@@ -65,10 +65,14 @@ lean_lib LemComprehensiveTest where
     `Test_indreln, `Test_indreln_auxiliary,
     `Test_instances, `Test_instances_auxiliary,
     `Test_keywords, `Test_keywords_auxiliary,
+    `Test_long_if_chain, `Test_long_if_chain_auxiliary,  -- >96-arm else-if chains split into continuations (linksem B3)
+    `Test_nested_abbrev, `Test_nested_abbrev_auxiliary,  -- abbreviations expanded in nested ctor args (linksem B4)
+    `Test_lambda_let, `Test_lambda_let_auxiliary,  -- local lambda lets annotated (linksem B11)
     `Test_let_bindings, `Test_let_bindings_auxiliary,
     `Test_misc, `Test_misc_auxiliary,
     `Test_modules, `Test_modules_auxiliary,
     `Test_mutual_types, `Test_mutual_types_auxiliary,
+    `Test_mutual_record_order, `Test_mutual_record_order_auxiliary,  -- mutual record literals in declaration order (linksem B7)
     `Test_mword, `Test_mword_auxiliary,
     `Test_numeric, `Test_numeric_auxiliary,
     `Test_patterns, `Test_patterns_auxiliary,
@@ -89,8 +93,10 @@ lean_lib LemComprehensiveTest where
     `TestStructuralCheck,  -- hand-written structural-declare kernel pins (decide/rfl through structural defs)
     `Test_supply, `Test_supply_auxiliary,
     `Test_supply_multi, `Test_supply_multi_auxiliary,
+    `Test_symbolic_ops, `Test_symbolic_ops_auxiliary,  -- symbolic constant names via ascii_rep (linksem B1)
     `TestSupplyCheck,  -- hand-written supply draw-order/signature pins (effect-retirement L1)
     `Test_types_advanced, `Test_types_advanced_auxiliary,
+    `Test_untaken_failure, `Test_untaken_failure_auxiliary,  -- untaken failure branches stay untaken (linksem B8/B9)
     `Test_tuple_let_once, `Test_tuple_let_once_auxiliary,
     `TupleLetTick,  -- hand-written m7 single-evaluation counter
     `Test_types_basic, `Test_types_basic_auxiliary,
@@ -103,6 +109,11 @@ lean_lib LemComprehensiveTest where
 -- LEAN_ABORT_ON_PANIC=1; must abort with the Incomplete Pattern message).
 lean_exe «test-failwith-panic» where
   root := `TestFailwithThreadingPanic
+
+-- Untaken failure branches are not evaluated at module init (linksem B8/B9);
+-- run by the Makefile `lean-untaken-failure` target.
+lean_exe «test-untaken-failure» where
+  root := `TestUntakenFailure
 
 lean_exe «test-tuple-let-once» where
   root := `TestTupleLetOnce

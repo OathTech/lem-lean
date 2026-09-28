@@ -1,5 +1,9 @@
 LEM = ../../lem
-LEMLIB = ../../library
+# ABSOLUTE (linksem 2026-09-28, B12): if LEMLIB is set in the caller's
+# environment, make exports THIS value to every recipe, and a relative path
+# is wrong for the recipes that change directory (parity/run.sh). Before the
+# B10 fix lem then silently ran with no reserved-name list.
+LEMLIB = $(abspath ../../library)
 LEMFLAGS = -wl ign -i $(LEMLIB)/pervasives.lem
 # Every lake invocation runs through the cgroup cap (parity-fix audit
 # response, 2026-09-03: "never run a Lean build uncapped"); the same
@@ -10,7 +14,7 @@ LAKE = "$(CAPPED)" lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-generate lean-compile lean-negative lean-panic lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
+.PHONY: all lean lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -19,7 +23,21 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-version lean-parity-admission lean-generate lean-compile lean-panic lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+lean: lean-version lean-constants-required lean-parity-admission lean-generate lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+
+# The reserved-name list is required (linksem 2026-09-28, B10): with the
+# library's lean_constants missing, lem must refuse to generate Lean (it used
+# to silently disable the renaming pass: unescaped keywords, ambiguous
+# constructors). Plant: a library copy without the file.
+lean-constants-required:
+	@echo "=== Reserved-name list required (missing lean_constants is fatal) ==="
+	@d=$$(mktemp -d); cp -r $(LEMLIB) $$d/lib && rm $$d/lib/lean_constants; \
+	out=$$(LEMLIB=$$d/lib $(LEM) -wl ign -lean -outdir $$d test_misc.lem 2>&1); st=$$?; \
+	ok=$$(LEMLIB=$(abspath $(LEMLIB)) $(LEM) -wl ign -lean -outdir $$d test_misc.lem 2>&1); st2=$$?; rm -rf $$d; \
+	if [ $$st -eq 0 ] || ! echo "$$out" | grep -q "reserved-name list for target lean is missing"; then \
+		echo "  FAIL: generation without lean_constants was not refused: exit $$st: $$out"; exit 1; \
+	elif [ $$st2 -ne 0 ]; then echo "  FAIL: generation with the intact library failed: $$ok"; exit 1; \
+	else echo "  OK: missing lean_constants refused; intact library generates"; fi
 
 lean-parity-admission:
 	@bash parity/test_failure_admission.sh
@@ -280,6 +298,22 @@ lean-panic:
 	else \
 		echo "  OK (leg 2): fail-stops (exit $$st) under LEAN_ABORT_ON_PANIC=1"; \
 	fi
+
+# Untaken failure branches (linksem 2026-09-28, B8/B9): a closed call to a
+# partial function in an UNTAKEN branch must not run at module init (Lean
+# 4.28 closed-term extraction; panic messages are off during init, so the
+# pre-fix symptom was a silent SIGABRT under LEAN_ABORT_ON_PANIC=1).
+lean-untaken-failure:
+	@echo "=== Untaken failure branches are not evaluated at module init ==="
+	@cd lean-test && $(LAKE) build test-untaken-failure > /dev/null
+	@out=$$(cd lean-test && LEAN_ABORT_ON_PANIC=1 ./.lake/build/bin/test-untaken-failure 2>&1); st=$$?; \
+	if [ $$st -ne 0 ] || [ "$$out" != "untaken: 0 z" ]; then \
+		echo "  FAIL (leg 1): exit $$st, output '$$out' (expected 'untaken: 0 z', exit 0)"; exit 1; \
+	else echo "  OK (leg 1): untaken branches not evaluated"; fi
+	@out=$$(cd lean-test && LEAN_ABORT_ON_PANIC=1 ./.lake/build/bin/test-untaken-failure take 2>&1); st=$$?; \
+	if [ $$st -eq 0 ] || ! echo "$$out" | grep -q "must_be_small: too big"; then \
+		echo "  FAIL (leg 2): exit $$st without the failure message: $$out"; exit 1; \
+	else echo "  OK (leg 2): the taken branch fail-stops with its message"; fi
 
 # Negative probes: each negative/neg_*.lem MUST be rejected, and with the
 # error fragment declared in its first-line "(* EXPECT: ... *)" header —

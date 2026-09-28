@@ -9,6 +9,7 @@ import LemLib.Tuple
 import LemLib.Num
 import LemLib.List
 import LemLib.Assert_extra
+set_option compiler.extract_closed false
 
 namespace Lem_List_extra
 

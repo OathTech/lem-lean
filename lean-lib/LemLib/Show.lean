@@ -6,6 +6,7 @@ import LemLib.String
 import LemLib.Maybe
 import LemLib.Num
 import LemLib.Basic_classes
+set_option compiler.extract_closed false
 
 namespace Lem_Show
 

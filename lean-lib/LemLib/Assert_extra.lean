@@ -2,6 +2,7 @@
 
 import LemLib
 
+set_option compiler.extract_closed false
 
 namespace Lem_Assert_extra
 
@@ -13,7 +14,7 @@ namespace Lem_Assert_extra
 
 /- removed value specification -/
 
-def  fail  {a : Type} [Inhabited a]   : a := (failwithI  "fail" : a)
+@[never_extract] def  fail  {a : Type} [Inhabited a]   : a := (failwithI  "fail" : a)
 /- removed value specification -/
 
 def  ensure  (test : Bool) (msg : String)  : Unit := 

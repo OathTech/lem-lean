@@ -264,3 +264,11 @@ assert unwrap_ok2 : unwrap_annotated (Wrap (7, false)) = (0:nat)
 assert as_ctor_ok : let (_, n) = as_with_ctor (Blue 5) in n = (5:nat)
 assert multi_as_ok : let (_, sum1, sum2) = multi_as ((3, 4), 5) in sum1 = (7:nat) && sum2 = 10
 assert fib_deep_ok : fib_deep 7 = (13:nat)
+
+(* ---- linksem 2026-09-28 (B6): parenthesised binder parameters ----
+   dwarf.lem writes `let analysed_locations_at_pc (ev) (ds: dwarf_static) ...`;
+   `(ev)` used to render as `((ev : T))`, a Lean parse error. *)
+let paren_params (x) (y : nat) ((z)) (_) = x + y + z
+let paren_unit (()) (n : nat) = n
+assert paren_params_ok : (paren_params 1 2 3 true = (6 : nat))
+assert paren_unit_ok : (paren_unit () 4 = 4)

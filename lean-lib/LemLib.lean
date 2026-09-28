@@ -171,6 +171,15 @@ instance [Ord α] [Ord β] : Ord (α ⊕ β) where
 /- Ord for Unit (not in Lean stdlib, needed by generated code) -/
 instance : Ord Unit where compare _ _ := .eq
 
+/- Ord for LemOrdering (linksem 2026-09-28, B2): Lem programs build sets of
+   comparison results (`Set.member (compare a b) {LT; EQ}`), which needs
+   `SetType ordering`, derived from `Ord`. The order is the OCaml target's:
+   `ordering` is `int` there with LT = -1, EQ = 0, GT = 1, so LT < EQ < GT. -/
+instance : Ord LemOrdering where
+  compare a b :=
+    let rank : LemOrdering → Nat := fun | .LT => 0 | .EQ => 1 | .GT => 2
+    compare (rank a) (rank b)
+
 /- Ord instance for Prod (not in Lean stdlib) -/
 instance [Ord α] [Ord β] : Ord (α × β) where
   compare p q :=

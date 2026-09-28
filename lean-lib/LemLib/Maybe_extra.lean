@@ -5,6 +5,7 @@ import LemLib
 import LemLib.Basic_classes
 import LemLib.Maybe
 import LemLib.Assert_extra
+set_option compiler.extract_closed false
 
 namespace Lem_Maybe_extra
  

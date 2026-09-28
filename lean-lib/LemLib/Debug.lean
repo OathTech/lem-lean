@@ -2,6 +2,7 @@
 
 import LemLib
 
+set_option compiler.extract_closed false
 
 namespace Lem_Debug
 

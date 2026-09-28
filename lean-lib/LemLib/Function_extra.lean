@@ -7,6 +7,7 @@ import LemLib.Bool
 import LemLib.Basic_classes
 import LemLib.Num
 import LemLib.Function
+set_option compiler.extract_closed false
 
 namespace Lem_Function_extra
 

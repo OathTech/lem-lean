@@ -14,6 +14,7 @@ import LemLib.Assert_extra
 import LemLib.Show_extra
 import LemLib.Machine_word
 import LemLib.Pervasives
+set_option compiler.extract_closed false
 
 namespace Lem_Pervasives_extra
  

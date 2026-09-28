@@ -7,6 +7,7 @@ import LemLib.Maybe
 import LemLib.Num
 import LemLib.Basic_classes
 import LemLib.List
+set_option compiler.extract_closed false
 
 namespace Lem_Word
 
