@@ -316,6 +316,10 @@ lean-untaken-failure:
 	if [ $$st -eq 0 ] || ! echo "$$out" | grep -q "must_be_small: too big"; then \
 		echo "  FAIL (leg 2): exit $$st without the failure message: $$out"; exit 1; \
 	else echo "  OK (leg 2): the taken branch fail-stops with its message"; fi
+	@out=$$(cd lean-test && env -u LEAN_ABORT_ON_PANIC ./.lake/build/bin/test-untaken-failure failstop 2>&1); st=$$?; \
+	if [ $$st -eq 0 ] || ! echo "$$out" | grep -q "must_be_small: too big" || echo "$$out" | grep -q "untaken:"; then \
+		echo "  FAIL (leg 3): lemFailStop without LEAN_ABORT_ON_PANIC did not stop: exit $$st: $$out"; exit 1; \
+	else echo "  OK (leg 3): lemFailStop stops at the failure without LEAN_ABORT_ON_PANIC (exit $$st)"; fi
 
 # Negative probes: each negative/neg_*.lem MUST be rejected, and with the
 # error fragment declared in its first-line "(* EXPECT: ... *)" header —

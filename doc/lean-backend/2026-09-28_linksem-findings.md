@@ -250,3 +250,34 @@ initialisation and passes on 4.32.2 without the option. The keyword probe
 found 12 identifier-shaped core tokens new in 4.32.2 (`cbv_eval`,
 `cbv_simproc`, `idbg`, `inferInstanceAs`, `unlock_limits`, ...); they were
 added to both avoid lists.
+
+## Audit follow-up (2026-09-29)
+
+Five independent auditors compared the Lean port of linksem with the OCaml
+build; the linksem record lists every item. Backend-side:
+
+- **A2. Panics continued by default (fixed).** A reached `failwithI` is a
+  Lean `panic!`, which prints and CONTINUES with the `Inhabited` default
+  unless `LEAN_ABORT_ON_PANIC=1` is set; an executable over generated code
+  could then exit 0 with plausible output where the OCaml target raises
+  (linksem: invalid program-header flags printed a table with an empty
+  column). LemLib now provides `lemFailStop : BaseIO Unit` (the runtime's
+  `lean_internal_set_exit_on_panic`, as Lean's own shell uses; no `import
+  Lean`), to be called first in `main`: a reached failure then prints its
+  message and exits 1. Test: `lean-untaken-failure` leg 3 (without the
+  environment variable; plant: removing the call makes it fail).
+- **A3. Failures inside function-returning definitions fire later (documented
+  limitation).** Lean's compiler eta-expands every definition to the arity of
+  its TYPE (`Lean/Compiler/LCNF/ToDecl.lean:155`, `Meta.etaExpand`, no
+  opt-out short of `@[extern]`/`@[init]`), so for `f (x) : A -> B := if c
+  then g else failwith ..` the body runs when the returned function is
+  applied, whereas OCaml runs it when `f` is applied to `x`. Only the timing
+  of failures (and non-termination) differs; the outcome flips only if a
+  failing function value is built and never applied. linksem reaches it with
+  an unknown DWARF attribute form (both sides fail, different messages).
+  Matching OCaml would need a non-function wrapper type for every such
+  definition and its uses; not taken.
+- **A4. Failure order (documented limitation, existing).** OCaml evaluates
+  arguments right to left, Lean left to right: with two failing
+  subexpressions the reported failure differs (both fail).
+- **A1. Comparison residuals** (being fixed separately; see the next section).

@@ -7,5 +7,8 @@
 import Test_untaken_failure
 
 def main (args : List String) : IO Unit := do
-  let take := args == ["take"]
+  -- leg 3 (audit item 2): `failstop` runs with LemLib's fail-stop switched
+  -- on and NO LEAN_ABORT_ON_PANIC: the reached failure must still stop it.
+  if args == ["failstop"] then lemFailStop
+  let take := args == ["take"] || args == ["failstop"]
   IO.println s!"untaken: {pick take} {pick_char 0}"

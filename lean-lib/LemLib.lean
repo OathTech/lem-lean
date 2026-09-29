@@ -247,6 +247,22 @@ def lemBoolToProp (b : Bool) : Prop := b = true
 @[implemented_by failwithIImpl, never_extract]
 opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
 
+/- Fail-stop for executables (linksem 2026-09-29, audit item 2). A reached
+   `failwithI` is a Lean `panic!`: by default the runtime prints the message
+   and CONTINUES with the `Inhabited` default ("library-call semantics"), so a
+   program whose model fails can still exit 0 with plausible-looking output,
+   where the OCaml target raises and stops. An executable over generated code
+   should call `lemFailStop` first thing in `main`: every later panic then
+   prints its message and exits (status 1), independently of the caller's
+   environment (`LEAN_ABORT_ON_PANIC=1` remains an alternative, from outside).
+   `lean_internal_set_exit_on_panic` is the runtime entry point Lean's own
+   shell uses (Lean/Shell.lean); it is part of the runtime linked into every
+   executable, so no `import Lean` is needed. -/
+@[extern "lean_internal_set_exit_on_panic"]
+opaque lemSetExitOnPanic (exit : Bool) : BaseIO Unit
+
+def lemFailStop : BaseIO Unit := lemSetExitOnPanic true
+
 /- fuelExhaustedWith: out-of-fuel sentinel for fuel'd defs whose return
    type is pure (no error channel) and possibly polymorphic (arc-3 sweep).
    The witness — any in-scope value of the return type, typically one of
