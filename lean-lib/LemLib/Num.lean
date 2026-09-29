@@ -4,7 +4,6 @@ import LemLib
 
 import LemLib.Bool
 import LemLib.Basic_classes
-set_option compiler.extract_closed false
 
 namespace Lem_Num
 

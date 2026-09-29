@@ -6,7 +6,6 @@ import LemLib.Bool
 import LemLib.Basic_classes
 import LemLib.List
 import LemLib.Tuple
-set_option compiler.extract_closed false
 
 namespace Lem_Either
  

@@ -300,9 +300,11 @@ lean-panic:
 	fi
 
 # Untaken failure branches (linksem 2026-09-28, B8/B9): a closed call to a
-# partial function in an UNTAKEN branch must not run at module init (Lean
-# 4.28 closed-term extraction; panic messages are off during init, so the
-# pre-fix symptom was a silent SIGABRT under LEAN_ABORT_ON_PANIC=1).
+# partial function in an UNTAKEN branch must not run at module init. Lean
+# 4.28 initialised hoisted closed terms eagerly at load (silent SIGABRT under
+# LEAN_ABORT_ON_PANIC=1: panic messages are off during init); 4.32 does it
+# lazily, so since the 4.32.2 move this target is the GUARD of that toolchain
+# property (the per-module `extract_closed false` workaround is retired).
 lean-untaken-failure:
 	@echo "=== Untaken failure branches are not evaluated at module init ==="
 	@cd lean-test && $(LAKE) build test-untaken-failure > /dev/null

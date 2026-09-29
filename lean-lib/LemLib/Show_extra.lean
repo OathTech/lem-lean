@@ -11,7 +11,6 @@ import LemLib.Basic_classes
 import LemLib.Set
 import LemLib.Relation
 import LemLib.Show
-set_option compiler.extract_closed false
 
 namespace Lem_Show_extra
 

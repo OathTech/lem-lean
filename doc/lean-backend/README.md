@@ -35,8 +35,9 @@ Use this fork explicitly: the upstream opam release does not contain the
 Lean backend. The measured platform is Linux x86_64; other platforms are
 unverified. Prerequisites are Git, Bash, GNU make/coreutils/diffutils,
 a C toolchain, opam 2, and elan with the toolchain in `lean-lib/lean-toolchain` installed. The local
-measurement used OCaml 5.4.0, opam 2.1.5 and Lean 4.28.0; Cerberus uses
-Lean 4.32.2. Package constraints are in `opam`. Public repository/ref
+measurement used OCaml 5.4.0, opam 2.1.5 and Lean 4.28.0; since 2026-09-28
+the pin is Lean 4.32.2, the toolchain Cerberus uses (record:
+[linksem findings](2026-09-28_linksem-findings.md), B9). Package constraints are in `opam`. Public repository/ref
 availability and a fresh dependency download remain operator checks in
 the cleanup evidence; offline tests used preinstalled dependencies.
 

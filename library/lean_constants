@@ -580,3 +580,14 @@ while
 without_expected_type
 with_weak_namespace
 lem_if
+builtin_cbv_simproc
+builtin_cbv_simproc_decl
+cbv_eval
+cbv_simproc
+cbv_simproc_decl
+deprecated_module
+deprecated_syntax
+idbg
+register_sym_dsimp
+register_sym_simp
+unlock_limits

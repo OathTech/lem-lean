@@ -7,9 +7,10 @@ open import Pervasives_extra
    `must_be_small 10` when the module LOADED and panicked (silently: panic
    messages are off during initialisation), although the OCaml target only
    evaluates it when the branch is taken. Likewise every use of the
-   polymorphic `fail` (B8). The backend compiles generated code with
-   closed-term extraction off, and marks nullary polymorphic definitions
-   never_extract. Executed by the Makefile `lean-untaken-failure` target
+   polymorphic `fail` (B8, which stays never_extract). Lean 4.32 initialises
+   closed terms lazily, so since the 4.32.2 toolchain move this test guards
+   that property (the per-module `extract_closed false` of B9 is retired).
+   Executed by the Makefile `lean-untaken-failure` target
    (test-untaken-failure, LEAN_ABORT_ON_PANIC=1): untaken -> exit 0,
    taken -> loud abort with the message.
    ====================================================================== *)

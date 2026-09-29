@@ -31,7 +31,7 @@ To compile the generated code, set up a [Lake](https://lean-lang.org/lean4/doc/s
     lean_lib MyLib where
       roots := #[`MyModule]
 
-Then run `lake build` to compile. The library pins its toolchain in `lean-lib/lean-toolchain` (Lean 4.28.0 at the time of writing); the same generated code is also built by its largest consumer on Lean 4.32.2. Always build generated code against the `LemLib` from the same checkout as the `lem` that generated it — the two evolve together.
+Then run `lake build` to compile. The library pins its toolchain in `lean-lib/lean-toolchain` (Lean 4.32.2, the toolchain of its largest consumer, Cerberus). Generated code relies on Lean initialising closed terms lazily (4.32 and later); the `lean-untaken-failure` suite target fails on a toolchain that does not. Always build generated code against the `LemLib` from the same checkout as the `lem` that generated it — the two evolve together.
 
 ### What the Lean target emits
 

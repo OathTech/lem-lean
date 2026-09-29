@@ -17,7 +17,6 @@ import LemLib.List
 import LemLib.String
 import LemLib.Word
 import LemLib.Show
-set_option compiler.extract_closed false
 
 namespace Lem_Pervasives
  

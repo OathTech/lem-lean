@@ -161,6 +161,8 @@ let lean_syntax_keywords = [
   "this"; "rfl"; "calc"; "decide"; "sorry";
   "pure"; "get"; "set"; "throw"; "panic"; "admit"; "trivial";
   "lem_if";  (* LemLib's Bool-conditional token (B13) *)
+  (* Lean 4.32.2 additions (toolchain move, scripts/lean_keyword_probe.sh) *)
+  "builtin_cbv_simproc"; "builtin_cbv_simproc_decl"; "cbv_eval"; "cbv_simproc"; "cbv_simproc_decl"; "deprecated_module"; "deprecated_syntax"; "idbg"; "inferInstanceAs"; "register_sym_dsimp"; "register_sym_simp"; "unlock_limits";
   (* linksem 2026-09-28 (B5): every identifier-shaped core-grammar token
      that fails as a binder on the pinned toolchain (linksem hit `matches`);
      derived and checked by scripts/lean_keyword_probe.sh, which fails if
@@ -8893,19 +8895,17 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
           Output.flat (
             from_string "\n/- ===== fuel_measure obligations (generated statements; proofs in the hand-written module above) ===== -/\n"
             :: !St.measure_obligations) in
-        (* linksem 2026-09-28 (B9): Lean's closed-term extraction hoists
-           every CLOSED subterm out of function bodies into a constant
-           evaluated when the module LOADS. A closed application of a
-           partial function in an untaken branch (`if b then g 10 else 0`,
-           `g` panicking on 10) then panics at start-up (silently: panic
-           messages are off during initialisation), where the OCaml target
-           evaluates it only if the branch is reached. Generated code is
-           therefore compiled with extraction OFF: strict, in-place
-           evaluation, as in OCaml. Top-level constants are unaffected
-           (initialised at load on both targets). Must follow every import
-           (transitive_opens may itself begin with imports). *)
-        let no_closed_extraction = from_string "set_option compiler.extract_closed false\n" in
-        ((to_rope (r"\"") lex_skip need_space @@ imports_output ^ transitive_opens ^ no_closed_extraction ^ ns_start ^ lean_defs ^ ns_end ^ ws end_lex_skips),
-          to_rope (r"\"") lex_skip need_space @@ measure_import ^ transitive_opens ^ no_closed_extraction ^ opens_output ^ lean_defs_extra ^ measure_obligations ^ ws end_lex_skips)
+        (* linksem 2026-09-28 (B9, retired with the 4.32.2 toolchain move):
+           Lean 4.28 evaluated hoisted closed terms when a module LOADED, so
+           a closed call to a partial function in an untaken branch
+           (`if b then g 10 else 0`) panicked at start-up; generated modules
+           then set `compiler.extract_closed false`. From 4.32 closed terms
+           are initialised lazily at first use (probe: 4.28 exits 134, 4.32.2
+           exits 0), so the option only cost time (+21 % Lean CPU on the
+           Cerberus csmith lane) and is no longer emitted. The property is
+           guarded by the `lean-untaken-failure` suite target, which fails on
+           a toolchain with eager initialisation. *)
+        ((to_rope (r"\"") lex_skip need_space @@ imports_output ^ transitive_opens ^ ns_start ^ lean_defs ^ ns_end ^ ws end_lex_skips),
+          to_rope (r"\"") lex_skip need_space @@ measure_import ^ transitive_opens ^ opens_output ^ lean_defs_extra ^ measure_obligations ^ ws end_lex_skips)
     ;;
   end

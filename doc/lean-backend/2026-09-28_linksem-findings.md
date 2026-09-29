@@ -237,3 +237,16 @@ where it costs ~21 % CPU on this lane. Options (operator decision): keep B9
 unconditional; or move lem-lean's toolchain pin to 4.32.2 (Cerberus's) and
 drop the option, keeping `lean-untaken-failure` as the guard that fails if a
 toolchain with eager closed-term initialisation comes back.
+
+## Toolchain move to Lean 4.32.2; B9 retired (2026-09-29)
+
+[USER 2026-09-29] agreed: move lem-lean's pin to Lean 4.32.2 (Cerberus's
+toolchain; on the roadmap) and drop B9. All five `lean-toolchain` files now
+pin 4.32.2; generated modules no longer set `compiler.extract_closed false`
+(the backend comment at the former emission site records why); B8
+(`never_extract` on nullary polymorphic definitions) stays; the
+`lean-untaken-failure` target is now the guard of lazy closed-term
+initialisation and passes on 4.32.2 without the option. The keyword probe
+found 12 identifier-shaped core tokens new in 4.32.2 (`cbv_eval`,
+`cbv_simproc`, `idbg`, `inferInstanceAs`, `unlock_limits`, ...); they were
+added to both avoid lists.

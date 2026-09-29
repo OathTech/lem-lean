@@ -11,7 +11,6 @@ import LemLib.List
 import LemLib.Num
 import LemLib.Set
 import LemLib.Map
-set_option compiler.extract_closed false
 
 namespace Lem_Map_extra
 

@@ -10,7 +10,6 @@ import LemLib.Num
 import LemLib.List
 import LemLib.Sorting
 import LemLib.Set
-set_option compiler.extract_closed false
 
 namespace Lem_Set_extra
 /- **************************************************************************** -/

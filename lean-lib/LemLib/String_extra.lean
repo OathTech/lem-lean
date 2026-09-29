@@ -7,7 +7,6 @@ import LemLib.String
 import LemLib.List
 import LemLib.Num
 import LemLib.Basic_classes
-set_option compiler.extract_closed false
 
 namespace Lem_String_extra
 /- **************************************************************************** -/

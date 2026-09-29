@@ -14,13 +14,10 @@
      NOTHING (silent default); the message line is the pin of the fix.
    - LEAN_ABORT_ON_PANIC=1 (the harness discipline, cerberus
      scripts/common.sh): the process must fail-stop (nonzero exit).
-     Toolchain caveat (4.28): closed-term extraction is EAGER here, so
-     LemLib's own ground failwithI arms (e.g. List_extra.tail's []
-     arm) panic-silently inside module INIT — the abort fires there,
-     before main, and the message cannot be observed on this leg. On
-     ≥4.32 closed terms are lazy (lean_obj_once) and the
-     abort-with-message path is covered by the cerberus differential
-     suites.
+     Toolchain note: on Lean 4.28 closed terms were initialised EAGERLY at
+     module load (the abort fired before main, message unobservable);
+     since the 4.32.2 move they are lazy (guarded by the
+     `lean-untaken-failure` target, linksem 2026-09-28 B9).
 
    The argument list is derived from argv: a closed `head_undef []`
    call would itself be lifted into a module initializer, where the

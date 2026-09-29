@@ -10,7 +10,6 @@ import LemLib.List
 import LemLib.Tuple
 import LemLib.Set
 import LemLib.Num
-set_option compiler.extract_closed false
 
 namespace Lem_Map
 
