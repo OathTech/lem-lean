@@ -263,6 +263,23 @@ opaque lemSetExitOnPanic (exit : Bool) : BaseIO Unit
 
 def lemFailStop : BaseIO Unit := lemSetExitOnPanic true
 
+/- Sequencing (linksem B15): Lem's `let _ = e1 in e2` evaluates e1 for its
+   effect (a diagnostic, or a failure that must stop the program, as the
+   OCaml exception does). Lean's compiler drops unused pure values and treats
+   every Unit value as `()`, so the backend emits
+   `lemSeq (fun _ => e1) (fun _ => e2)`. Logically `e2`; the runtime
+   implementation forces `e1` first by storing its value in a fresh IO
+   reference: a `BaseIO` effect the compiler must keep. (A pure "use" is not
+   enough: an `if ptrAddrUnsafe x == 1 then b () else b ()` was simplified
+   away, and arity reduction then dropped `a` altogether.) -/
+@[never_extract, noinline] private unsafe def lemSeqImpl {α β : Type} (a : Unit → α) (b : Unit → β) : β :=
+  match unsafeBaseIO (do
+      let r ← IO.mkRef (none : Option α)
+      r.set (some (a ()))
+      pure (b ())) with
+  | v => v
+@[implemented_by lemSeqImpl] def lemSeq {α β : Type} (_ : Unit → α) (b : Unit → β) : β := b ()
+
 /- Comparing function values (linksem audit A1). OCaml's polymorphic compare
    and structural equality raise `Invalid_argument "compare: functional
    value"` when they REACH a closure, and only then (`GOT [] = GOT []`

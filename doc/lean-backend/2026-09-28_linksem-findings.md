@@ -208,6 +208,76 @@ compiles, `Link.lean` included (214 jobs). Test: `test_if_bool_cond.lem`
 (the linksem shape in Lem; plant: pristine c2a68e7 output fails to compile
 with the original error, this branch compiles and its assert passes).
 
+## B14. Instances at several tuple arities resolved by Lean, not Lem (fixed)
+
+Found by the `main_link` lane (2026-09-29). Lem tuples are n-ary; Lean's
+are right-nested pairs, so the Lean type of a Lem triple whose LAST
+component is a pair, `a × b × (c × d)`, IS the Lean type of a quadruple.
+A class with instances at several tuple arities (linksem's `Show`: pair,
+triple, quad) therefore has overlapping Lean instances at such a type, and
+Lean picks the most recently declared one: `(1, 2, (3, 4))` showed as
+`(1, 2, 3, 4)`, a pair `(1, (2, 3))` as a triple. Lem inlines a method at a
+known instance (so the top-level choice was right in generated code); the
+wrong choice was in the instance ARGUMENTS Lean re-resolves (a list of such
+triples, a generic caller, a nested pair) and in hand-written Lean calling
+the class method (linksem's `main_link` driver, since fixed to call what
+Lem resolves to). Fix: non-default tuple instances get a global name
+(`lemInst_[Lem_]<module>_Instance_<class>_<type>`, `Lem_` for library
+modules, since linksem's `Show` and LemLib's `Show` both have a pair
+instance); a use of a constant whose class constraints reach a confusable
+tuple type (Lem's own resolution, `get_matching_instance`) binds exactly
+Lem's instances locally, innermost first (`haveI := lemInst_... (a := T1)
+...; e`); Lean's local instances take precedence over global ones.
+Exempt: Basic_classes' `Eq`/`Ord`/`SetType`/`MapKeyType` (their tuple
+instances are componentwise / lexicographic, so the overlap computes the
+same result). The supply-threaded paths refuse such a use (loud). Test:
+`test_tuple_inst_arity.lem` (7 asserts; with the bindings stripped, 3
+fail: nested, list, generic). LemLib: one instance renamed
+(`Lem_Show` pair). linksem: instance names only (no confusable use in the
+model).
+
+## B15. `let _ = e1 in e2` dropped e1 (fixed)
+
+Found by the `main_link` lane (a model diagnostic missing on stderr). Lem's
+sequencing idiom evaluates e1 for its effect; OCaml is strict, so e1 runs
+and a failure in e1 stops the program. Lean's compiler drops an unused pure
+`let`, and treats any `Unit` value as `()` (even `match e1 with | () => e2`
+and an opaque `implemented_by` consumer of the value were removed): the
+model's `errln` diagnostics vanished and, worse, a FAILING e1 was skipped
+(fail-open). Fix: `let _ = e1 in e2`, `let () = e1 in e2` (which reaches
+the backend as a one-arm match) and one-arm matches on `_`/`()` are emitted
+as `lemSeq (fun _ => e1) (fun _ => e2)`. LemLib's `lemSeq` is logically
+`e2` (`b ()`); its `implemented_by` body forces e1 by storing the value in
+a fresh `IO.Ref` (a `BaseIO` effect the compiler keeps; a pure "use",
+`if ptrAddrUnsafe x == 1 then b () else b ()`, was simplified away and
+arity reduction then dropped the argument). A variable or literal e1 keeps
+the plain emission (no effect possible). The supply-threaded paths refuse
+a pure e1 (loud). Inside the discarded e1 no expected type flows in, so an
+empty list literal of a closed Lem type is ascribed (`([] : List domain)`):
+Cerberus's hand-written `print_debug_pure : Nat → List d → ...` is more
+general than Lem's `list domain`, and `lemSeq (fun _ => print_debug_pure 2
+[] ...)` otherwise leaves `d` unsolved. (The old `match e1 with | () =>
+e2` elaborated only because Lean discards the discriminant of a `()`
+pattern: e1 was dropped already in the elaborated term.) Tests: parity
+failure probes `f_let_seq.lem`, `f_let_unit.lem` (OCaml and Lean both fail
+with the discarded e1's message; pre-fix the Lean binary printed the next
+step and exited 0).
+
+Cerberus impact of B15: 266 sites (its `print_debug_pure`/`warn` debug
+calls, no-ops in its Lean twins, so no behaviour change). Two hand-written
+proofs unfold definitions through these sites and need `lemSeq` in their
+`simp only` sets (`Core_run_aux_lemMeasureProofs.lean`,
+`Driver_lemMeasureProofs.lean`: one word each; verified in the scratch
+clone, 395 jobs build). This is an edit for the Cerberus re-pin, not made
+in the Cerberus checkout.
+
+Cerberus behaviour with A1 + B14 + B15 (scratch clone, csmith corpus lane,
+`scripts/measure_csmith_cpu.py --max 200`): 97 match, 102 CERB_SKIP, 1
+timeout, 0 baseline regressions after A1 and again after B14/B15 (the same
+statuses as before A1). Lean CPU over the 97 matched inputs: 34.82 s (A1),
+32.58 s (B14/B15); the unchanged OCaml oracle moved by the same order
+(14.34 s, 13.17 s), so no measurable cost.
+
 ## Impact on the Cerberus tree (measured, not re-pinned)
 
 Generated with this branch (lem `65389aa`) in a scratch clone of cerberus-lean

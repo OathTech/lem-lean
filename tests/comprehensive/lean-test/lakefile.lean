@@ -100,6 +100,7 @@ lean_lib LemComprehensiveTest where
     `TestSupplyCheck,  -- hand-written supply draw-order/signature pins (effect-retirement L1)
     `Test_types_advanced, `Test_types_advanced_auxiliary,
     `Test_untaken_failure, `Test_untaken_failure_auxiliary,  -- untaken failure branches stay untaken (linksem B8/B9)
+    `Test_tuple_inst_arity, `Test_tuple_inst_arity_auxiliary,  -- class instances at several tuple arities (linksem B14)
     `Test_tuple_let_once, `Test_tuple_let_once_auxiliary,
     `TupleLetTick,  -- hand-written m7 single-evaluation counter
     `Test_types_basic, `Test_types_basic_auxiliary,

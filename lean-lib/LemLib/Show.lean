@@ -59,7 +59,7 @@ instance (a : Type) [Show a] : Show (List  a) where
 
 def  stringFromPair  {a : Type} {b : Type}  (showX : a → String) (showY : b → String) (p : (a ×b))  : String := match showX, showY, p with |  showX,  showY,  (x, y) =>   String.append "("   (String.append (showX  x)   (String.append ", "   (String.append (showY  y)  ")"))) 
 
-instance (a b : Type) [Show a] [Show b] : Show ((a  × b)) where
+instance _root_.lemInst_Lem_Show_Instance_Show_Show_tup2 (a b : Type) [Show a] [Show b] : Show ((a  × b)) where
 
     show0   :=  stringFromPair  (@show0 (a) _)  (@show0 (b) _)
 

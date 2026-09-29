@@ -2585,6 +2585,143 @@ let lean_cmp_prepass env (ds : def list) =
            Seplist.to_list_map (fun ((_, c, _, _, _, _):funcl_aux) -> c) funs)) vds
   done
 
+(* ===== Tuple instances of different arities (linksem 2026-09-29, B14) =====
+   Lem tuples are n-ary; Lean's are right-nested pairs, so the Lean type of
+   a Lem triple whose LAST component is a pair, `a × b × (c × d)`, IS the
+   Lean type of a quadruple. A class with instances at several tuple
+   arities (linksem's Show: pair, triple, quad) therefore has overlapping
+   Lean instances at such a type, and Lean picks the most recently
+   declared one (the quad: `(x, y, (z, w))` showed as "(x, y, z, w)"),
+   where Lem's resolution picks the triple. The backend resolves such
+   demands the Lem way: tuple instances get a global name
+   (lean_tuple_inst_name), and a use of a constant whose class constraints
+   reach a confusable tuple type binds exactly Lem's instance locally,
+   innermost first (`haveI := lemInst_... T1 T2 T3; e`); Lean's local
+   instances take precedence over global ones.
+   Exempt: Basic_classes' Eq / Ord / SetType / MapKeyType. Their tuple
+   instances are componentwise / lexicographic, so the overlapping choice
+   computes the same result; binding them would only add noise. *)
+let lean_tuple_inst_exempt (cls : Path.t) : bool =
+  let (mods, n) = Path.to_name_list cls in
+  List.exists (fun m -> Name.to_string m = "Basic_classes") mods
+  && List.mem (Name.to_string n) ["Eq"; "Ord"; "SetType"; "MapKeyType"]
+
+(* The global Lean name of a non-default tuple instance: from Lem's instance
+   path (module path + Instance_<class>_<type>), with `Lem_` for library
+   modules (a user module may share a library module's name: linksem's
+   Show and LemLib's Show both have a pair instance of their Show). *)
+let lean_tuple_inst_name env (inst : Types.instance) : string =
+  let l = Ast.Trans (false, "lean_tuple_inst_name", None) in
+  let (mods, n) = Path.to_name_list inst.Types.inst_binding in
+  let is_lib = match mods with
+    | m :: _ ->
+      (match Types.Pfmap.apply env.e_env (Path.mk_path [] m) with
+       | Some md -> Backend_common.lean_module_is_library md
+       | None ->
+         raise (Reporting_basic.err_general true l
+           (Stdlib.(^) "Lean backend: internal error — module of instance not found: "
+              (Path.to_string inst.Types.inst_binding))))
+    | [] ->
+      raise (Reporting_basic.err_general true l
+        "Lean backend: internal error — instance path without a module") in
+  String.concat "" [ "lemInst_"; (if is_lib then "Lem_" else "");
+                     String.concat "_" (List.map Name.to_string (mods @ [n])) ]
+
+let lean_tuple_inst_named env (inst : Types.instance) : bool =
+  not inst.Types.inst_is_default
+  && not (lean_tuple_inst_exempt inst.Types.inst_class)
+  && (match (Types.head_norm env.t_env inst.Types.inst_type).Types.t with
+      | Types.Ttup _ -> true | _ -> false)
+
+(* A Lem tuple type that a longer Lean tuple type also matches. *)
+let lean_tuple_confusable env (ty : Types.t) : bool =
+  match (Types.head_norm env.t_env ty).Types.t with
+  | Types.Ttup ts ->
+    (match List.rev ts with
+     | last :: _ :: _ ->
+       (match (Types.head_norm env.t_env last).Types.t with Types.Ttup _ -> true | _ -> false)
+     | _ -> false)
+  | _ -> false
+
+(* The confusable tuple-instance demands of one constant use, innermost
+   first, deduplicated: (instance, type-variable substitution, type). *)
+let lean_tuple_inst_demands env (c : const_descr_ref id)
+    : (Types.instance * Types.t Types.TNfmap.t * Types.t) list =
+  let l = Ast.Trans (false, "lean_tuple_inst_demands", None) in
+  let cd = c_env_lookup l env.c_env c.descr in
+  let out = ref [] in
+  let rec walk depth (p : Path.t) (ty : Types.t) =
+    if depth <= 50 && not (lean_tuple_inst_exempt p) then
+      match Types.get_matching_instance env.t_env (p, ty) env.i_env with
+      | Some (inst, subst) when not inst.Types.inst_is_default ->
+        List.iter (fun (p', tv') ->
+          match Types.TNfmap.apply subst tv' with
+          | Some ty' -> walk (depth + 1) p' ty'
+          | None -> ()) inst.Types.inst_constraints;
+        if lean_tuple_confusable env ty then begin
+          if not (lean_tuple_inst_named env inst) then
+            raise (Reporting_basic.err_general true l
+              (Stdlib.(^) "Lean backend: internal error — confusable tuple instance is not named: "
+                 (Path.to_string inst.Types.inst_binding)));
+          if not (List.exists (fun (i, _, t) ->
+                    Path.compare i.Types.inst_binding inst.Types.inst_binding = 0
+                    && Types.compare t ty = 0) !out)
+          then out := !out @ [(inst, subst, ty)]
+        end
+      | _ -> () in
+  let rec zip ps is = match ps, is with
+    | p :: ps', i :: is' -> (p, i) :: zip ps' is'
+    | _ -> [] in
+  let inst_of = zip cd.const_tparams c.instantiation in
+  List.iter (fun (p, tv) ->
+    match List.find_opt (fun (tv', _) -> Types.tnvar_compare tv tv' = 0) inst_of with
+    | Some (_, ty) -> walk 0 p ty
+    | None -> ()) cd.const_class;
+  !out
+
+(* The constant heading an expression node (constant, application spine,
+   infix operator): the node that receives B14's local instance bindings. *)
+let lean_exp_head_const (e : exp) : const_descr_ref id option =
+  let rec head e = match ExpW.exp_to_term e with
+    | Constant c -> Some c
+    | App (e1, _) -> head e1
+    | _ -> None in
+  match ExpW.exp_to_term e with
+  | Constant c -> Some c
+  | App _ -> head e
+  | Infix (_, op, _) -> (match ExpW.exp_to_term op with Constant c -> Some c | _ -> None)
+  | _ -> None
+
+(* ===== Sequencing `let _ = e1 in e2` (linksem 2026-09-29, B15) =====
+   Lem's idiom for evaluating e1 for its effect (OCaml is strict: e1 runs,
+   and a failure in e1 stops the program). Lean's compiler drops an unused
+   pure let, and any Unit-typed value is interchangeable with `()`, so
+   `let _ := e1; e2` / `match e1 with | () => e2` skipped e1 entirely: the
+   model's diagnostics (`errln`) vanished and a failing e1 was not raised.
+   Emitted as `lemSeq (fun _ => e1) (fun _ => e2)`: logically `e2`, at run
+   time LemLib forces e1 first. Patterns: `_` and `()`; also the one-arm
+   match Lem makes of `let () = e1 in e2`. *)
+(* e1 that cannot have an effect or fail (a variable, a literal): the plain
+   emission is kept. *)
+let rec lean_seq_trivial (e : exp) : bool =
+  match ExpW.exp_to_term e with
+  | Var _ | Lit _ -> true
+  | Paren (_, e1, _) | Typed (_, e1, _, _, _) | Begin (_, e1, _) -> lean_seq_trivial e1
+  | _ -> false
+
+(* > 0 while emitting a discarded e1: no expected type reaches it, so an
+   empty list literal of a closed Lem type is ascribed (a target rep more
+   general than its Lem type -- Cerberus's `print_debug_pure : ... -> List d
+   -> ...` for Lem's `list domain` -- otherwise leaves `d` unsolved). *)
+let lean_seq_discard_depth = ref 0
+
+let rec lean_seq_pattern (p : pat) : bool =
+  match p.term with
+  | P_wild _ -> true
+  | P_lit { term = L_unit _ } -> true
+  | P_paren (_, p', _) | P_typ (_, p', _, _, _) -> lean_seq_pattern p'
+  | _ -> false
+
 (* Public-readiness M4: a bare `sorry` target representation is a proof
    hole, not a runtime boundary. Check declarations as well as uses, so
    an unused or partially applied constant cannot hide this escape.
@@ -4230,6 +4367,8 @@ type pat_style = FunParam | MatchArm
           in
             let inst_kw = if is_default
               then from_string "instance (priority := low)"
+              else if lean_tuple_inst_named A.env instance_info
+              then from_string (Stdlib.(^) "instance _root_." (lean_tuple_inst_name A.env instance_info))
               else from_string "instance" in
             Output.flat [
               ws skips; inst_kw; prefix; from_string " where";
@@ -5808,6 +5947,9 @@ type pat_style = FunParam | MatchArm
       | App _ -> supply_thread_app inside_instance senv e
       | Let (_, (lb, _), _, e2) ->
         (match lb with
+         | Let_val (p, _, _, e1) when lean_seq_pattern p && not (lean_seq_trivial e1)
+                                     && not (exp_needs_supply e1) ->
+           err "Lean backend: `let _ = e1 in e2` with a pure e1 in a supply-threaded body (B15: e1 would be dropped; unsupported — bind e1 to a used name, or move it out of the supply-threaded region)"
          | Let_val (p, topt, _, e1) ->
            let (bs1, v1, senv1) = supply_thread inside_instance senv e1 in
            let p_out, topt_out = (match p.term with
@@ -5841,6 +5983,10 @@ type pat_style = FunParam | MatchArm
                           from_string " else "; armF]) in
           (bs0 @ [bind], v, senv')
         end
+      | Case (_, _, e0, _, cases, _)
+        when Seplist.length cases = 1 && not (lean_seq_trivial e0) && not (exp_needs_supply e0)
+             && (let (p, _, _, _) = Seplist.hd cases in lean_seq_pattern p) ->
+        err "Lean backend: `let () = e1 in e2` with a pure e1 in a supply-threaded body (B15: e1 would be dropped; unsupported — bind e1 to a used name, or move it out of the supply-threaded region)"
       | Case (_, _, e0, _, cases, _) ->
         let (bs0, v0, senv0) = supply_thread inside_instance senv e0 in
         let v0 = lean_sv_out v0 in
@@ -5928,6 +6074,8 @@ type pat_style = FunParam | MatchArm
              | None ->
                err "Lean backend: internal error — short-circuit head lost its classification") in
            supply_shortcircuit inside_instance senv kind le re
+         | Constant cd when lean_tuple_inst_demands A.env cd <> [] ->
+           err "Lean backend: a confusable tuple-instance demand (B14) in a supply-threaded infix application (unsupported; bind the operands in lets first)"
          | Constant cd ->
            (* OCaml order: the RIGHT operand is evaluated first *)
            let (bs2, vr, senv1) = supply_thread inside_instance senv re in
@@ -6051,6 +6199,8 @@ type pat_style = FunParam | MatchArm
            special head classes cannot take hoisted arguments soundly
            and fail closed. *)
         lean_unsupported_check_cref A.env l cd.descr;
+        if lean_tuple_inst_demands A.env cd <> [] then
+          err "Lean backend: a confusable tuple-instance demand (B14) in a supply-threaded application (unsupported; bind the drawn values in lets first)";
         if is_lean_failwith_rep cd.descr then
           err "Lean backend: a failwith-mapped call with supply-drawing arguments (unsupported; bind the drawn values in lets first)";
         if ground_rep_for cd.descr <> None then
@@ -6175,7 +6325,48 @@ type pat_style = FunParam | MatchArm
        - For polymorphic indreln self-references (St.indreln_params), explicit
          type parameters are inserted since Lean can't infer them
        - Class method constants get explicit @ type application when used bare *)
+    (* B15: `lemSeq (fun _ => e1) (fun _ => e2)` *)
+    and lem_seq_out inside_instance skips e1 e2 =
+      incr lean_seq_discard_depth;
+      let e1_out = (try exp inside_instance e1
+                    with ex -> decr lean_seq_discard_depth; raise ex) in
+      decr lean_seq_discard_depth;
+      Output.flat [
+        ws skips; from_string "(lemSeq (fun _ => "; e1_out;
+        from_string ") (fun _ => "; exp inside_instance e2; from_string "))"
+      ]
+
+    (* B14: a node headed by a constant whose class constraints reach a
+       confusable tuple type binds Lem's instances locally first. *)
     and exp inside_instance e =
+      let out = exp_core inside_instance e in
+      match lean_exp_head_const e with
+      | None -> out
+      | Some c ->
+        (match lean_tuple_inst_demands A.env c with
+         | [] -> out
+         | ds ->
+           let l = exp_to_locn e in
+           let binding (inst, subst, _ty) =
+             let args = List.map (fun tv ->
+               match tv with
+               | Types.Nv _ ->
+                 raise (Reporting_basic.err_general true l
+                   "Lean backend: tuple instance with a numeric type variable (unsupported for B14 local binding)")
+               | Types.Ty _ ->
+                 (match Types.TNfmap.apply subst tv with
+                  | Some t ->
+                    Output.flat [from_string " ("; from_string (tnvar_name tv); from_string " := ";
+                                 pat_typ (C.t_to_src_t t); from_string ")"]
+                  | None ->
+                    raise (Reporting_basic.err_general true l
+                      "Lean backend: internal error — tuple instance variable not instantiated")))
+               inst.Types.inst_tyvars in
+             Output.flat ([from_string "haveI := "; from_string (lean_tuple_inst_name A.env inst)]
+                          @ args @ [from_string "; "]) in
+           Output.flat ([from_string "("] @ List.map binding ds @ [out; from_string ")"]))
+
+    and exp_core inside_instance e =
       let is_user_exp = Typed_ast_syntax.is_pp_exp e in
         match C.exp_to_term e with
           | Var v ->
@@ -6330,11 +6521,21 @@ type pat_style = FunParam | MatchArm
                 Output.flat [
                   ws skips; from_string "("; tups; from_string ")"; ws skips'
                 ]
+          | List (skips, es, skips')
+            when !lean_seq_discard_depth > 0 && Seplist.length es = 0
+                 && Types.TNset.is_empty (Types.free_vars (Typed_ast.exp_to_typ e)) ->
+              Output.flat [
+                ws skips; from_string "([] : "; pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e));
+                from_string ")"; ws skips'
+              ]
           | List (skips, es, skips') ->
               let lists = flat @@ Seplist.to_sep_list_last (Seplist.Forbid (fun _ -> from_string " ")) (exp inside_instance) (sep @@ from_string ",") es in
                 Output.flat [
                   ws skips; from_string "["; lists; from_string "]"; ws skips'
                 ]
+          | Let (skips, (Let_val (p, _, _, e1), _), _skips', e)
+            when lean_seq_pattern p && not (lean_seq_trivial e1) ->
+              lem_seq_out inside_instance skips e1 e
           | Let (skips, bind, _skips', e) ->
               let body = flatten_newlines (let_body inside_instance None false Types.TNset.empty bind) in
                 Output.flat [
@@ -6573,6 +6774,13 @@ type pat_style = FunParam | MatchArm
                    ws skips; from_string "{ "; exp inside_instance e; ws skips'; from_string " with "; body; skips''; from_string " }"
                 ]
             )
+          | Case (_, skips, e1, _, cases, _)
+            when Seplist.length cases = 1 && not (lean_seq_trivial e1)
+                 && (let (p, _, _, _) = Seplist.hd cases in lean_seq_pattern p) ->
+            (* B15: `let () = e1 in e2` reaches the backend as a one-arm
+               match; OCaml evaluates the scrutinee for its effect *)
+            let (_, _, e2, _) = Seplist.hd cases in
+            lem_seq_out inside_instance skips e1 e2
           | Case (_, skips, e, skips', cases, skips'') ->
             let case_sep _ = from_string " " in
             let has_vec = Seplist.exists (fun (p, _, _, _) -> pat_has_vector p) cases in
