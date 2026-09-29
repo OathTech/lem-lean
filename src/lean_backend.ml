@@ -2078,6 +2078,8 @@ type cmp_shape =
   | CSoption of Types.t * cmp_shape          (* mutual option helper *)
   | CSsum of (Types.t * cmp_shape) * (Types.t * cmp_shape)  (* mutual sum helper *)
   | CSbad of string                          (* underivable: reason (fail-closed, type keeps its residual) *)
+  | CSfn                                     (* function-typed field (linksem audit A1): comparing it panics as OCaml's
+                                                polymorphic compare raises "compare: functional value" on closures *)
 
 (* Does the (head-normalized) type reference any of the given paths? *)
 let rec lean_typ_refs_paths (d : Types.type_defs) (paths : Path.t list) (t : Types.t) : bool =
@@ -2099,15 +2101,26 @@ let rec lean_typ_refs_paths (d : Types.type_defs) (paths : Path.t list) (t : Typ
    a sorry instance). Containers with a Lean-instance comparison story
    (list, maybe, either, tuples) recurse; any other head over a sibling
    is fail-closed CSbad. *)
+(* Does the (head-normalized) type contain a function type anywhere? *)
+and lean_typ_has_fn (d : Types.type_defs) (t : Types.t) : bool =
+  let t = Types.head_norm d t in
+  match t.Types.t with
+    | Types.Tfn _ -> true
+    | Types.Ttup ts | Types.Tbackend (ts, _) | Types.Tapp (ts, _) -> List.exists (lean_typ_has_fn d) ts
+    | Types.Tvar _ | Types.Tne _ | Types.Tuvar _ -> false
+
 let rec lean_cmp_shape (d : Types.type_defs) (derived : (Path.t * string) list)
     (sorried : Path.t list) (t : Types.t) : cmp_shape =
   let all_paths = List.map fst derived @ sorried in
-  if not (lean_typ_refs_paths d all_paths t) then CSleaf
+  (* linksem audit A1: a field type containing a function type is compared
+     structurally down to the function (OCaml's polymorphic compare raises
+     only when it REACHES a closure: `GOT []` compares fine). *)
+  if not (lean_typ_refs_paths d all_paths t) && not (lean_typ_has_fn d t) then CSleaf
   else
     let bad_of = function CSbad r -> Some r | _ -> None in
     let t' = Types.head_norm d t in
     match t'.Types.t with
-      | Types.Tfn _ -> CSbad "function type"  (* unreachable behind texp_can_derive_beq; belt *)
+      | Types.Tfn _ -> CSfn
       | Types.Ttup ts ->
         let shs = List.map (lean_cmp_shape d derived sorried) ts in
         (match List.find_map bad_of shs with
@@ -2136,7 +2149,7 @@ let rec lean_cmp_shape (d : Types.type_defs) (derived : (Path.t * string) list)
                   (match bad_of shl, bad_of shr with
                     | Some r, _ | _, Some r -> CSbad r
                     | None, None -> CSsum ((l, shl), (r, shr)))
-                | n, _ -> CSbad (Printf.sprintf "mutual reference under unsupported head '%s'" n)))
+                | n, _ -> CSbad (Printf.sprintf "mutual reference or function type under unsupported head '%s'" n)))
       | _ -> CSbad "unexpected shape"
 
 let lean_cmp_shape_is_bad = function CSbad _ -> true | _ -> false
@@ -2400,6 +2413,177 @@ let rec exp_backend_idents (e : exp) : string list =
   | Do (_, _, dls, _, e1, _, _) ->
     List.concat_map (fun (Do_line (_, _, rhs, _)) -> exp_backend_idents rhs) dls
     @ exp_backend_idents e1
+
+(* ===== Comparison-dictionary threading (linksem 2026-09-29, audit A1) =====
+   Lem's DEFAULT instances of Eq and SetType (and MapKeyType, via SetType)
+   are OCaml's polymorphic comparison: available at every type, no
+   dictionary. The Lean realisation of such a comparison at a type
+   mentioning a type variable `a` of the enclosing definition is the
+   bounded structural instance of that type, which needs Lean `[Ord a]` (or
+   `[BEq a]` for Eq). This pre-pass computes, per definition, which such
+   binders its body demands:
+   - every use of a constant whose Lem class constraint (Eq / SetType /
+     MapKeyType / Ord) is instantiated at a type containing `a` demands
+     `[BEq a]` (Eq) or `[Ord a]` (the others) -- except when the type IS
+     `a` and the definition itself carries that Lem constraint on `a`
+     (the dictionary is then in scope);
+   - every use of a generated definition that received such binders
+     demands them at the instantiated types (transitively; fixpoint).
+   The binders are emitted after the definition's Lem constraints
+   (val_def). There is no fallback: a demand this analysis misses is a Lean
+   compile error, never the retired runtime-panicking residual instance. *)
+let lean_cmp_bounds : (Types.const_descr_ref, (string * string) list) Hashtbl.t = Hashtbl.create 256
+
+let rec exp_constants (e : exp) : const_descr_ref id list =
+  let seplist_exps sl = Seplist.to_list sl in
+  match ExpW.exp_to_term e with
+  | Constant c -> [c]
+  | Backend _ | Var _ | Nvar_e _ | Lit _ -> []
+  | Fun (_, _, _, e1) -> exp_constants e1
+  | Function (_, arms, _) ->
+    List.concat_map (fun (_, _, e1, _) -> exp_constants e1) (Seplist.to_list arms)
+  | App (e1, e2) -> exp_constants e1 @ exp_constants e2
+  | Infix (e1, e2, e3) -> exp_constants e1 @ exp_constants e2 @ exp_constants e3
+  | Record (_, fes, _) ->
+    List.concat_map (fun (_, _, e1, _) -> exp_constants e1) (Seplist.to_list fes)
+  | Recup (_, e0, _, fes, _) ->
+    exp_constants e0 @ List.concat_map (fun (_, _, e1, _) -> exp_constants e1) (Seplist.to_list fes)
+  | Field (e1, _, _) -> exp_constants e1
+  | Vector (_, es, _) | Tup (_, es, _) | List (_, es, _) | Set (_, es, _) ->
+    List.concat_map exp_constants (seplist_exps es)
+  | VectorSub (e1, _, _, _, _, _) | VectorAcc (e1, _, _, _) -> exp_constants e1
+  | Case (_, _, e0, _, arms, _) ->
+    exp_constants e0 @ List.concat_map (fun (_, _, e1, _) -> exp_constants e1) (Seplist.to_list arms)
+  | Typed (_, e1, _, _, _) | Paren (_, e1, _) | Begin (_, e1, _) -> exp_constants e1
+  | Let (_, (lb, _), _, body) ->
+    (match lb with
+     | Let_val (_, _, _, rhs) -> exp_constants rhs
+     | Let_fun (_, _, _, _, rhs) -> exp_constants rhs) @ exp_constants body
+  | If (_, e1, _, e2, _, e3) -> exp_constants e1 @ exp_constants e2 @ exp_constants e3
+  | Setcomp (_, e1, _, e2, _, _) -> exp_constants e1 @ exp_constants e2
+  | Comp_binding (_, _, e1, _, _, _, _, e2, _) -> exp_constants e1 @ exp_constants e2
+  | Quant (_, _, _, e1) -> exp_constants e1
+  | Do (_, _, dls, _, e1, _, _) ->
+    List.concat_map (fun (Do_line (_, _, rhs, _)) -> exp_constants rhs) dls @ exp_constants e1
+
+let lean_cmp_class_of_lem (p : Path.t) : string option =
+  match Name.to_string (Path.get_name p) with
+  | "Eq" -> Some "BEq"
+  | "SetType" | "MapKeyType" | "Ord" -> Some "Ord"
+  | _ -> None
+
+let tnvar_name (tv : Types.tnvar) : string = Ulib.Text.to_string (Types.tnvar_to_rope tv)
+
+(* Lem's polymorphic-comparison PRIMITIVES (library basic_classes.lem): no
+   class constraint in Lem (they ARE OCaml's polymorphic compare), but their
+   Lean reps (`==`, `defaultCompare`, ...) need the Lean class at the type
+   they are used at. The default Eq instance's method inlines to
+   unsafe_structural_equality, so `x = y` at an unconstrained parameterized
+   type reaches the backend as one of these. *)
+let lean_cmp_primitive (cd : const_descr) : string option =
+  match Path.to_name_list cd.const_binding with
+  | (mods, n) when List.exists (fun m -> Name.to_string m = "Basic_classes") mods ->
+    (match Name.to_string n with
+     | "unsafe_structural_equality" | "unsafe_structural_inequality" -> Some "BEq"
+     | "defaultCompare" | "defaultLess" | "defaultLessEq" | "defaultGreater" | "defaultGreaterEq" -> Some "Ord"
+     | _ -> None)
+  | _ -> None
+
+let lean_cmp_prepass env (ds : def list) =
+  let l = Ast.Trans (false, "lean_cmp_prepass", None) in
+  let val_def_bodies (vd : val_def) : exp list =
+    match vd with
+    | Let_def (_, _, (_, _, _, _, e)) -> [e]
+    | Fun_def (_, _, _, funs) -> Seplist.to_list_map (fun ((_, _, _, _, _, e) : funcl_aux) -> e) funs
+    | Let_inline _ -> [] in
+  let rec collect acc (((d_aux, _), _, _) : def) =
+    match d_aux with
+    | Module (_, _, _, _, _, inner, _) -> List.fold_left collect acc inner
+    | Val_def vd -> vd :: acc
+    | _ -> acc in
+  let vds = List.rev (List.fold_left collect [] ds) in
+  let demands_of (vd : val_def) : (string * string) list =
+    let tvs = List.filter_map (fun tv -> match tv with Types.Ty _ -> Some (tnvar_name tv) | Types.Nv _ -> None)
+      (Types.TNset.elements (val_def_get_free_tnvars env vd)) in
+    let explicit = List.map (fun (p, tv) -> (Name.to_string (Path.get_name p), tnvar_name tv))
+      (val_def_get_class_constraints env vd) in
+    let out = ref [] in
+    let add cls a = if List.mem a tvs && not (List.mem (cls, a) !out) then out := (cls, a) :: !out in
+    List.iter (fun e ->
+      List.iter (fun (c : const_descr_ref id) ->
+        let cd = c_env_lookup l env.c_env c.descr in
+        let inst_of tv =
+          let rec go ps is = match ps, is with
+            | p :: ps', i :: is' -> if Types.tnvar_compare p tv = 0 then Some i else go ps' is'
+            | _ -> None in
+          go cd.const_tparams c.instantiation in
+        (* Lean class demanded when Lem resolves class [lem_p] at [ty]:
+           follow Lem's instance resolution; an explicit instance (tuples,
+           list, maybe, ...) passes the demand to its own constraints; the
+           DEFAULT instance (polymorphic compare) is realised by bounded
+           structural instances, which need the Lean class on every type
+           variable below. *)
+        let rec lem_demand depth (lem_p : Path.t) (ty : Types.t) =
+          match lean_cmp_class_of_lem lem_p with
+          | None -> ()
+          | Some cls ->
+            let lem_cls = Name.to_string (Path.get_name lem_p) in
+            (match ty.Types.t with
+             | Types.Tvar _ ->
+               let a = (match Types.TNset.elements (Types.free_vars ty) with v :: _ -> tnvar_name v | [] -> "") in
+               if not (List.mem (lem_cls, a) explicit) then add cls a
+             | _ when Types.TNset.is_empty (Types.free_vars ty) -> ()
+             | _ ->
+               let default_all () =
+                 List.iter (fun fv -> add cls (tnvar_name fv)) (Types.TNset.elements (Types.free_vars ty)) in
+               if depth > 50 then default_all () else
+               (match Types.get_matching_instance env.t_env (lem_p, ty) env.i_env with
+                | Some (inst, subst) when not inst.Types.inst_is_default ->
+                  List.iter (fun (p', tv') ->
+                    match Types.TNfmap.apply subst tv' with
+                    | Some ty' -> lem_demand (depth + 1) p' ty'
+                    | None -> ()) inst.Types.inst_constraints
+                | _ -> default_all ())) in
+        let demand ~lem_p cls tv =
+          match inst_of tv with
+          | None -> ()
+          | Some ty ->
+            (match lem_p with
+             | Some p -> lem_demand 0 p ty
+             | None ->
+               (* a threaded Lean-class binder of a generated callee: the Lean
+                  instance at [ty] needs the class on its type variables *)
+               List.iter (fun fv -> add cls (tnvar_name fv)) (Types.TNset.elements (Types.free_vars ty))) in
+        List.iter (fun (p, tv) ->
+          match lean_cmp_class_of_lem p with
+          | Some cls -> demand ~lem_p:(Some p) cls tv
+          | None -> ()) cd.const_class;
+        (match lean_cmp_primitive cd, cd.const_tparams with
+         | Some cls, tv :: _ -> demand ~lem_p:None cls tv
+         | _ -> ());
+        (match Hashtbl.find_opt lean_cmp_bounds c.descr with
+         | Some bs ->
+           List.iter (fun (cls, tvn) ->
+             List.iter (fun tv -> if tnvar_name tv = tvn then demand ~lem_p:None cls tv) cd.const_tparams) bs
+         | None -> ())) (exp_constants e)) (val_def_bodies vd);
+    (* declaration order of the definition's type variables, then class *)
+    List.concat_map (fun a -> List.filter (fun (_, b) -> b = a) (List.rev !out)) tvs in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    List.iter (fun vd ->
+      let ds' = demands_of vd in
+      List.iter (fun c ->
+        let old = Option.value ~default:[] (Hashtbl.find_opt lean_cmp_bounds c) in
+        let merged = List.fold_left (fun acc x -> if List.mem x acc then acc else acc @ [x]) old ds' in
+        if List.length merged <> List.length old then begin
+          Hashtbl.replace lean_cmp_bounds c merged; changed := true end)
+        (match vd with
+         | Let_def(_, _, (_, nm, _, _, _)) -> List.map snd nm
+         | Let_inline(_,_,_,_,c,_,_,_) -> [c]
+         | Fun_def(_, _, _, funs) ->
+           Seplist.to_list_map (fun ((_, c, _, _, _, _):funcl_aux) -> c) funs)) vds
+  done
 
 (* Public-readiness M4: a bare `sorry` target representation is a proof
    hole, not a runtime boundary. Check declarations as well as uses, so
@@ -4132,10 +4316,24 @@ type pat_style = FunParam | MatchArm
             ) cds in
             filter_new_tyr_constraints extras class_constraints
           in
-          if List.length class_constraints = 0 && extra_tyr = [] then
-            emp
-          else
-            body ^ format_tyr_constraints extra_tyr
+          (* comparison dictionaries (lean_cmp_prepass, audit A1) *)
+          let cmp_binders = if inside_instance then [] else
+            let cs = match def with
+              | Let_def(_, _, (_, nm, _, _, _)) -> List.map snd nm
+              | Let_inline(_,_,_,_,c,_,_,_) -> [c]
+              | Fun_def(_, _, _, funs) ->
+                Seplist.to_list_map (fun ((_, c, _, _, _, _):funcl_aux) -> c) funs in
+            List.fold_left (fun acc c ->
+              List.fold_left (fun acc b -> if List.mem b acc then acc else acc @ [b]) acc
+                (Option.value ~default:[] (Hashtbl.find_opt lean_cmp_bounds c))) [] cs in
+          let cmp_out = Output.concat (from_string " ") (List.map (fun (cls, a) ->
+            from_string (Printf.sprintf "[%s %s]" cls a)) cmp_binders) in
+          let base =
+            if List.length class_constraints = 0 && extra_tyr = [] then emp
+            else body ^ format_tyr_constraints extra_tyr in
+          if cmp_binders = [] then base
+          else if base = emp then cmp_out
+          else Output.flat [base; from_string " "; cmp_out]
         in
         match def with
           | Let_def (skips, targets, (p, name_map, topt, sk, e)) ->
@@ -6214,7 +6412,9 @@ type pat_style = FunParam | MatchArm
                     let src_t = C.t_to_src_t t in
                     Output.flat [from_string " ("; pat_typ src_t; from_string ")"]
                   ) const.instantiation in
-                  let num_classes = List.length c_descr.const_class in
+                  (* + the threaded comparison binders (lean_cmp_prepass) *)
+                  let num_classes = List.length c_descr.const_class
+                    + List.length (Option.value ~default:[] (Hashtbl.find_opt lean_cmp_bounds const.descr)) in
                   let class_holes = List.init num_classes (fun _ -> from_string " _") in
                   (* Parenthesize the @name (type) _ expression so it can safely
                      appear as an argument to another function *)
@@ -6931,6 +7131,13 @@ type pat_style = FunParam | MatchArm
         | Typ_paren (_, t, _) -> src_t_has_fn t
         | Typ_with_sort (t, _) -> src_t_has_fn t
         | Typ_wild _ | Typ_var _ | Typ_len _ -> false
+    (* linksem audit A1: a variant/record with function-typed fields gets a
+       real structural comparison (function fields panic only when reached)
+       instead of an always-panicking residual. *)
+    and texp_fn_fields (t : texp) : bool =
+      match t with
+        | Te_variant _ | Te_record _ -> not (texp_can_derive_beq t)
+        | Te_opaque | Te_abbrev _ -> false
     and texp_can_derive_beq (t : texp) : bool =
       match t with
         | Te_variant (_, ctors) ->
@@ -7896,6 +8103,14 @@ type pat_style = FunParam | MatchArm
           let residual_body cls reason =
             String.concat "" ["failwithI \"Lean backend: comparison residual: "; cls; " ("; type_name_str; "): "; reason; "\""] in
           let fn_reason = "type carries function-typed fields (OCaml polymorphic comparison raises on closures)" in
+          (* A type without a derived comparison keeps a LOUD residual: it
+             fails if, and only if, a comparison actually reaches it (as
+             OCaml's compare does on closures). Say why honestly: function
+             fields are derived since audit A1, so what remains is a shape
+             the derivation cannot recurse through. *)
+          let residual_reason =
+            if texp_fn_fields t then fn_reason
+            else "no derived structural comparison (a mutual sibling under a type head other than list/maybe/either/tuple); fails only if a comparison reaches it" in
           let tv_reason = "demanded at an unconstrained type variable (lem default instance erased the dictionary); the bounded real instance needs concrete comparable arguments" in
           let residual_beq_ord reason priority_kw =
             (Output.flat [
@@ -7948,20 +8163,24 @@ type pat_style = FunParam | MatchArm
                   from_string " : Ord ("; o; type_args;
                   from_string ") where\n  compare := "; from_string type_name_str; from_string ".compare_derived";
                 ])
-              | None -> residual_beq_ord fn_reason "\ninstance (priority := low)"
+              | None -> residual_beq_ord residual_reason "\ninstance (priority := low)"
           in
           (* Unconstrained fallbacks for bounded real instances (parameterized
              types only): lem's unconstrained default instances mean generated
              polymorphic code may demand these classes at OPEN type variables
              (no dictionary); priority strictly below the bounded instance so
              it is only reached when the bounds cannot be synthesized. *)
-          let fallback_beq_ord =
-            match derived_cmp with
-              | Some bounds when tnvar_list <> [] && bounds <> [] ->
-                let (b, o_) = residual_beq_ord tv_reason "\ninstance (priority := 50)" in
-                Output.flat [b; o_]
-              | _ -> emp
-          in
+          (* RETIRED (linksem 2026-09-29, audit A1): the priority-50
+             "unconstrained type variable" fallbacks. They panicked at
+             runtime wherever a generic definition compared values of a
+             parameterized type without a dictionary -- and a panic
+             continues with a default value, so sets silently kept
+             duplicates and the linksem linker produced a broken
+             executable. lean_cmp_prepass now threads the [Ord a]/[BEq a]
+             dictionaries into such definitions; a demand it misses is a
+             Lean compile error, never a runtime panic. *)
+          let _ = tv_reason in
+          let fallback_beq_ord = emp in
           (* SetType/Eq0/Ord0 are defined for (a : Type) only, skip for Type 1 *)
           if is_type1 then Output.flat [beq_instance; ord_instance]
           else
@@ -8055,12 +8274,8 @@ type pat_style = FunParam | MatchArm
             in
             (* Fallback trio for any parameterized type whose trio is real
                (deriving-bridge or derived): the open-tyvar demand class. *)
-            let fallback_trio =
-              if tnvar_list = [] then emp
-              else if has_deriving || derived_cmp <> None
-              then residual_trio tv_reason "\ninstance (priority := 50)"
-              else emp
-            in
+            (* RETIRED with fallback_beq_ord above (audit A1). *)
+            let fallback_trio = emp in
             Output.flat [
               beq_instance;
               ord_instance;
@@ -8069,7 +8284,7 @@ type pat_style = FunParam | MatchArm
                else if has_deriving then real_trio all_ty_tvs "\ninstance (priority := 500)"
                else match derived_cmp with
                  | Some bounds -> derived_trio bounds
-                 | None -> residual_trio fn_reason "\ninstance (priority := low)");
+                 | None -> residual_trio residual_reason "\ninstance (priority := low)");
               fallback_trio;
             ]
     (* ===== Arc-10 S2: derived structural comparisons for mutual blocks =====
@@ -8135,7 +8350,7 @@ type pat_style = FunParam | MatchArm
         List.fold_right (fun (((name, _), tnvar_list, path, t, _)) (cs, os) ->
           if skip_type path then (cs, os)
           else if deriving_covered t then (cs, os)
-          else if not (texp_can_derive_beq t) then (cs, path :: os)
+          else if not (texp_can_derive_beq t) && not (texp_fn_fields t) then (cs, path :: os)
           else
             let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip (B.type_path_to_name name path))) in
             (match t with
@@ -8228,6 +8443,7 @@ type pat_style = FunParam | MatchArm
             | CSlist (et, esh) -> Printf.sprintf "%s %s %s" (helper "beq" (CSlist (et, esh))) x y
             | CSoption (et, esh) -> Printf.sprintf "%s %s %s" (helper "beq" (CSoption (et, esh))) x y
             | CSsum (a, b) -> Printf.sprintf "%s %s %s" (helper "beq" (CSsum (a, b))) x y
+            | CSfn -> Printf.sprintf "lemFunctionalBeq %s %s" x y
             | CStuple _ | CSbad _ -> assert false (* destructured / fail-closed upstream *)
         and cmp_leaf (x, y, sh) : string =
           match sh with
@@ -8236,6 +8452,7 @@ type pat_style = FunParam | MatchArm
             | CSlist (et, esh) -> Printf.sprintf "%s %s %s" (helper "cmp" (CSlist (et, esh))) x y
             | CSoption (et, esh) -> Printf.sprintf "%s %s %s" (helper "cmp" (CSoption (et, esh))) x y
             | CSsum (a, b) -> Printf.sprintf "%s %s %s" (helper "cmp" (CSsum (a, b))) x y
+            | CSfn -> Printf.sprintf "lemFunctionalCompare %s %s" x y
             | CStuple _ | CSbad _ -> assert false
         and beq_conj (leaves : (string * string * cmp_shape) list) : string =
           match leaves with
@@ -8560,9 +8777,10 @@ type pat_style = FunParam | MatchArm
       let mapped = List.map (fun (((_, _), _, path, _, _) as t) ->
         generate_inhabited_instance [path] t) ts in
       let beq_instances = List.map (fun (((_, _), _, _, t, _) as td) ->
-        if texp_needs_ocaml_rank t && texp_can_derive_beq t then
+        if (texp_needs_ocaml_rank t && texp_can_derive_beq t) || texp_fn_fields t then
           (* F4: OCaml constructor rank for a single mixed-order variant —
-             a mutual block of one through the arc-10 derivation. *)
+             a mutual block of one through the arc-10 derivation; likewise
+             a type with function-typed fields (linksem audit A1). *)
           let (cmp_defs, derived_cmp) = derived_comparison_single td in
           Output.flat [cmp_defs; generate_beq_ord_instances ~emit_deriving:false ?derived_cmp td]
         else generate_beq_ord_instances td) ts in
@@ -8621,7 +8839,7 @@ type pat_style = FunParam | MatchArm
       (* F4: a block of one whose single variant needs the OCaml rank goes
          through the derivation like the single-type path. *)
       let single_needs_rank = match non_abbrev with
-        | [(_, _, _, t, _)] -> texp_needs_ocaml_rank t && texp_can_derive_beq t
+        | [(_, _, _, t, _)] -> (texp_needs_ocaml_rank t && texp_can_derive_beq t) || texp_fn_fields t
         | _ -> false in
       (* Arc-10 S2: derived structural comparisons for the block's
          derivable types (real mutual beq/compare defs; fail-closed
@@ -8633,7 +8851,7 @@ type pat_style = FunParam | MatchArm
          population empty). *)
       let (cmp_defs, derived_info) =
         if single_needs_rank then
-          (match List.find_opt (fun (_, _, _, t, _) -> texp_needs_ocaml_rank t) non_abbrev with
+          (match List.find_opt (fun (_, _, _, t, _) -> texp_needs_ocaml_rank t || texp_fn_fields t) non_abbrev with
            | Some td ->
              let (o, bounds) = derived_comparison_single td in
              let (_, _, path, _, _) = td in
@@ -8763,6 +8981,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
       if is_library then
         St.namespace_stack := [ns_name];
       lean_reader_prepass A.env ds;
+      lean_cmp_prepass A.env ds;
       lean_fuel_prepass A.env ds;
       lean_supply_prepass A.env ds;
       (* Arc-8 S1: compute the Inhabited census + tier-2 plans in

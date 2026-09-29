@@ -14,6 +14,7 @@ lean_lib LemComprehensiveTest where
     `Test_case_arm_parsing, `Test_case_arm_parsing_auxiliary,
     `Test_cerberus_patterns, `Test_cerberus_patterns_auxiliary,
     `Test_classes, `Test_classes_auxiliary,
+    `Test_cmp_threading, `Test_cmp_threading_auxiliary,  -- comparison dictionaries threaded through generic defs (linksem audit A1)
     `Test_collections, `Test_collections_auxiliary,
     `Test_contextual_keywords, `Test_contextual_keywords_auxiliary,
     `Test_contextual_keywords_lemMeasureProofs,  -- hand-written proof of its measured declare's obligation (fuel-measure slice)
@@ -63,6 +64,7 @@ lean_lib LemComprehensiveTest where
     `Test_function_tails_lemMeasureProofs,  -- hand-written proofs of its obligations (the build fails without it)
     `TestFunctionTailsCheck,  -- hand-written kernel pins (decide/rfl through the hoisted binders; the applied sentinel)
     `Test_functions, `Test_functions_auxiliary,
+    `Test_fn_field_compare, `Test_fn_field_compare_auxiliary,  -- structural compare of function-field types (linksem audit A1)
     `Test_indreln, `Test_indreln_auxiliary,
     `Test_instances, `Test_instances_auxiliary,
     `Test_keywords, `Test_keywords_auxiliary,

@@ -280,4 +280,26 @@ build; the linksem record lists every item. Backend-side:
 - **A4. Failure order (documented limitation, existing).** OCaml evaluates
   arguments right to left, Lean left to right: with two failing
   subexpressions the reported failure differs (both fail).
-- **A1. Comparison residuals** (being fixed separately; see the next section).
+- **A1. Comparison residuals (confirmed, fixed).** Lem's default `Eq` /
+  `SetType` / `MapKeyType` instances are OCaml's polymorphic compare, valid
+  at every type. The backend's comparisons at a type with a type variable
+  that carried no Lem constraint resolved to priority-50 fallback instances
+  whose methods panicked (~200 sites in linksem). Because of A2 the
+  panic returned a default value: sets kept duplicates (`tag_image` twice:
+  OCaml 2 tags, Lean 3), and the Lean linker built an executable with entry
+  point 0 and no `.text`. Types with function-typed fields
+  (`amd64_abi_feature`) panicked on EVERY comparison, not only when a
+  closure is reached. Fix (design:
+  `doc/notes/2026-09-29_comparison-dictionaries-design.md`): Lem-instance-guided
+  threading of `[Ord a]`/`[BEq a]` binders (transitive, fixpoint);
+  function-typed positions are compared structurally with
+  `lemFunctionalCompare`/`lemFunctionalBeq`, which fail like OCaml's
+  `compare: functional value`. The fallback instances are DELETED, so any
+  missed demand is a compile error. Tests: `test_cmp_threading.lem` (the
+  pristine output fails 3 of 4 asserts), `test_fn_field_compare.lem`.
+  linksem: no fallback left; one loud residual remains
+  (`allocated_sections_map`, a map over a mutual sibling, never compared).
+  Cerberus (scratch clone `d62f52121`, container checkout untouched): 23
+  generated files change (729 fallback-instance lines deleted, threaded
+  binders, derived comparisons for function-field types such as
+  `pre_execution`); the tree compiles (395 jobs) against this LemLib.

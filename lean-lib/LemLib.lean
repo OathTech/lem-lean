@@ -263,6 +263,17 @@ opaque lemSetExitOnPanic (exit : Bool) : BaseIO Unit
 
 def lemFailStop : BaseIO Unit := lemSetExitOnPanic true
 
+/- Comparing function values (linksem audit A1). OCaml's polymorphic compare
+   and structural equality raise `Invalid_argument "compare: functional
+   value"` when they REACH a closure, and only then (`GOT [] = GOT []`
+   is fine). Backend-derived structural comparisons of types with
+   function-typed fields call these at the function-typed positions, so a
+   comparison fails exactly when OCaml's would. -/
+@[never_extract] def lemFunctionalCompare {α β : Type} (_ _ : α → β) : Ordering :=
+  failwithI "compare: functional value"
+@[never_extract] def lemFunctionalBeq {α β : Type} (_ _ : α → β) : Bool :=
+  failwithI "compare: functional value"
+
 /- fuelExhaustedWith: out-of-fuel sentinel for fuel'd defs whose return
    type is pure (no error channel) and possibly polymorphic (arc-3 sweep).
    The witness — any in-scope value of the return type, typically one of
