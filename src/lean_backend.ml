@@ -2715,6 +2715,21 @@ let rec lean_seq_trivial (e : exp) : bool =
    -> ...` for Lem's `list domain` -- otherwise leaves `d` unsolved). *)
 let lean_seq_discard_depth = ref 0
 
+(* B15b: a binding pattern that cannot fail to match (variables, wildcards,
+   tuples of them): `let x = e1 in e2` with none of its variables used in e2
+   is the same sequencing as `let _ = e1 in e2`. *)
+let rec lean_seq_irrefutable (p : pat) : bool =
+  match p.term with
+  | P_wild _ | P_var _ | P_var_annot _ -> true
+  | P_tup (_, ps, _) -> Seplist.for_all lean_seq_irrefutable ps
+  | P_paren (_, p', _) | P_typ (_, p', _, _, _) -> lean_seq_irrefutable p'
+  | _ -> false
+
+let lean_seq_unused_binding (p : pat) (body : exp) : bool =
+  lean_seq_irrefutable p
+  && (let free = ExpW.exp_to_free body in
+      NameSet.for_all (fun n -> not (Nfmap.in_dom n free)) (Typed_ast.pat_to_bound_names p))
+
 let rec lean_seq_pattern (p : pat) : bool =
   match p.term with
   | P_wild _ -> true
@@ -5947,7 +5962,8 @@ type pat_style = FunParam | MatchArm
       | App _ -> supply_thread_app inside_instance senv e
       | Let (_, (lb, _), _, e2) ->
         (match lb with
-         | Let_val (p, _, _, e1) when lean_seq_pattern p && not (lean_seq_trivial e1)
+         | Let_val (p, _, _, e1) when (lean_seq_pattern p || lean_seq_unused_binding p e2)
+                                     && not (lean_seq_trivial e1)
                                      && not (exp_needs_supply e1) ->
            err "Lean backend: `let _ = e1 in e2` with a pure e1 in a supply-threaded body (B15: e1 would be dropped; unsupported — bind e1 to a used name, or move it out of the supply-threaded region)"
          | Let_val (p, topt, _, e1) ->
@@ -6534,7 +6550,7 @@ type pat_style = FunParam | MatchArm
                   ws skips; from_string "["; lists; from_string "]"; ws skips'
                 ]
           | Let (skips, (Let_val (p, _, _, e1), _), _skips', e)
-            when lean_seq_pattern p && not (lean_seq_trivial e1) ->
+            when (lean_seq_pattern p || lean_seq_unused_binding p e) && not (lean_seq_trivial e1) ->
               lem_seq_out inside_instance skips e1 e
           | Let (skips, bind, _skips', e) ->
               let body = flatten_newlines (let_body inside_instance None false Types.TNset.empty bind) in

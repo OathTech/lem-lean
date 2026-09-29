@@ -278,6 +278,23 @@ statuses as before A1). Lean CPU over the 97 matched inputs: 34.82 s (A1),
 32.58 s (B14/B15); the unchanged OCaml oracle moved by the same order
 (14.34 s, 13.17 s), so no measurable cost.
 
+## B15b. `let x = e1 in e2` with `x` unused dropped e1 (fixed)
+
+The general case of B15, found while reviewing it: OCaml evaluates the
+right-hand side of every `let` (strict), so a failing e1 stops the program
+even when its value is never used; Lean's compiler drops an unused binding.
+linksem had 58 such sites, some of which fail (e.g. the linker's
+`match got_el.startpos with Just a -> a | Nothing -> failwith ...` bound to
+an unused name). A `let` whose pattern cannot fail to match (variables,
+wildcards, tuples of them, parentheses, annotations) and none of whose
+variables is free in the body is now emitted as `lemSeq` like `let _ =`;
+the supply-threaded path refuses a pure e1 (loud). Test: parity failure
+probe `f_let_unused.lem` (plus an in-domain tuple step). Cerberus: 2 sites
+(pure, non-failing), tree compiles. The general hazard remains for
+unused ARGUMENTS after inlining (`const x (failwith ..)`): Lean may drop
+the failing argument where OCaml evaluates it (audit A3 family,
+documented).
+
 ## Impact on the Cerberus tree (measured, not re-pinned)
 
 Generated with this branch (lem `65389aa`) in a scratch clone of cerberus-lean
