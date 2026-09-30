@@ -3,8 +3,10 @@
    intLxor, intLsl, intAsr, natLand, natLor, natLxor, natLsl, natAsr) and
    the 31-bit bitSeq views intFromBitSeq/bitSeqFromInt/natFromBitSeq/
    bitSeqFromNat. OCaml: native land/lor/lxor/lsl/asr/lnot on 63-bit int;
-   Lean: lem's own definitions through a 31-bit bitSequence. Expected
-   values are the OCaml target's output. *)
+   Lean: LemLib's unbounded lemInt*/lemNat* reps since LP4 (before, lem's
+   own definitions through a 31-bit bitSequence); operands and results stay
+   inside 63 bits (beyond: p_word_bitwise_wide). Expected values are the
+   OCaml target's output. *)
 open import Pervasives_extra
 
 let sI (i : int) : string = stringFromInt i

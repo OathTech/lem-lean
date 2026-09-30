@@ -44,7 +44,11 @@
 # documented divergence): such a probe must still FAIL its parity check —
 # a listed probe that PASSES is reported as a failure of the suite ("the
 # expected failure now passes: remove it from the list"), so the list
-# cannot go stale and a fix cannot land silently.
+# cannot go stale and a fix cannot land silently. A listed probe counts as
+# XFAIL only on a real parity disagreement: different output with Lean
+# exiting 0, or (non-failure probe) a Lean panic abort (exit 134 after a
+# "PANIC at" line) where the OCaml reference succeeded; a broken build or
+# any other crash is red (test_failure_admission.sh).
 # Usage: ./run.sh [<name>...]   (default: every probes/*.lem), from any cwd,
 #        with the complete opam environment (opam exec --). Env: CAPPED, CERB_MEM_MAX.
 set -u
@@ -158,6 +162,11 @@ run_one() {
       else echo "  OK: parity ($(wc -l < "$OUT/lean/$name.out") lines byte-identical to the OCaml reference; pin matches)"; return 0; fi
     else
       [ "$ln_st" -eq 0 ] && parity_mismatch=1
+      # Failure-vs-success (the OCaml reference succeeded, checked above):
+      # a Lean panic under LEAN_ABORT_ON_PANIC=1 (the runtime's "PANIC at"
+      # line, then abort: exit 134) is a real parity disagreement too. Any
+      # other non-zero exit (a kill, a crash without a panic) is not.
+      if [ "$ln_st" -eq 134 ] && grep -q '^PANIC at ' "$OUT/lean/$name.out"; then parity_mismatch=1; fi
       echo "  FAIL: PARITY DIFF (< OCaml reference, > Lean; lean exit $ln_st):"; head -40 "$OUT/$name.diff"; return 1
     fi
   fi
