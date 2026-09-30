@@ -577,8 +577,9 @@ and is not the operator's words.
   [USER 2026-09-30] "Yes, agree on 1-3. Go ahead", on the orchestrator's questions (1) accept LP4 and OM4 as
   registered OCaml-target deviations under the 2026-09-03 X3 ruling
   ([USER 2026-09-03] "ocaml limits that are hardcoded thanks to ocaml-level execution issues are also forbidden, the real thing is the logical semantics") and (2) keep the `p_word_bitwise_wide_mul` runner
-  row. LP4 and OM4 are ACCEPTED; `p_word_bitwise_wide` and `p_mword_width`
-  are class `ruled`. The verbatim diff and the upstream-Lem candidate (the
+  row, and (3) a fresh delta review of round 2 before landing (done:
+  review round 3, below). LP4 and OM4 are ACCEPTED; `p_word_bitwise_wide`
+  and `p_mword_width` are class `ruled`. The verbatim diff and the upstream-Lem candidate (the
   width-limited prover definitions) are in the library-parity record.
 
 ## Review fixes (2026-09-30)
@@ -718,3 +719,43 @@ An independent delta review of `66e3cf8..2ea67cf`. The worker is [AGENT].
   for a numeric `memory.max` on its own cgroup unless `CERB_MEM_MAX=none`.
   With the marker forged by hand it refuses with "no memory cap in force
   (… memory.max='max')", exit 2.
+
+## Review round 3 (2026-09-30)
+
+The fresh delta review of `2ea67cf..d06b17f` asked for by the ruling's
+item (3). Verdict: "LAND WITH FIXES". The worker is [AGENT].
+
+- Stale labels corrected: the library-parity record (LP4 "awaiting
+  acceptance", `p_word_bitwise_wide` "class `open`") and the header
+  comments of `p_word_bitwise_wide.lem` and `p_mword_width.lem`.
+- Overclaim corrected: on representable operands OCaml's land/lor/lxor/asr
+  are exact. The primitive divergence is `lsl` past bit 62 plus shifts by
+  at least the word size. This is reworded in the library-parity record,
+  the probe header and the LP4 registry reason. New rows pinned in
+  `p_word_bitwise_wide`: `intAsr 5 64`, `intAsr (0-5) 64`, `natAsr 5 64`
+  (OCaml `5`, `-5`, `5`; Lean `0`, `-1`, `0`).
+- Runner mask: the round-2 normaliser deleted every line equal to
+  `backtrace:`/`Aborted …` or ending in `[0x…]` anywhere in the output.
+  The reviewer's plant used that to hide a changed panic message. Now
+  nothing is deleted. The noise is suppressed at the source: the Lean exe
+  runs with `LEAN_BACKTRACE=0` (the runtime then prints no backtrace), and
+  under `( ulimit -c 0; exec "$exe" )`, so the shell's "Aborted (core
+  dumped)" goes to the runner's own stderr, not the capture. The only
+  normalisation left is the PANIC position mask, which rewrites digits
+  and deletes no line. The nine pins untouched by this round matched
+  unchanged. Plant: the `lemFunctionalCompare` message planted as
+  `compare: functional value\nbacktrace:\nPLANTED hidden line [0xdeadbeef]`
+  is red:
+  `FAIL: registered probe's disagreement CHANGED …`, `> backtrace:`,
+  `> PLANTED hidden line [0xdeadbeef]`.
+- Rebaseline runs are never green. Any run with `REBASELINE=1` or
+  `REBASELINE_XFAIL=1` exits 1 with
+  `parity: REBASELINE run — N pin(s) REWRITTEN (M changed); not a gate: …`.
+  Plants: `REBASELINE=1` alone on `p_hello` gave exit 1, "1 pin(s)
+  REWRITTEN (0 changed)"; `REBASELINE_XFAIL=1` alone on `p_mword_width`
+  gave exit 1, "1 pin(s) REWRITTEN (0 changed)".
+- Nits: a whitespace-only reason is refused
+  (`line 28: want <probe>,<class>,<non-blank reason>: p_hello,open,   `).
+  `LEM_KEYWORD_PROBE_CAPPED=1 CERB_MEM_MAX=none` now prints
+  "lean_keyword_probe: CERB_MEM_MAX=none — running UNCAPPED (explicit
+  opt-out)". The ruling's item (3) is recorded next to (1) and (2).

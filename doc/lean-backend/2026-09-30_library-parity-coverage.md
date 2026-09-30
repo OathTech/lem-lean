@@ -55,8 +55,8 @@ and `natLand`, `natLor`, `natLxor`, `natLsl`, `natAsr` OCaml reps (native
 definitions through a 31-bit `bitSequence`
 (`bitSeqFromInt = bitSeqFromInteger (Just 31)`). The two targets disagreed
 from 2^30 on (from the `8ccbe40` record: `intLsl 1 30` gave OCaml
-`1073741824` and Lean `0`). [AGENT] change, implemented and awaiting
-acceptance: the Lean reps are UNBOUNDED two's
+`1073741824` and Lean `0`). [AGENT] change, ACCEPTED by the ruling of
+2026-09-30 (below): the Lean reps are UNBOUNDED two's
 complement (LemLib `lemIntLand`/`lemIntLor`/`lemIntLxor`/`lemIntLsl`/
 `lemIntAsr` over `Int`, `lemNat*` over `Nat`). `intFromBitSeq` and
 `bitSeqFromInt` keep Lem's 31-bit definition on every target. Regression:
@@ -80,9 +80,9 @@ OCaml `int` (`library/num.lem:117`), and OCaml cannot write a literal at or
 above 2^62, so the wide operands are computed. Two probes, split in review
 round 2 so that each measures one thing:
 
-- `p_word_bitwise_wide` isolates the bitwise operations. Every operand is
-  a literal inside 62 bits or the result of an operation under test
-  (`lsl`), with no arithmetic. Registered class `open`.
+- `p_word_bitwise_wide` has no arithmetic. Every operand is a literal
+  inside 62 bits or the result of `lsl`. Registered class `ruled` (by the
+  ruling below; it was `open` until then).
 - `p_word_bitwise_wide_mul` holds the rows whose wide operands are built
   by multiplication. The multiplication itself wraps on OCaml
   (`p61*4 = 0`), which is the separately ruled X3/N4 class, so these rows
@@ -137,10 +137,17 @@ and `.lean.out`):
 > natLxor (n61*8) 1 = 18446744073709551617
 ```
 
-So OCaml's reps are 63-bit and wrapping, and this holds for the bitwise
-operations in isolation, not only through wrapped arithmetic. OCaml also yields a NEGATIVE
-`nat` (`natLsl 1 62`), and `intLsl 1 64 = 1`: OCaml's `lsl` by at least the
-word size is unspecified. The disagreement is the 63-bit class ruled on
+So OCaml's reps are 63-bit. Where exactly the targets diverge (corrected
+in review round 3): on representable operands, OCaml's `land`, `lor`,
+`lxor` and `asr` are EXACT. The primitive divergence is `lsl` past bit 62
+(`intLsl 1 63 = 0`; OCaml even yields a NEGATIVE `nat`, `natLsl 1 62`),
+plus shifts by at least the word size, where OCaml's result is
+unspecified. Measured: `intLsl 1 64 = 1`, and, added in round 3,
+`intAsr 5 64 = 5`, `intAsr (0-5) 64 = -5` and `natAsr 5 64 = 5` on OCaml,
+where Lean gives `0`, `-1` and `0`. The `land`/`lor`/`lxor` rows of
+`p_word_bitwise_wide` only propagate an `lsl`-built operand that already
+differs. The `asr`-by-64 rows are pinned in the same probe, in the same
+(LP4) class. The disagreement is the 63-bit class ruled on
 [USER 2026-09-03], but D2 was given subject to the opposite finding. So
 LP4's acceptance went BACK TO THE OPERATOR with this measurement.
 

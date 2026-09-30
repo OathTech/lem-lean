@@ -24,7 +24,11 @@ fi
 # memory cap is actually in force on this process's cgroup (a numeric
 # memory.max), so setting LEM_KEYWORD_PROBE_CAPPED=1 by hand cannot skip the
 # cap. CERB_MEM_MAX=none is capped's own explicit, loudly reported opt-out.
-if [ "${CERB_MEM_MAX:-}" != none ]; then
+if [ "${CERB_MEM_MAX:-}" = none ]; then
+  # capped reports its own opt-out loudly; a hand-set marker bypasses
+  # capped, so the opt-out is reported here too (never silent).
+  echo "lean_keyword_probe: CERB_MEM_MAX=none — running UNCAPPED (explicit opt-out)" >&2
+else
   cg="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)"
   mm="$(cat "$cg/memory.max" 2>/dev/null || true)"
   case "$mm" in
