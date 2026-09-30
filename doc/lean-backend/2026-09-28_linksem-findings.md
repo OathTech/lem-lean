@@ -290,7 +290,8 @@ wildcards, tuples of them, parentheses, annotations) and none of whose
 variables is free in the body is now emitted as `lemSeq` like `let _ =`;
 the supply-threaded path refuses a pure e1 (loud). Test: parity failure
 probe `f_let_unused.lem` (plus an in-domain tuple step). Cerberus: 2 sites
-(pure, non-failing), tree compiles. The general hazard remains for
+(pure, non-failing), tree compiles; csmith lane statuses unchanged (97
+match / 102 skip / 1 timeout, 0 regressions). The general hazard remains for
 unused ARGUMENTS after inlining (`const x (failwith ..)`): Lean may drop
 the failing argument where OCaml evaluates it (audit A3 family,
 documented).
