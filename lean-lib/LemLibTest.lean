@@ -212,7 +212,7 @@ open Lean Elab Command in
 example : lemIfNew true 3 = 4 := rfl
 example : lemIfNew false 3 = 7 := rfl
 
-/-- LP4 (library-parity-coverage 2026-09-30): the unbounded Int bitwise reps
+/-- LP4 (library-parity-coverage 2026-09-30; implemented, acceptance OPEN): the unbounded Int bitwise reps
     agree with two's complement (the OCaml `land`/`lor`/`lxor` values), in
     every sign combination; LP6: bit lists are MSB-first; LP7:
     word_extract masks by hi. -/

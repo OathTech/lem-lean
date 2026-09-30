@@ -265,12 +265,12 @@ opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
 def lemRequireAbortOnPanic : IO Unit := do
   match ← IO.getEnv "LEAN_ABORT_ON_PANIC" with
   | some "1" => pure ()
-  | v =>
-    let shown := match v with
-      | some x => "\"" ++ x ++ "\""
-      | none => "not set"
-    IO.eprintln ("LemLib lemRequireAbortOnPanic: refused — LEAN_ABORT_ON_PANIC is " ++ shown ++
-      ", not 1: a reached failure (a Lean panic!) would print and then CONTINUE with a default value where the OCaml target stops; run with LEAN_ABORT_ON_PANIC=1")
+  | none =>
+    IO.eprintln "LemLib lemRequireAbortOnPanic: refused — LEAN_ABORT_ON_PANIC is not set: a reached failure (a Lean panic!) would print and then CONTINUE with a default value where the OCaml target stops; run with LEAN_ABORT_ON_PANIC=1"
+    IO.Process.exit 2
+  | some x =>
+    IO.eprintln ("LemLib lemRequireAbortOnPanic: refused — LEAN_ABORT_ON_PANIC is \"" ++ x ++
+      "\", not 1: the Lean runtime aborts on a panic whenever the variable is set, but this check requires exactly 1 so the fail-stop contract has one spelling; run with LEAN_ABORT_ON_PANIC=1")
     IO.Process.exit 2
 
 /- Sequencing (linksem B15): Lem's `let _ = e1 in e2` evaluates e1 for its
@@ -1775,9 +1775,12 @@ def lemNatAsr (a b : Nat) : Nat := a >>> b  -- same as lsr for Nat (unsigned)
 
 /- Int bitwise operations: UNBOUNDED two's complement, the Lean reps of
    word.lem's intLand/intLor/intLxor/intLsl/intAsr (library-parity-coverage
-   2026-09-30, finding LP4 [AGENT]). The OCaml reference is native 63-bit
+   2026-09-30, finding LP4 [AGENT]; implemented, acceptance OPEN: ruling D2
+   was conditional on OCaml being unbounded, and it is not (probe
+   p_word_bitwise_wide)). The OCaml reference is native 63-bit
    `land`/`lor`/`lxor`/`lsl`/`asr`; these agree with it on its whole
-   domain (and extend it where OCaml wraps: the ruled 63-bit class). Lem's
+   domain and DIFFER where OCaml wraps (whether that difference is accepted
+   is the open D2 question). Lem's
    own definitions go through a 31-bit bitSequence and disagreed from 2^30
    on. `Int.negSucc n` is `-(n+1)`, i.e. the complement `~~~n` of `n`, so
    each case is a Nat identity: `a &&& ~~~b = a ^^^ (a &&& b)`,

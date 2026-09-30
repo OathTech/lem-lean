@@ -2651,12 +2651,14 @@ let lean_tuple_inst_demands env (c : const_descr_ref id)
   let cd = c_env_lookup l env.c_env c.descr in
   let out = ref [] in
   let rec walk depth (p : Path.t) (ty : Types.t) =
-    (* Lem's instance resolution terminates (instance constraints are on
-       strictly smaller types), so this bound is a tripwire, never a
-       cut-off: past it the walk refuses loudly instead of silently
-       leaving demands unbound (fail-closed). *)
+    (* Depth bound. It used to be a silent cut-off (demands past it left
+       unbound); now exceeding it is a loud refusal (fail-closed). It is a
+       bound, not a proof: a legitimate constraint chain deeper than 50
+       would also be refused (loudly). Lem's instance constraints are
+       normally on component types, so real chains are short; no case
+       near the bound is known. *)
     if depth > 50 then
-      raise (Reporting_basic.err_general true l
+      raise (Reporting_basic.err_general true c.id_locn
         (Stdlib.(^) "Lean backend: internal error — B14 tuple-instance walk exceeded depth 50 at class "
            (Path.to_string p)));
     if not (lean_tuple_inst_exempt p) then

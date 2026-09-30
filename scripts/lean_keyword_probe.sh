@@ -20,6 +20,17 @@ if [ "${LEM_KEYWORD_PROBE_CAPPED:-}" != 1 ]; then
   export CERB_MEM_MAX="${CERB_MEM_MAX:-32G}" LEM_KEYWORD_PROBE_CAPPED=1
   exec "$ROOT/scripts/capped" "$0" "$@"
 fi
+# The marker only says "re-executed"; it is not trusted. Verify that a
+# memory cap is actually in force on this process's cgroup (a numeric
+# memory.max), so setting LEM_KEYWORD_PROBE_CAPPED=1 by hand cannot skip the
+# cap. CERB_MEM_MAX=none is capped's own explicit, loudly reported opt-out.
+if [ "${CERB_MEM_MAX:-}" != none ]; then
+  cg="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)"
+  mm="$(cat "$cg/memory.max" 2>/dev/null || true)"
+  case "$mm" in
+    ''|*[!0-9]*) echo "lean_keyword_probe: refused — no memory cap in force (cgroup $cg memory.max='$mm'); run the script directly (it re-executes itself under scripts/capped), or set CERB_MEM_MAX=none to opt out explicitly" >&2; exit 2;;
+  esac
+fi
 TC="$(cat "$ROOT/lean-lib/lean-toolchain")"
 LEAN="$HOME/.elan/toolchains/$(echo "$TC" | sed 's|/|--|; s|:|---|')/bin/lean"
 [ -x "$LEAN" ] || { echo "lean_keyword_probe: no lean binary for $TC at $LEAN" >&2; exit 2; }
