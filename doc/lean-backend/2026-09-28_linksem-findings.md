@@ -119,6 +119,17 @@ definition with no explicit parameters and a non-function type is emitted
 `@[never_extract]` (as `failwithI` itself is). Test:
 `test_untaken_failure.lem` / `lean-untaken-failure` (`pick_char`).
 
+On Lean 4.32.2 (review fix 2026-09-30, LOW e), closed terms are
+initialised lazily, so leg 1 no longer tells the difference: without the
+attribute it passes too. The attribute still matters, and leg 4 now tests
+it. Leg 4 reaches `Assert_extra.fail` at two different runtime arguments
+without `LEAN_ABORT_ON_PANIC`. With `never_extract`, each reached failure
+panics, and OCaml raises each time. Without it, `@fail Char _` is
+extracted and initialised ONCE, and the second failure is silent. That
+was measured in a scratch package: `pickB` without the attribute printed
+one PANIC for two failing calls, and `pickA` with it printed two.
+Plant-tested on the suite: see the review-fix section.
+
 ## B9. Closed calls in untaken branches evaluated at load (fixed; toolchain-dependent)
 
 B8 is one case of a general hazard: on Lean 4.28 ANY closed application of
@@ -230,7 +241,10 @@ Lem's instances locally, innermost first (`haveI := lemInst_... (a := T1)
 ...; e`); Lean's local instances take precedence over global ones.
 Exempt: Basic_classes' `Eq`/`Ord`/`SetType`/`MapKeyType` (their tuple
 instances are componentwise / lexicographic, so the overlap computes the
-same result). The supply-threaded paths refuse such a use (loud). Test:
+same result). The walk over instance constraints is bounded at depth 50,
+and past the bound it refuses loudly (review fix 2026-09-30, LOW a). It
+used to stop silently, which would have left demands unbound. Lem's
+resolution terminates, so the bound is a tripwire. The supply-threaded paths refuse such a use (loud). Test:
 `test_tuple_inst_arity.lem` (7 asserts; with the bindings stripped, 3
 fail: nested, list, generic). LemLib: one instance renamed
 (`Lem_Show` pair). linksem: instance names only (no confusable use in the
@@ -252,13 +266,29 @@ a fresh `IO.Ref` (a `BaseIO` effect the compiler keeps; a pure "use",
 `if ptrAddrUnsafe x == 1 then b () else b ()`, was simplified away and
 arity reduction then dropped the argument). A variable or literal e1 keeps
 the plain emission (no effect possible). The supply-threaded paths refuse
-a pure e1 (loud). Inside the discarded e1 no expected type flows in, so an
-empty list literal of a closed Lem type is ascribed (`([] : List domain)`):
-Cerberus's hand-written `print_debug_pure : Nat → List d → ...` is more
-general than Lem's `list domain`, and `lemSeq (fun _ => print_debug_pure 2
-[] ...)` otherwise leaves `d` unsolved. (The old `match e1 with | () =>
-e2` elaborated only because Lean discards the discriminant of a `()`
-pattern: e1 was dropped already in the elaborated term.) Tests: parity
+a pure e1 (loud). Cerberus's hand-written
+`print_debug_pure : Nat → List d → ...` is more general than Lem's
+`list domain`, so `lemSeq (fun _ => print_debug_pure 2 [] ...)` leaves `d`
+unsolved. (The old `match e1 with | () => e2` elaborated only because Lean
+discards the discriminant of a `()` pattern: e1 was already dropped in the
+elaborated term.) B15 first ascribed an empty list literal of closed Lem
+type only inside a discarded e1. Since the review fix of 2026-09-30
+(LOW c), EVERY empty list literal whose Lem type is closed is ascribed
+(`([] : List T)`), wherever it occurs. The hazard is not specific to
+discarded e1: `let y = f [] in y + n`, with `f` a `List.length` rep of a
+`list bool -> nat`, failed to elaborate with "don't know how to
+synthesize implicit argument `α`" under the old rule. The reviewer's
+alternative, ascribing the whole discarded e1 with its Lem type, was
+measured and does not help: e1's type, `nat` or `unit`, does not mention
+the unsolved parameter. The ascription only affects elaboration; the
+kernel term is the same `@List.nil T`. Test:
+`test_empty_list_ascription.lem` (discarded, used `let`, nested unit `let`,
+inside a `match`). LemLib's generated modules gain the ascriptions (List,
+String_extra, Word). Other nullary polymorphic values (`Nothing`, empty
+sets and maps) passed to an over-general rep are exposed to the same
+elaboration failure. That failure is loud (a Lean build error), and none
+is known in Cerberus or linksem. The Cerberus tree was NOT regenerated
+with this rule; the re-pin must check it. Tests: parity
 failure probes `f_let_seq.lem`, `f_let_unit.lem` (OCaml and Lean both fail
 with the discarded e1's message; pre-fix the Lean binary printed the next
 step and exited 0).
@@ -345,15 +375,23 @@ Five independent auditors compared the Lean port of linksem with the OCaml
 build; the linksem record lists every item. Backend-side:
 
 - **A2. Panics continued by default (fixed).** A reached `failwithI` is a
-  Lean `panic!`, which prints and CONTINUES with the `Inhabited` default
-  unless `LEAN_ABORT_ON_PANIC=1` is set; an executable over generated code
+  Lean `panic!`. Unless `LEAN_ABORT_ON_PANIC=1` is set, it prints and
+  CONTINUES with the `Inhabited` default. An executable over generated code
   could then exit 0 with plausible output where the OCaml target raises
   (linksem: invalid program-header flags printed a table with an empty
-  column). LemLib now provides `lemFailStop : BaseIO Unit` (the runtime's
-  `lean_internal_set_exit_on_panic`, as Lean's own shell uses; no `import
-  Lean`), to be called first in `main`: a reached failure then prints its
-  message and exits 1. Test: `lean-untaken-failure` leg 3 (without the
-  environment variable; plant: removing the call makes it fail).
+  column). The first fix, `lemFailStop` over an
+  `@[extern "lean_internal_set_exit_on_panic"]` opaque `lemSetExitOnPanic`,
+  was REMOVED by ruling D1(b) [USER 2026-09-30] (see "Native seams"
+  below). LemLib now provides `lemRequireAbortOnPanic : IO Unit`, with no
+  extern and no unsafe code. A client calls it first in `main`. It reads
+  `LEAN_ABORT_ON_PANIC` with `IO.getEnv`, and unless the value is exactly
+  `1` it prints an attributed refusal on stderr and exits 2. This is the
+  pattern of Cerberus's driver (`lean_frontend/Main.lean`, Z2-FL-03). That
+  driver measured that the runtime aborts when the variable is merely
+  present, so the check here is stricter than the runtime. Tests:
+  `lean-untaken-failure` legs 3a (unset: refused, exit 2, nothing run),
+  3b (`0`: refused) and 3c (`1`: passes, and the reached failure
+  fail-stops). Plant: see the review-fix section.
 - **A3. Failures inside function-returning definitions fire later (documented
   limitation).** Lean's compiler eta-expands every definition to the arity of
   its TYPE (`Lean/Compiler/LCNF/ToDecl.lean:155`, `Meta.etaExpand`, no
@@ -365,9 +403,54 @@ build; the linksem record lists every item. Backend-side:
   an unknown DWARF attribute form (both sides fail, different messages).
   Matching OCaml would need a non-function wrapper type for every such
   definition and its uses; not taken.
-- **A4. Failure order (documented limitation, existing).** OCaml evaluates
-  arguments right to left, Lean left to right: with two failing
-  subexpressions the reported failure differs (both fail).
+- **A4. Evaluation order (documented limitation, existing).** OCaml
+  evaluates arguments right to left, Lean left to right. With two failing
+  subexpressions, the reported failure differs and both fail. The order
+  can also change the OUTCOME. If one argument fails and another does not
+  terminate, the target that evaluates the failing one first fails, and
+  the other target does not terminate. So a failure on one target can be
+  non-termination on the other (in either direction).
+- **A5. A `let` floated into an untaken branch or a closure (OPEN, review
+  finding HIGH-2, 2026-09-30).** Take `let x = e1 in e2` where `x` IS
+  free in e2, but only in a branch that is not taken, or only inside a
+  local closure that is never called. OCaml is strict: it evaluates e1 at
+  the `let`, so a failing e1 stops the program. Lean's compiler floats the
+  binding to its use (LCNF let-floating into the branch, and into the
+  closure), so e1 never runs and the program continues. B15b covers only
+  bindings whose variable is not free in e2 at all. Probes, both
+  registered in `parity/expected_failures.txt` (class 3, open), each run
+  with the runtime `n = 0`:
+  - `f_let_float_branch`:
+    `let x = checked_pred n in if n = 7 then "used: " ^ show x else "after ..."`;
+  - `f_let_float_closure`: `x` used only in
+    `let g = fun (u : unit) -> "used: " ^ show x in if n = 7 then g () else "after ..."`.
+  In both, OCaml fails with `Failure("let_float_…: e1 failed")` after
+  `before: 0`, and the Lean binary prints `after (must not print): 0` and
+  exits 0. It is the same family as A3 and B15b: Lean's compiler is free
+  to move or drop pure computation, and a Lem failure is pure in the
+  logic. Fix options, NOT implemented (an operator decision on cost):
+  1. **A strict `lemLet e1 (fun x => e2)`** for every `let` with a
+     non-trivial e1. Its implementation forces e1 before calling the body
+     (the `lemSeq` mechanism with the value passed on). This adds a native
+     seam with the same kernel-versus-runtime gap as `lemSeq`, so it needs
+     a boundary ruling. Every `let` in generated code becomes an
+     application: proofs that use `zeta`/`simp only [...]` through lets
+     need `lemLet` in their simp sets, as B15 needed `lemSeq` in two
+     Cerberus proofs. It also stops let-floating and allocates a closure
+     per `let` body. The CPU cost is unmeasured, and B9's 21 % on
+     Cerberus is the order of magnitude to expect for a blanket change.
+  2. **The same, restricted to lets whose variable is not used on EVERY
+     path** (a use analysis). The cost is lower, but every precision hole
+     in the analysis is a silent discrepancy. Closures and inlining make
+     "used on every path" hard to decide conservatively.
+  3. **`let x := e1; lemSeq (fun _ => x) (fun _ => e2)`**: reuse the
+     existing (temporary) seam to force `x`. No new seam, but it has the
+     proof and speed costs of option 1, and it rests on a seam whose mover
+     (below) would delete it.
+  4. **The failure-monad translation** (TODO item 24, D1(a)'s named
+     mover) fixes it structurally, with A3 and A4. It is an L-sized arc,
+     with a design pass first.
+  5. **A documented limitation**, like A3.
 - **A1. Comparison residuals (confirmed, fixed).** Lem's default `Eq` /
   `SetType` / `MapKeyType` instances are OCaml's polymorphic compare, valid
   at every type. The backend's comparisons at a type with a type variable
@@ -381,9 +464,11 @@ build; the linksem record lists every item. Backend-side:
   `doc/notes/2026-09-29_comparison-dictionaries-design.md`): Lem-instance-guided
   threading of `[Ord a]`/`[BEq a]` binders (transitive, fixpoint);
   function-typed positions are compared structurally with
-  `lemFunctionalCompare`/`lemFunctionalBeq`, which fail like OCaml's
-  `compare: functional value`. The fallback instances are DELETED, so any
-  missed demand is a compile error. Tests: `test_cmp_threading.lem` (the
+  `lemFunctionalCompare`/`lemFunctionalBeq`, which fail with OCaml's
+  message `compare: functional value` whenever they reach a closure. That
+  matches OCaml's `=`, which raises on any closure it reaches. It does NOT
+  match OCaml's `compare` (see A1-R below). The fallback instances are
+  DELETED, so any missed demand is a compile error. Tests: `test_cmp_threading.lem` (the
   pristine output fails 3 of 4 asserts), `test_fn_field_compare.lem`.
   linksem: no fallback left; one loud residual remains
   (`allocated_sections_map`, a map over a mutual sibling, never compared).
@@ -391,3 +476,140 @@ build; the linksem record lists every item. Backend-side:
   generated files change (729 fallback-instance lines deleted, threaded
   binders, derived comparisons for function-field types such as
   `pre_execution`); the tree compiles (395 jobs) against this LemLib.
+- **A1-R. Residual discrepancy: `compare` on the same closure (OPEN,
+  review finding MEDIUM-1, 2026-09-30).** OCaml's polymorphic `compare`
+  returns 0 for two occurrences of the SAME closure object: it checks
+  physical equality first. It raises only for DISTINCT closures. Only `=`
+  raises on every closure. Measured with a native OCaml binary:
+  `compare f f = 0`, `f = f` raises `Invalid_argument "compare: functional
+  value"`, `compare f g` raises, and `compare [f] [f]` on fresh lists is
+  0. LemLib's `lemFunctionalCompare` fails on every closure. So a set of
+  function-field values sharing one closure computes on OCaml and fails on
+  Lean. Probe `p_fn_compare_same_closure`:
+  `Set.size (Set.fromList [GOT [f]; GOT [f]; Plain 1])` is `size: 2` on
+  OCaml, and Lean aborts with
+  `PANIC at _private.LemLib.0.failwithIImpl LemLib:239:2: compare: functional value`.
+  It is registered in `parity/expected_failures.txt` (class 3, open). The
+  parity runner now admits a Lean panic abort (exit 134 after a
+  `PANIC at` line) where OCaml succeeded as a real disagreement for such
+  entries. Plant: with the PANIC match disabled, the probe is red,
+  "not XFAIL". Fix options: (1) a pointer-equality test before failing
+  (`ptrAddrUnsafe`, i.e. a new native seam). Not taken, per the brief: it
+  needs a boundary ruling, and it would make logical equality depend on
+  sharing. (2) Rule it an OCaml-target deviation (behaviour that depends
+  on sharing is not a semantics). The decision is the operator's.
+- **Comparison at a function type is refused at Lean compile time.** A
+  threaded binder demanded at a function type fails instance synthesis
+  (review finding LOW f, measured). Example: `tags_of : list (tag 'a) ->
+  set (tag 'a)` used at `tag (nat -> nat)`. Lem generation succeeds; Lean
+  reports `failed to synthesize instance of type class Ord (Nat → Nat)`.
+  OCaml compiles it and raises only if a comparison reaches a closure:
+  `tags_of [NoTag; NoTag]` computes a set of size 1. This is loud (a build
+  error, not a wrong answer), but a valid Lem program the Lean target
+  cannot compile. Recorded as a limitation. Matching OCaml would need an
+  `Ord` for function types that fails when used, which is the deleted
+  fallback-instance shape.
+
+## Native seams: boundary rulings (2026-09-30)
+
+A native seam is an `@[implemented_by]` body (or an `@[extern]`) whose
+run-time behaviour is not the logical definition the kernel sees. The
+orchestrator relayed the operator's rulings, verbatim: D1 [USER
+2026-09-30] "D1: agree"; D2 [USER 2026-09-30] "D2: okay, agreed". Each was
+given on the orchestrator's recommendation, which is paraphrased below
+and is not the operator's words.
+
+- **`lemSeqImpl`, behind `lemSeq` (B15/B15b).** `lemSeq {α β} (a : Unit →
+  α) (b : Unit → β) : β := b ()` is a transparent definition: the kernel
+  and every proof see `b ()`. Its `implemented_by lemSeqImpl` forces `a ()`
+  at run time first, by storing the value in a fresh `IO.Ref` under
+  `unsafeBaseIO`, and then returns `b ()`. The gap: a failure or
+  non-termination in `a` is visible at run time and invisible to the
+  logic. That is the intent (it mirrors OCaml's strict `let`), but it is
+  a trust boundary. It is also an exception to LemLib's L2 note "DO NOT
+  REINTRODUCE an axiom or unsafe effect-projection". **Ruling D1(a):
+  ACCEPTED onto the boundary list as TEMPORARY, not permanent.** Its named
+  mover is the failure-monad translation (TODO item 24): an effect
+  analysis in the backend emits every function that can transitively
+  reach `failwith` in an error monad (`Except`), so strictness and
+  evaluation order become part of the semantics. That fixes the `lemSeq`
+  gap, A5, most of A3, and lets A4 follow OCaml's order. The TODO entry
+  says: queued, design pass with the operator first.
+- **`lemSetExitOnPanic` / `lemFailStop` (A2's first fix).** This was an
+  `@[extern "lean_internal_set_exit_on_panic"]` opaque, `BaseIO Unit`: a
+  call into a runtime-internal symbol, with no logical content.
+  **Ruling D1(b): REMOVED from LemLib.** It is replaced by the unsafe-free,
+  extern-free check `lemRequireAbortOnPanic : IO Unit` (A2 above).
+  `lean-untaken-failure` leg 3 was updated, and plant-tested: removing the
+  call from the leg's driver makes the leg fail.
+- **LemLib's native-seam population after D1** is exactly
+  `failwithIImpl` and `fuelExhaustedWithImpl` (permanent, the loud-failure
+  primitives), plus `lemSeqImpl` (TEMPORARY, D1(a)). LemLib has no
+  `@[extern]`. Checked on this branch: a grep for `@[extern` and
+  `implemented_by` over `lean-lib/**/*.lean` finds exactly these three
+  attribute uses, and nothing else outside comments.
+- **LP4's semantics conflict** (library-parity record LP4): Lean's reps
+  are unbounded, OCaml's are 63-bit and wrap, and HOL/Isabelle/Coq use
+  Lem's 31-bit definition. **Ruling D2** accepted LP4 SUBJECT TO a
+  measurement that the OCaml reps are unbounded. The measurement
+  (`p_word_bitwise_wide`) shows they WRAP at 63 bits, so the condition is
+  not met and LP4 is back with the operator. The verbatim diff and the
+  upstream-Lem candidate (the width-limited prover definitions) are in the
+  library-parity record.
+
+## Review fixes (2026-09-30)
+
+Two independent reviews of `arc/linksem` at `66e3cf8`. The worker is
+[AGENT]; findings marked "confirmed" were confirmed by the orchestrator.
+
+- MEDIUM-3 (confirmed): the missing record
+  `2026-09-30_library-parity-coverage.md` is committed, scoped to this
+  branch (see its §0 for what was cut and where it lives).
+- HIGH-2: recorded as A5, OPEN, with two XFAIL probes.
+- MEDIUM-1: A1's wording is corrected here and in
+  `doc/notes/2026-09-29_comparison-dictionaries-design.md`. Recorded as
+  A1-R, OPEN, with one XFAIL probe.
+- LOW a: the B14 depth bound is loud (B14).
+- LOW b: `scripts/lean_keyword_probe.sh` re-executes itself once under
+  `scripts/capped`, so the whole batch is one capped job
+  (`CERB_MEM_MAX`, default 32G). Checked: with `CERB_MEM_MAX=bogus`, the
+  cap wrapper rejects the value and the probe exits 2. The token dump's
+  `2>/dev/null` was dropped.
+- LOW c: the empty-list ascription is a context-free rule (B15).
+- LOW d: the new LemLib root names (`lemChr`, `lemFunctionalBeq`,
+  `lemFunctionalCompare`, `lemIntAsr`, `lemIntLand`, `lemIntLor`,
+  `lemIntLsl`, `lemIntLxor`, `lemNatAsr`, `lemNatLand`, `lemNatLnot`,
+  `lemNatLor`, `lemNatLsl`, `lemNatLsr`, `lemNatLxor`,
+  `lemRequireAbortOnPanic`, `lemSeq`) are in `library/lean_constants`.
+  Test: `test_keywords.lem`, where user definitions of six of these names
+  are renamed and asserted. That list was found by diffing LemLib's
+  top-level declarations against `c2a68e7`. Open, not done: LemLib's
+  OLDER root names (`failwithI`, `fuelExhausted`, `lemIntDiv`, …) are not
+  in the file either. Only `LemFuel` and `lem_if` were. A Lem user
+  definition with one of those names would collide. This gap predates
+  this branch.
+- LOW e: B8 is discriminated again on 4.32.2 (B8, leg 4).
+- Plants for legs 3 and 4 (`make lean-untaken-failure`), verbatim verdict
+  lines. First, the `lemRequireAbortOnPanic` call replaced by `pure ()`
+  in the driver:
+  `FAIL (leg 3a): lemRequireAbortOnPanic with LEAN_ABORT_ON_PANIC unset did not refuse before running: exit 0: PANIC at _private.LemLib.0.failwithIImpl LemLib:239:2: must_be_small: too big`.
+  Second, `@[never_extract]` removed from the generated
+  `LemLib/Assert_extra.lean` `fail`:
+  `FAIL (leg 4): expected 2 PANIC lines (one per reached Assert_extra.fail, B8 never_extract), got 1, exit 0: PANIC at _private.LemLib.0.failwithIImpl LemLib:239:2: fail`.
+  Both were restored, and a rebuild gave `OK (leg 3a)` … `OK (leg 4)`.
+- Suite vacuity hazard (found while gating, not fixed): the suite
+  generates every `test_*.lem`, but it COMPILES (and runs the asserts of)
+  only the modules listed as roots in `tests/comprehensive/lean-test/lakefile.lean`.
+  `test_empty_list_ascription` was generated and green before it was
+  added as a root, so its asserts had not run. It is a root now, and every
+  other `test_*.lem` was checked to be one. Nothing forces this; a check
+  in `lean-compile` that each generated `Test_*` module is a root would.
+- LOW f: comparison at a function type is refused at Lean compile time
+  (under A1).
+- LOW g: A4's wording now covers failure versus non-termination.
+- Parity runner: `expected_failures.txt` gained class (3), an OPEN
+  discrepancy awaiting an operator decision [AGENT, on the orchestrator's
+  instruction to register open discrepancies as XFAIL]. The runner now
+  also treats a Lean panic abort (exit 134 after a `PANIC at` line) on a
+  non-failure probe, where OCaml succeeded, as a real parity
+  disagreement. Any other crash stays red.

@@ -32,7 +32,13 @@ OCaml-rank path). A new shape `CSfn` compares a function-typed position with
 LemLib's `lemFunctionalCompare`/`lemFunctionalBeq`, which fail with OCaml's
 message `compare: functional value`; containers containing functions
 (list/maybe/either/tuple) are recursed into like sibling references. The
-comparison fails exactly when OCaml's would. A shape the derivation cannot
+comparison fails whenever it reaches a closure. That is exactly when
+OCaml's `=` fails, but NOT always when OCaml's `compare` fails: `compare`
+returns 0 for the same closure object (physical equality) and raises only
+for distinct closures. Correction of 2026-09-30 (review finding
+MEDIUM-1): this is the open discrepancy A1-R in
+`doc/lean-backend/2026-09-28_linksem-findings.md`, with the probe
+`p_fn_compare_same_closure`. A shape the derivation cannot
 recurse through keeps a loud residual (fails only if reached), with an
 accurate reason.
 
