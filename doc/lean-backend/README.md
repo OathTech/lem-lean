@@ -93,11 +93,10 @@ v2 delegation or a working systemd user service to enforce a cap. If direct cgro
 fails and `systemd-run` is absent, it warns and runs uncapped. If
 `systemd-run` exists but its user service is unavailable, the command fails. `CERB_MEM_MAX=32G` sets
 the cap on a suitably provisioned machine; it is an upper limit, not a
-minimum RAM requirement. Call LemLib's `lemFailStop` first thing in the `main` of a native client (a
-reached failure then prints its message and exits, whatever the environment;
-without it a Lean panic CONTINUES with a default value), or set
-`LEAN_ABORT_ON_PANIC=1` when executing native
-clients that must stop on a reached panic. This does not prevent Lean
+minimum RAM requirement. Run native clients with
+`LEAN_ABORT_ON_PANIC=1` (without it a reached Lean panic CONTINUES with a
+default value), and call LemLib's `lemRequireAbortOnPanic` first thing in
+their `main`: it refuses to run unless the variable is exactly `1`. This does not prevent Lean
 from eliminating an unused pure failure (see the limitations below).
 
 The [manual](../manual/backend_lean.md) describes the language and a

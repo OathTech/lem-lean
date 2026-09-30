@@ -40,7 +40,7 @@ open Lem_List_extra
 /- removed value specification -/
 
 def  stringFromNat  (n : Nat)  : String :=  
-  lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNatHelper  n  [])
+  lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNatHelper  n  ([] : List (Char)))
 /- removed value specification -/
 
 /- 
@@ -52,7 +52,7 @@ def  stringFromNat  (n : Nat)  : String :=
 /- removed value specification -/
 
 def  stringFromNatural  (n : Nat)  : String :=  
-  lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNaturalHelper  n  [])
+  lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNaturalHelper  n  ([] : List (Char)))
 /- removed value specification -/
 
 def  stringFromInt  (i : Int)  : String :=  

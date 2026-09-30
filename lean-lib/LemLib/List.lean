@@ -169,7 +169,7 @@ def  dest_init  {a : Type}  (l : List a)  : Option ((List a ×a)) :=  match  l w
 
 
  def  findIndices_aux  {a : Type}   (i :Nat) (P : a → Bool) (l : List a)  : List (Nat) := 
-  match  l with  |  [] =>  [] |  x  ::  xs => ( lem_if  P  x then  i  ::  findIndices_aux  (i  +   1)  P  xs  else  findIndices_aux  (i  +   1)  P  xs)
+  match  l with  |  [] =>  ([] : List (Nat)) |  x  ::  xs => ( lem_if  P  x then  i  ::  findIndices_aux  (i  +   1)  P  xs  else  findIndices_aux  (i  +   1)  P  xs)
  
 def  findIndices  {a : Type}  (P : a → Bool) (l : List a)  : List (Nat) :=  findIndices_aux (  0)  P  l
 /- removed value specification -/

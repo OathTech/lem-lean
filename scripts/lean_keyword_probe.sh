@@ -9,8 +9,17 @@
 #   - library/lean_constants (top-level names, renamed by the rename pass).
 # Exit 1 naming the missing tokens; exit 0 when both lists cover the set.
 # Re-run whenever the Lean toolchain moves (new keywords appear).
+# Every lean invocation runs under the repository's cgroup memory cap: the
+# script re-executes itself once through scripts/capped, so the whole batch
+# (including the parallel per-token checks) is ONE capped job
+# (CERB_MEM_MAX, default 32G here). A missing wrapper is a hard error.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ "${LEM_KEYWORD_PROBE_CAPPED:-}" != 1 ]; then
+  [ -x "$ROOT/scripts/capped" ] || { echo "lean_keyword_probe: $ROOT/scripts/capped missing or not executable" >&2; exit 2; }
+  export CERB_MEM_MAX="${CERB_MEM_MAX:-32G}" LEM_KEYWORD_PROBE_CAPPED=1
+  exec "$ROOT/scripts/capped" "$0" "$@"
+fi
 TC="$(cat "$ROOT/lean-lib/lean-toolchain")"
 LEAN="$HOME/.elan/toolchains/$(echo "$TC" | sed 's|/|--|; s|:|---|')/bin/lean"
 [ -x "$LEAN" ] || { echo "lean_keyword_probe: no lean binary for $TC at $LEAN" >&2; exit 2; }
@@ -24,7 +33,7 @@ open Lean Elab Command
     if s.length > 0 && s.front.isAlpha && s.all (fun c => c.isAlphanum || c == '_') then
       IO.println s
 LEAN
-"$LEAN" "$W/Tok.lean" 2>/dev/null | grep -E '^[A-Za-z][A-Za-z0-9_]*$' | sort -u > "$W/toks"
+"$LEAN" "$W/Tok.lean" | grep -E '^[A-Za-z][A-Za-z0-9_]*$' | sort -u > "$W/toks"
 [ -s "$W/toks" ] || { echo "lean_keyword_probe: empty token table (vacuous probe)" >&2; exit 2; }
 mkdir "$W/p"
 while read -r t; do

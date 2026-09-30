@@ -91,7 +91,7 @@ def  bitSeqNot  (b : bitSequence)  : bitSequence := match b with | ( BitSeq  len
 
 /- 
  def  bitSeqBinopAux  (binop : Bool → Bool → Bool) (s1 : Bool) (bl1 : List (Bool)) (s2 : Bool) (bl2 : List (Bool))  : List (Bool) := 
-  match bl1,  bl2 with  | [],  [] =>  [] | b1  ::  bl1',  [] =>  (binop  b1  s2)  ::  bitSeqBinopAux  binop  s1  bl1'  s2  [] | [],  b2  ::  bl2' =>  (binop  s1  b2)  ::  bitSeqBinopAux  binop  s1  []    s2  bl2' | b1  ::  bl1',  b2  ::  bl2' =>  (binop  b1  b2)  ::  bitSeqBinopAux  binop  s1  bl1'  s2  bl2'
+  match bl1,  bl2 with  | [],  [] =>  ([] : List (Bool)) | b1  ::  bl1',  [] =>  (binop  b1  s2)  ::  bitSeqBinopAux  binop  s1  bl1'  s2  ([] : List (Bool)) | [],  b2  ::  bl2' =>  (binop  s1  b2)  ::  bitSeqBinopAux  binop  s1  ([] : List (Bool))    s2  bl2' | b1  ::  bl1',  b2  ::  bl2' =>  (binop  b1  b2)  ::  bitSeqBinopAux  binop  s1  bl1'  s2  bl2'
    -/
 
 def  bitSeqBinop  (binop : Bool → Bool → Bool) (bs1 : bitSequence) (bs2 : bitSequence)  : bitSequence :=  (
@@ -134,9 +134,9 @@ def  integerFromBoolList  (p : (Bool ×List (Bool)))  : Int := match p with |  (
 
 def  boolListFromInteger   (i  : Int)  : (Bool ×List (Bool)) :=  
   lem_if  ( intLtb i (( 0 :  Int))) then 
-    (true, List.map  not  (boolListFromNatural  []  (Int.natAbs  ((Int.neg  (i  + ( 1 :  Int)))))))
+    (true, List.map  not  (boolListFromNatural  ([] : List (Bool))  (Int.natAbs  ((Int.neg  (i  + ( 1 :  Int)))))))
    else 
-    (false, boolListFromNatural  []  (Int.natAbs  i))
+    (false, boolListFromNatural  ([] : List (Bool))  (Int.natAbs  i))
 /- removed value specification -/
 
 def  bitSeqFromInteger  (len_opt : Option (Nat)) (i : Int)  : bitSequence := 

@@ -2651,7 +2651,15 @@ let lean_tuple_inst_demands env (c : const_descr_ref id)
   let cd = c_env_lookup l env.c_env c.descr in
   let out = ref [] in
   let rec walk depth (p : Path.t) (ty : Types.t) =
-    if depth <= 50 && not (lean_tuple_inst_exempt p) then
+    (* Lem's instance resolution terminates (instance constraints are on
+       strictly smaller types), so this bound is a tripwire, never a
+       cut-off: past it the walk refuses loudly instead of silently
+       leaving demands unbound (fail-closed). *)
+    if depth > 50 then
+      raise (Reporting_basic.err_general true l
+        (Stdlib.(^) "Lean backend: internal error — B14 tuple-instance walk exceeded depth 50 at class "
+           (Path.to_string p)));
+    if not (lean_tuple_inst_exempt p) then
       match Types.get_matching_instance env.t_env (p, ty) env.i_env with
       | Some (inst, subst) when not inst.Types.inst_is_default ->
         List.iter (fun (p', tv') ->
@@ -2709,11 +2717,6 @@ let rec lean_seq_trivial (e : exp) : bool =
   | Paren (_, e1, _) | Typed (_, e1, _, _, _) | Begin (_, e1, _) -> lean_seq_trivial e1
   | _ -> false
 
-(* > 0 while emitting a discarded e1: no expected type reaches it, so an
-   empty list literal of a closed Lem type is ascribed (a target rep more
-   general than its Lem type -- Cerberus's `print_debug_pure : ... -> List d
-   -> ...` for Lem's `list domain` -- otherwise leaves `d` unsolved). *)
-let lean_seq_discard_depth = ref 0
 
 (* B15b: a binding pattern that cannot fail to match (variables, wildcards,
    tuples of them): `let x = e1 in e2` with none of its variables used in e2
@@ -6343,10 +6346,7 @@ type pat_style = FunParam | MatchArm
        - Class method constants get explicit @ type application when used bare *)
     (* B15: `lemSeq (fun _ => e1) (fun _ => e2)` *)
     and lem_seq_out inside_instance skips e1 e2 =
-      incr lean_seq_discard_depth;
-      let e1_out = (try exp inside_instance e1
-                    with ex -> decr lean_seq_discard_depth; raise ex) in
-      decr lean_seq_discard_depth;
+      let e1_out = exp inside_instance e1 in
       Output.flat [
         ws skips; from_string "(lemSeq (fun _ => "; e1_out;
         from_string ") (fun _ => "; exp inside_instance e2; from_string "))"
@@ -6537,8 +6537,19 @@ type pat_style = FunParam | MatchArm
                 Output.flat [
                   ws skips; from_string "("; tups; from_string ")"; ws skips'
                 ]
+          (* An empty list literal whose Lem type is closed is ascribed with
+             it, wherever it occurs (review fix 2026-09-30, replacing a rule
+             that applied only inside a discarded `let _ = e1`): a target rep
+             more general than its Lem type (Cerberus's `print_debug_pure :
+             Nat -> List d -> ...` for Lem's `list domain`; `List.length` for
+             a `list bool -> nat`) otherwise leaves the element type unsolved
+             whenever the surrounding term does not determine it -- in a
+             discarded e1, but equally in `let y = f [] in ...`. Ascribing the
+             whole discarded e1 instead does not help (measured: its result
+             type does not mention the unsolved parameter). Elaboration-only:
+             the kernel term is the same `@List.nil T`. *)
           | List (skips, es, skips')
-            when !lean_seq_discard_depth > 0 && Seplist.length es = 0
+            when Seplist.length es = 0
                  && Types.TNset.is_empty (Types.free_vars (Typed_ast.exp_to_typ e)) ->
               Output.flat [
                 ws skips; from_string "([] : "; pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e));

@@ -247,21 +247,31 @@ def lemBoolToProp (b : Bool) : Prop := b = true
 @[implemented_by failwithIImpl, never_extract]
 opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
 
-/- Fail-stop for executables (linksem 2026-09-29, audit item 2). A reached
-   `failwithI` is a Lean `panic!`: by default the runtime prints the message
-   and CONTINUES with the `Inhabited` default ("library-call semantics"), so a
-   program whose model fails can still exit 0 with plausible-looking output,
-   where the OCaml target raises and stops. An executable over generated code
-   should call `lemFailStop` first thing in `main`: every later panic then
-   prints its message and exits (status 1), independently of the caller's
-   environment (`LEAN_ABORT_ON_PANIC=1` remains an alternative, from outside).
-   `lean_internal_set_exit_on_panic` is the runtime entry point Lean's own
-   shell uses (Lean/Shell.lean); it is part of the runtime linked into every
-   executable, so no `import Lean` is needed. -/
-@[extern "lean_internal_set_exit_on_panic"]
-opaque lemSetExitOnPanic (exit : Bool) : BaseIO Unit
-
-def lemFailStop : BaseIO Unit := lemSetExitOnPanic true
+/- Fail-stop for executables (linksem 2026-09-29, audit item 2; D1(b)
+   [USER 2026-09-30] "D1: agree"). A reached `failwithI` is a Lean `panic!`:
+   unless the runtime aborts, it prints the message and CONTINUES with the
+   `Inhabited` default ("library-call semantics"), so a program whose model
+   fails could exit 0 with plausible-looking output where the OCaml target
+   raises and stops. An executable over generated code calls
+   `lemRequireAbortOnPanic` first thing in `main`: it REFUSES to run (an
+   attributed message on stderr, exit 2) unless `LEAN_ABORT_ON_PANIC` is
+   exactly `1`, so every reached failure is a fail-stop. No extern and no
+   unsafe code: it replaces the earlier `lean_internal_set_exit_on_panic`
+   extern (`lemSetExitOnPanic`/`lemFailStop`), removed by that ruling. The
+   pattern is Cerberus's driver refusal (lean_frontend/Main.lean,
+   zero-discrepancy Z2-FL-03), which measured that the runtime aborts when
+   the variable is merely PRESENT ("1", "0" and "" all abort); this check is
+   stricter (the value must be `1`). -/
+def lemRequireAbortOnPanic : IO Unit := do
+  match ← IO.getEnv "LEAN_ABORT_ON_PANIC" with
+  | some "1" => pure ()
+  | v =>
+    let shown := match v with
+      | some x => "\"" ++ x ++ "\""
+      | none => "not set"
+    IO.eprintln ("LemLib lemRequireAbortOnPanic: refused — LEAN_ABORT_ON_PANIC is " ++ shown ++
+      ", not 1: a reached failure (a Lean panic!) would print and then CONTINUE with a default value where the OCaml target stops; run with LEAN_ABORT_ON_PANIC=1")
+    IO.Process.exit 2
 
 /- Sequencing (linksem B15): Lem's `let _ = e1 in e2` evaluates e1 for its
    effect (a diagnostic, or a failure that must stop the program, as the
@@ -271,7 +281,14 @@ def lemFailStop : BaseIO Unit := lemSetExitOnPanic true
    implementation forces `e1` first by storing its value in a fresh IO
    reference: a `BaseIO` effect the compiler must keep. (A pure "use" is not
    enough: an `if ptrAddrUnsafe x == 1 then b () else b ()` was simplified
-   away, and arity reduction then dropped `a` altogether.) -/
+   away, and arity reduction then dropped `a` altogether.)
+   BOUNDARY (D1(a) [USER 2026-09-30] "D1: agree"): `lemSeqImpl` is on the
+   native-seam boundary list as TEMPORARY. Kernel-vs-runtime gap: `lemSeq`
+   is a transparent def, logically `b ()`; at run time it also forces `a`.
+   It is an exception, by that ruling, to the L2 "DO NOT REINTRODUCE an
+   unsafe effect-projection" note above. Named mover: the failure-monad
+   translation (lem-lean doc/lean-backend/TODO.md), which makes strictness
+   part of the semantics and deletes this seam. -/
 @[never_extract, noinline] private unsafe def lemSeqImpl {α β : Type} (a : Unit → α) (b : Unit → β) : β :=
   match unsafeBaseIO (do
       let r ← IO.mkRef (none : Option α)
@@ -285,7 +302,11 @@ def lemFailStop : BaseIO Unit := lemSetExitOnPanic true
    value"` when they REACH a closure, and only then (`GOT [] = GOT []`
    is fine). Backend-derived structural comparisons of types with
    function-typed fields call these at the function-typed positions, so a
-   comparison fails exactly when OCaml's would. -/
+   comparison fails whenever it reaches a closure: exactly OCaml's `=`, but
+   NOT OCaml's `compare`, which returns 0 for the same closure object
+   (physical equality). That is the open discrepancy A1-R
+   (doc/lean-backend/2026-09-28_linksem-findings.md, probe
+   p_fn_compare_same_closure). -/
 @[never_extract] def lemFunctionalCompare {α β : Type} (_ _ : α → β) : Ordering :=
   failwithI "compare: functional value"
 @[never_extract] def lemFunctionalBeq {α β : Type} (_ _ : α → β) : Bool :=

@@ -305,6 +305,10 @@ lean-panic:
 # LEAN_ABORT_ON_PANIC=1: panic messages are off during init); 4.32 does it
 # lazily, so since the 4.32.2 move this target is the GUARD of that toolchain
 # property (the per-module `extract_closed false` workaround is retired).
+# Leg 1 no longer discriminates B8 (`never_extract` on nullary polymorphic
+# definitions) on 4.32.2; leg 4 does: without the attribute the lazily
+# initialised closed term is cached and a second reached failure is silent.
+# Leg 3 pins LemLib's lemRequireAbortOnPanic (D1(b) [USER 2026-09-30]).
 lean-untaken-failure:
 	@echo "=== Untaken failure branches are not evaluated at module init ==="
 	@cd lean-test && $(LAKE) build test-untaken-failure > /dev/null
@@ -317,9 +321,22 @@ lean-untaken-failure:
 		echo "  FAIL (leg 2): exit $$st without the failure message: $$out"; exit 1; \
 	else echo "  OK (leg 2): the taken branch fail-stops with its message"; fi
 	@out=$$(cd lean-test && env -u LEAN_ABORT_ON_PANIC ./.lake/build/bin/test-untaken-failure failstop 2>&1); st=$$?; \
-	if [ $$st -eq 0 ] || ! echo "$$out" | grep -q "must_be_small: too big" || echo "$$out" | grep -q "untaken:"; then \
-		echo "  FAIL (leg 3): lemFailStop without LEAN_ABORT_ON_PANIC did not stop: exit $$st: $$out"; exit 1; \
-	else echo "  OK (leg 3): lemFailStop stops at the failure without LEAN_ABORT_ON_PANIC (exit $$st)"; fi
+	if [ $$st -eq 0 ] || ! echo "$$out" | grep -q "lemRequireAbortOnPanic: refused" || echo "$$out" | grep -q "untaken:\|must_be_small"; then \
+		echo "  FAIL (leg 3a): lemRequireAbortOnPanic with LEAN_ABORT_ON_PANIC unset did not refuse before running: exit $$st: $$out"; exit 1; \
+	else echo "  OK (leg 3a): lemRequireAbortOnPanic refuses with LEAN_ABORT_ON_PANIC unset (exit $$st)"; fi
+	@out=$$(cd lean-test && LEAN_ABORT_ON_PANIC=0 ./.lake/build/bin/test-untaken-failure failstop 2>&1); st=$$?; \
+	if [ $$st -eq 0 ] || ! echo "$$out" | grep -q "lemRequireAbortOnPanic: refused" || echo "$$out" | grep -q "untaken:\|must_be_small"; then \
+		echo "  FAIL (leg 3b): lemRequireAbortOnPanic with LEAN_ABORT_ON_PANIC=0 did not refuse: exit $$st: $$out"; exit 1; \
+	else echo "  OK (leg 3b): lemRequireAbortOnPanic refuses LEAN_ABORT_ON_PANIC=0 (exit $$st)"; fi
+	@out=$$(cd lean-test && LEAN_ABORT_ON_PANIC=1 ./.lake/build/bin/test-untaken-failure failstop 2>&1); st=$$?; \
+	if [ $$st -eq 0 ] || ! echo "$$out" | grep -q "must_be_small: too big" || echo "$$out" | grep -q "untaken:\|refused"; then \
+		echo "  FAIL (leg 3c): with LEAN_ABORT_ON_PANIC=1 the check did not pass through to a fail-stop: exit $$st: $$out"; exit 1; \
+	else echo "  OK (leg 3c): with LEAN_ABORT_ON_PANIC=1 the check passes and the failure fail-stops (exit $$st)"; fi
+	@out=$$(cd lean-test && env -u LEAN_ABORT_ON_PANIC ./.lake/build/bin/test-untaken-failure twice 2>&1); st=$$?; \
+	n=$$(echo "$$out" | grep -c "^PANIC at .*: fail$$"); \
+	if [ $$st -ne 0 ] || [ "$$n" -ne 2 ] || ! echo "$$out" | grep -q "twice-2"; then \
+		echo "  FAIL (leg 4): expected 2 PANIC lines (one per reached Assert_extra.fail, B8 never_extract), got $$n, exit $$st: $$out"; exit 1; \
+	else echo "  OK (leg 4): each reached Assert_extra.fail panics (2 of 2; B8 never_extract)"; fi
 
 # Negative probes: each negative/neg_*.lem MUST be rejected, and with the
 # error fragment declared in its first-line "(* EXPECT: ... *)" header —

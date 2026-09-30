@@ -154,7 +154,9 @@ Lem programs have failure sites (incomplete matches, `failwith`) whose Lean tran
 - `class LemFuel where fuel : Nat` — the ambient fuel (see *Fuel*); a class with no instance anywhere in the library or in generated code.
 - `supplySplit (s : Nat) : Nat × Nat := (s, s + 1)` — a plain definition, the draw primitive of the supply lifting.
 
-These two `opaque`/`implemented_by` pairs (`failwithIImpl`, `fuelExhaustedWithImpl`) are the only ones in the library; nothing else in `LemLib` is `unsafe`. A harness that runs generated code with `LEAN_ABORT_ON_PANIC=1` fail-stops at the first reached panic (the `tests/comprehensive` phase `lean-panic` pins both behaviours: message-then-default without the variable, abort with it).
+- `lemSeq (a : Unit → α) (b : Unit → β) : β` — the emission of Lem's discarded `let _ = e1 in e2` (and of a `let` whose variables are unused): a transparent definition, logically `b ()`, whose compiled implementation also forces `a ()` first, as OCaml's strict `let` does.
+
+The library's native seams (an `@[implemented_by]` body that differs from the logical definition) are exactly three: `failwithIImpl` and `fuelExhaustedWithImpl` (permanent), and `lemSeqImpl`, on the boundary list as TEMPORARY (ruling D1(a), 2026-09-30; its named mover is the failure-monad translation, see `doc/lean-backend/TODO.md`). Nothing else in `LemLib` is `unsafe`, and `LemLib` has no `@[extern]`. A harness that runs generated code with `LEAN_ABORT_ON_PANIC=1` fail-stops at the first reached panic (the `tests/comprehensive` phase `lean-panic` pins both behaviours: message-then-default without the variable, abort with it). A native client should call `lemRequireAbortOnPanic : IO Unit` first thing in `main`: it refuses to run (an attributed message, exit 2) unless `LEAN_ABORT_ON_PANIC` is exactly `1` (`lean-untaken-failure` leg 3).
 
 ### Target Representations and Ground-Typed Heads
 

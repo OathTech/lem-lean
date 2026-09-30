@@ -232,3 +232,20 @@ let repeat_top = matches 1
 
 assert kw_b5_locals_ok : (kw_b5_locals [1; 2; 3] = 7)
 assert kw_b5_top_ok : (repeat_top = 101)
+
+(* ---- review fix 2026-09-30 (LOW d): LemLib root names new on arc/linksem
+   are in library/lean_constants, so user definitions of the same names are
+   renamed instead of colliding with LemLib (the LP3 `natLand` class of
+   error). A backend-emitted lemSeq (the discarded `let _ =`) sits in the
+   same module as the user's `lemSeq`. *)
+let lemSeq (x : nat) = x + 1
+let lemChr (x : nat) = x * 2
+let lemFunctionalCompare (x : nat) = x + 3
+let lemIntLand (x : nat) = x + 4
+let lemNatLsl (x : nat) = x + 5
+let lemRequireAbortOnPanic (x : nat) = x + 6
+let kw_lowd_use (n : nat) =
+  let _ = lemChr n in
+  lemSeq n + lemChr n + lemFunctionalCompare n + lemIntLand n + lemNatLsl n + lemRequireAbortOnPanic n
+
+assert kw_lowd_ok : (kw_lowd_use 1 = 2 + 2 + 4 + 5 + 6 + 7)

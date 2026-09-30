@@ -68,6 +68,7 @@ lean_lib LemComprehensiveTest where
     `Test_indreln, `Test_indreln_auxiliary,
     `Test_instances, `Test_instances_auxiliary,
     `Test_keywords, `Test_keywords_auxiliary,
+    `Test_empty_list_ascription, `Test_empty_list_ascription_auxiliary,  -- empty list literals of closed type ascribed everywhere (review fix 2026-09-30, LOW c)
     `Test_long_if_chain, `Test_long_if_chain_auxiliary,  -- >96-arm else-if chains split into continuations (linksem B3)
     `Test_nested_abbrev, `Test_nested_abbrev_auxiliary,  -- abbreviations expanded in nested ctor args (linksem B4)
     `Test_lambda_let, `Test_lambda_let_auxiliary,  -- local lambda lets annotated (linksem B11)
