@@ -1,7 +1,8 @@
 # Library parity coverage: record, scoped to arc/linksem (2026-09-30)
 
-This record covers the Lem standard-library parity fixes that are on the
-branch `arc/linksem`: LP3, LP4, LP6, LP7 and LP8 (commit `66e3cf8`). Their
+This record covers the Lem standard-library parity changes that are on the
+branch `arc/linksem`: the fixes LP3, LP6, LP7 and LP8, and LP4, which is
+implemented but whose acceptance is OPEN (commit `66e3cf8`). Their
 regression probes are `p_lib_word_int_nat`, `p_lib_machine_word` and
 `f_lib_chr_range` in `tests/comprehensive/parity/`. It also records what
 those probes exclude and why, and the rulings those exclusions need.
@@ -31,7 +32,7 @@ describes what this branch contains. Each claim was re-checked against
 this branch. The coverage numbers are NOT claimed for this branch: its
 library probes are the two above plus `f_lib_chr_range`.
 
-## 1. Fixes on this branch (commit `66e3cf8`)
+## 1. Changes on this branch (commit `66e3cf8`)
 
 ### LP3: `natLand`/`natLor`/… were ambiguous on Lean (FIXED)
 
@@ -45,7 +46,7 @@ Regression: `p_lib_word_int_nat` calls the Word functions by name. The
 names are now also in `library/lean_constants` (review fix 2026-09-30,
 LOW d; see the findings record).
 
-### LP4: int/nat bitwise were 31-bit on Lean (FIXED; ruling D2 CONDITION NOT MET)
+### LP4: int/nat bitwise were 31-bit on Lean (implemented; acceptance OPEN: D2 condition not met)
 
 `library/word.lem` gives `intLand`, `intLor`, `intLxor`, `intLsl`, `intAsr`
 and `natLand`, `natLor`, `natLxor`, `natLsl`, `natAsr` OCaml reps (native
@@ -53,7 +54,8 @@ and `natLand`, `natLor`, `natLxor`, `natLsl`, `natAsr` OCaml reps (native
 definitions through a 31-bit `bitSequence`
 (`bitSeqFromInt = bitSeqFromInteger (Just 31)`). The two targets disagreed
 from 2^30 on (from the `8ccbe40` record: `intLsl 1 30` gave OCaml
-`1073741824` and Lean `0`). [AGENT] fix: the Lean reps are UNBOUNDED two's
+`1073741824` and Lean `0`). [AGENT] change, implemented and awaiting
+acceptance: the Lean reps are UNBOUNDED two's
 complement (LemLib `lemIntLand`/`lemIntLor`/`lemIntLxor`/`lemIntLsl`/
 `lemIntAsr` over `Int`, `lemNat*` over `Nat`). `intFromBitSeq` and
 `bitSeqFromInt` keep Lem's 31-bit definition on every target. Regression:
@@ -72,12 +74,31 @@ versions compute unbounded (big-integer) results, not 63-bit wrapping. The
 proof asked for is a parity probe with operands beyond 2^63 showing that
 the two targets agree, or a verbatim report of any disagreement.
 
-**Measurement: the condition is NOT met.** Probe
-`tests/comprehensive/parity/probes/p_word_bitwise_wide.lem`. Lem `nat` and
-`int` are native OCaml `int` (`library/num.lem:117`), and OCaml cannot
-write a literal at or above 2^62, so the wide operands are computed. The
-parity runner's diff, verbatim (`<` is the OCaml reference, `>` is Lean;
-the three control rows inside 62 bits agree):
+**Measurement: the condition is NOT met.** Lem `nat` and `int` are native
+OCaml `int` (`library/num.lem:117`), and OCaml cannot write a literal at or
+above 2^62, so the wide operands are computed. Two probes, split in review
+round 2 so that each measures one thing:
+
+- `p_word_bitwise_wide` isolates the bitwise operations. Every operand is
+  a literal inside 62 bits or the result of an operation under test
+  (`lsl`), with no arithmetic. Registered class `open`.
+- `p_word_bitwise_wide_mul` holds the rows whose wide operands are built
+  by multiplication. The multiplication itself wraps on OCaml
+  (`p61*4 = 0`), which is the separately ruled X3/N4 class, so these rows
+  do not isolate the bitwise operations. Registered class `ruled` (X3/N4).
+  The X3 record says the arithmetic wrap has "no runner row by design".
+  This row exists [AGENT] because since review round 2 a registered
+  probe's Lean side is pinned exactly, so the row pins the known
+  difference instead of absorbing new ones.
+
+The parity runner's diff for the round-1 version of the probe, which
+mixed both kinds of row, verbatim (`<` is the OCaml reference, `>` is
+Lean; the three control rows inside 62 bits agree). The first nine
+differing rows are bitwise-only and are unchanged in the split
+`p_word_bitwise_wide`, which replaces the multiplication rows with
+`lsl`-built operands (for example OCaml `intLor (intLsl 1 63) 1 = 1`
+against Lean `9223372036854775809`; pins `expected/p_word_bitwise_wide.out`
+and `.lean.out`):
 
 ```
 < intLsl 1 62 = -4611686018427387904
@@ -115,7 +136,8 @@ the three control rows inside 62 bits agree):
 > natLxor (n61*8) 1 = 18446744073709551617
 ```
 
-So OCaml's reps are 63-bit and wrapping. OCaml also yields a NEGATIVE
+So OCaml's reps are 63-bit and wrapping, and this holds for the bitwise
+operations in isolation, not only through wrapped arithmetic. OCaml also yields a NEGATIVE
 `nat` (`natLsl 1 62`), and `intLsl 1 64 = 1`: OCaml's `lsl` by at least the
 word size is unspecified. The disagreement is the 63-bit class ruled on
 [USER 2026-09-03], but D2 was given subject to the opposite finding. So
@@ -239,10 +261,19 @@ semantics, and send them upstream. LP5: keep Lean's rendering. These are
 the operator's decisions. Until they are made, these classes are
 unprobed, known differences, listed here so they are not silent.
 
-Also noticed, and not probed: `transform.lem`'s `lnot` at `nat` is LemLib
-`lemNatLnot`. It panics on Lean ("bitwise NOT is not defined for Nat"),
-where OCaml's `lnot` returns a negative `int`, typed `nat`. Both
-behaviours are defects of a `nat` complement. Recorded here only.
+**`lnot` at `nat` is not a reachable discrepancy (correction, review round
+2).** The round-1 version of this record said that OCaml's `lnot` at `nat`
+returns a negative `int` where LemLib's `lemNatLnot` panics. That claim
+was not measured, and it is wrong. Measured: a Lem program cannot apply
+`lnot` to a `nat` on any target, because the Word library has no
+`WordNot nat` instance. `let v (n : nat) : nat = lnot n` is refused by the
+type checker with "unsatisfied type class constraint: (Word.WordNot nat)".
+The only Lean binding of `lemNatLnot` is `library/transform.lem`, which
+does not typecheck ("Type error: unbound variable: find_non_pure") and is
+not in the library build, and which has no OCaml rep for `lnot`. So
+`lemNatLnot` is dead code. The refusal is pinned by the negative test
+`tests/comprehensive/negative/neg_lnot_nat.lem`, so the question comes back
+if an instance ever appears. No parity probe is possible.
 
 ## 3. Decisions needed (this branch)
 
@@ -255,3 +286,7 @@ behaviours are defects of a `nat` complement. Recorded here only.
    mirror OCaml?
 4. Whether OM1–OM5, LP5 and the 31-bit prover definitions (LP4) go into
    the upstream Lem report bundle.
+5. **`lnot` at `nat`** (§2): not a discrepancy today (unreachable on
+   every target, pinned by `neg_lnot_nat`). Decision wanted only on
+   housekeeping: delete the dead `lemNatLnot` and the `transform.lem` Lean
+   reps, or keep them.

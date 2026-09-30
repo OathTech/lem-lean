@@ -244,7 +244,10 @@ instances are componentwise / lexicographic, so the overlap computes the
 same result). The walk over instance constraints is bounded at depth 50,
 and past the bound it refuses loudly (review fix 2026-09-30, LOW a). It
 used to stop silently, which would have left demands unbound. Lem's
-resolution terminates, so the bound is a tripwire. The supply-threaded paths refuse such a use (loud). Test:
+constraints are normally on component types, so real chains are short.
+The bound is a bound, not a proof: a legitimate chain deeper than 50 would
+also be refused, loudly (no case near it is known). Since review round 2,
+the error carries the source position of the constant use. The supply-threaded paths refuse such a use (loud). Test:
 `test_tuple_inst_arity.lem` (7 asserts; with the bindings stripped, 3
 fail: nested, list, generic). LemLib: one instance renamed
 (`Lem_Show` pair). linksem: instance names only (no confusable use in the
@@ -287,7 +290,23 @@ inside a `match`). LemLib's generated modules gain the ascriptions (List,
 String_extra, Word). Other nullary polymorphic values (`Nothing`, empty
 sets and maps) passed to an over-general rep are exposed to the same
 elaboration failure. That failure is loud (a Lean build error), and none
-is known in Cerberus or linksem. The Cerberus tree was NOT regenerated
+is known in Cerberus or linksem.
+
+Residual, precisely (review round 2, LOW-1): the rule covers only CLOSED
+element types. An empty list whose Lem type mentions the enclosing
+definition's type variables (`list 'a` inside
+`let bound_use (x : 'a) = ...`), passed to a rep more general than its Lem
+type in a position that does not fix the element type, still fails to
+elaborate, loudly. Extending the rule to such types is not sound as
+emitted today, so it was not done. The backend renames a PARAMETER that
+collides with a type variable (`{a : Type} (a1 : Nat)`) but not a LOCAL
+binder. In `let shadow2 (xs : list 'a) : nat = let a = 3 in a +
+List.length (match xs with [] -> [] | y :: ys -> ys end)`, the local
+`a := 3` shadows the type binder `a`. Hand-ascribing that `[]` as
+`([] : List a)` makes a definition that compiles today fail ("failed to
+synthesize instance of type class OfNat (Type ?u.16) 3", measured).
+Extending the rule would first need local binders renamed away from the
+type variables in scope. The Cerberus tree was NOT regenerated
 with this rule; the re-pin must check it. Tests: parity
 failure probes `f_let_seq.lem`, `f_let_unit.lem` (OCaml and Lean both fail
 with the discarded e1's message; pre-fix the Lean binary printed the next
@@ -548,7 +567,8 @@ and is not the operator's words.
   `@[extern]`. Checked on this branch: a grep for `@[extern` and
   `implemented_by` over `lean-lib/**/*.lean` finds exactly these three
   attribute uses, and nothing else outside comments.
-- **LP4's semantics conflict** (library-parity record LP4): Lean's reps
+- **LP4's semantics conflict** (library-parity record LP4; implemented,
+  acceptance OPEN: the D2 condition was not met): Lean's reps
   are unbounded, OCaml's are 63-bit and wrap, and HOL/Isabelle/Coq use
   Lem's 31-bit definition. **Ruling D2** accepted LP4 SUBJECT TO a
   measurement that the OCaml reps are unbounded. The measurement
@@ -613,3 +633,84 @@ Two independent reviews of `arc/linksem` at `66e3cf8`. The worker is
   also treats a Lean panic abort (exit 134 after a `PANIC at` line) on a
   non-failure probe, where OCaml succeeded, as a real parity
   disagreement. Any other crash stays red.
+
+### Migration note: `lemFailStop` removed (API break)
+
+`lemFailStop` and `lemSetExitOnPanic` are gone from LemLib (ruling D1(b)).
+An external client that called them no longer builds; linksem's Lean
+drivers `MainElf.lean` and `MainLink.lean` are known to. Migration:
+replace the call `lemFailStop` (a `BaseIO Unit`) with
+`lemRequireAbortOnPanic` (an `IO Unit`), still first in `main`, and run
+the executable with `LEAN_ABORT_ON_PANIC=1`. Without the variable the
+program now REFUSES to start (exit 2) instead of switching exit-on-panic
+on by itself. lem-lean has no changelog file; this note, and a pointer in
+`doc/lean-backend/README.md`, carry the break.
+
+## Review round 2 (2026-09-30)
+
+An independent delta review of `66e3cf8..2ea67cf`. The worker is [AGENT].
+
+- MEDIUM-1 (confirmed by the reviewer's plants): a registered probe
+  absorbed ANY new disagreement, because the Lean side was never pinned.
+  Now every registered probe has `expected/<probe>.lean.out`: the Lean exit
+  status, stdout and (failure probes) stderr, with backtrace lines and
+  the shell's "Aborted (core dumped)" removed and PANIC positions masked.
+  XFAIL requires an exact match; any other difference is
+  "FAIL: registered probe's disagreement CHANGED". Rebaselining is explicit
+  (`REBASELINE_XFAIL=1`). Plants, all red:
+  - A: `lemIntLsl` planted wrong at n = 61, so the agreeing control row of
+    `p_word_bitwise_wide` changes on the Lean side:
+    `< control intLsl 1 61 = 2305843009213693952` / `> control intLsl 1 61 = 0`.
+  - B: `lemFunctionalCompare`'s message planted, an unrelated panic in
+    `p_fn_compare_same_closure`:
+    `< PANIC at _private.LemLib.0.failwithIImpl LemLib:<pos>: compare: functional value` /
+    `> PANIC at _private.LemLib.0.failwithIImpl LemLib:<pos>: PLANTED unrelated panic`.
+  - C (worker's own): the untaken-branch text of `f_let_float_branch`
+    changed; OCaml's prefix is unaffected: `< after (must not print): 0` /
+    `> after (PLANTED): 0`.
+  - D: `test_failure_admission.sh` (planted compiler failure) stays red:
+    "OK (registered probe with compiler failure is red, not XFAIL)".
+  - E: a registered probe that passes (`p_hello`, with a Lean pin):
+    "FAIL: EXPECTED FAILURE NOW PASSES".
+  All planted files were restored.
+- LOW-4: `expected_failures.txt` entries are now `<probe>,<class>,<reason>`
+  with class `fix`, `ruled` or `open`. Before any probe runs, the runner
+  rejects a malformed line, an unknown class, a duplicate, an orphan entry
+  (no such probe), a registered probe without a Lean pin, and an orphan Lean
+  pin. The unused `xfail_status` is replaced by counters and a summary line
+  (`parity: N probes: k OK, x XFAIL (registered, Lean side pinned), f FAIL`).
+  Plants, all refused: unknown class (`line 25: unknown class "maybe"`),
+  orphan entry, missing Lean pin, orphan Lean pin, malformed line,
+  duplicate (`line 28: duplicate entry for p_mword_width`), and a crashing
+  validator (a fake `awk` exiting 3: "the registry validator itself
+  failed (awk exit 3) — refusing to run"). The plants found a real bug in
+  the first version: the awk validator used the gawk builtin name `exp`,
+  crashed, and its failure was ignored, so an invalid registry passed.
+  The validator's exit status is now checked.
+- MEDIUM-2: LP4 is relabelled "implemented; acceptance OPEN (D2 condition
+  not met)" in both records and in the LemLib/LemLibTest comments.
+  `p_word_bitwise_wide` now isolates the bitwise operations (operands are
+  literals or `lsl` results), and the multiplication-built rows are
+  `p_word_bitwise_wide_mul` (class `ruled`, X3/N4).
+- LOW-3: `lnot` at `nat` was a false claim of the round-1 record (not
+  measured). It is unreachable on every target and pinned by
+  `negative/neg_lnot_nat.lem`; library-parity record §2 and §3 item 5.
+- LOW-1: the residual of the empty-list rule is documented under B15, with
+  the measured reason it is not extended.
+- LOW-2: the depth-bound comment is corrected (B14 above), and the error
+  carries the constant use's position. Plant (bound 0):
+  `File "test_tuple_inst_arity.lem", line 31, character 18 to line 31,
+  character 32 / Error: Lean backend: internal error — B14 tuple-instance
+  walk exceeded depth 50 at class Test_tuple_inst_arity.Describe`.
+- LOW-5: TODO row 24 was detached from its table by a blank line. Rows 7,
+  8, 9, 12 and 15 had the same pre-existing defect and are fixed too.
+- LOW-6: the migration note above.
+- Nits: `lemRequireAbortOnPanic`'s refusal now says "would CONTINUE" only
+  when the variable is unset. For a set value other than `1`, it says the
+  runtime would abort but the check requires exactly `1`. Measured on
+  4.32.2 with `test-failwith-panic`: `LEAN_ABORT_ON_PANIC` set to `1`, `0`
+  or the empty string exits 134, and unset exits 0. The keyword
+  probe no longer trusts its re-exec marker: under the marker it checks
+  for a numeric `memory.max` on its own cgroup unless `CERB_MEM_MAX=none`.
+  With the marker forged by hand it refuses with "no memory cap in force
+  (… memory.max='max')", exit 2.

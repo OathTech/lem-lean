@@ -96,7 +96,9 @@ the cap on a suitably provisioned machine; it is an upper limit, not a
 minimum RAM requirement. Run native clients with
 `LEAN_ABORT_ON_PANIC=1` (without it a reached Lean panic CONTINUES with a
 default value), and call LemLib's `lemRequireAbortOnPanic` first thing in
-their `main`: it refuses to run unless the variable is exactly `1`. This does not prevent Lean
+their `main`: it refuses to run unless the variable is exactly `1`. (It
+replaces `lemFailStop`, removed on 2026-09-30: an API break for existing
+drivers; migration in `2026-09-28_linksem-findings.md`, "Migration note".) This does not prevent Lean
 from eliminating an unused pure failure (see the limitations below).
 
 The [manual](../manual/backend_lean.md) describes the language and a
