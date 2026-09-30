@@ -579,43 +579,48 @@ instance   : WordNot Int where
 
 /- removed value specification -/
 
-def  intLor  (i1 : Int) (i2 : Int)  : Int :=  defaultLor  intFromBitSeq  bitSeqFromInt  i1  i2
+/- 
+def  intLor  (i1 : Int) (i2 : Int)  : Int :=  defaultLor  intFromBitSeq  bitSeqFromInt  i1  i2 -/
 
 instance   : WordOr Int where
  
-    inclusive_or   :=  intLor
+    inclusive_or   :=  lemIntLor
 
 /- removed value specification -/
 
-def  intLxor  (i1 : Int) (i2 : Int)  : Int :=  defaultLxor  intFromBitSeq  bitSeqFromInt  i1  i2
+/- 
+def  intLxor  (i1 : Int) (i2 : Int)  : Int :=  defaultLxor  intFromBitSeq  bitSeqFromInt  i1  i2 -/
 
 instance   : WordXor Int where
  
-    exclusive_or   :=  intLxor
+    exclusive_or   :=  lemIntLxor
 
 /- removed value specification -/
 
-def  intLand  (i1 : Int) (i2 : Int)  : Int :=  defaultLand  intFromBitSeq  bitSeqFromInt  i1  i2
+/- 
+def  intLand  (i1 : Int) (i2 : Int)  : Int :=  defaultLand  intFromBitSeq  bitSeqFromInt  i1  i2 -/
 
 instance   : WordAnd Int where
  
-    conjunction   :=  intLand
+    conjunction   :=  lemIntLand
 
 /- removed value specification -/
 
-def  intLsl  (i : Int) (n : Nat)  : Int :=  defaultLsl  intFromBitSeq  bitSeqFromInt  i  n
+/- 
+def  intLsl  (i : Int) (n : Nat)  : Int :=  defaultLsl  intFromBitSeq  bitSeqFromInt  i  n -/
 
 instance   : WordLsl Int where
  
-    left_shift   :=  intLsl
+    left_shift   :=  lemIntLsl
 
 /- removed value specification -/
 
-def  intAsr  (i : Int) (n : Nat)  : Int :=  defaultAsr  intFromBitSeq  bitSeqFromInt  i  n
+/- 
+def  intAsr  (i : Int) (n : Nat)  : Int :=  defaultAsr  intFromBitSeq  bitSeqFromInt  i  n -/
 
 instance    : WordAsr Int where
  
-    arithmetic_right_shift   :=  intAsr
+    arithmetic_right_shift   :=  lemIntAsr
 
 /- removed value specification -/
 
@@ -676,43 +681,48 @@ def  natFromBitSeq  (bs : bitSequence)  : Nat :=  lemNatFromNatural  (naturalFro
 def  bitSeqFromNat  (i : Nat)  : bitSequence :=  bitSeqFromNatural  (some (  31))  (id  i)
 /- removed value specification -/
 
-def  natLor  (i1 : Nat) (i2 : Nat)  : Nat :=  defaultLor  natFromBitSeq  bitSeqFromNat  i1  i2
+/- 
+def  natLor  (i1 : Nat) (i2 : Nat)  : Nat :=  defaultLor  natFromBitSeq  bitSeqFromNat  i1  i2 -/
 
 instance   : WordOr Nat where
  
-    inclusive_or   :=  natLor
+    inclusive_or   :=  lemNatLor
 
 /- removed value specification -/
 
-def  natLxor  (i1 : Nat) (i2 : Nat)  : Nat :=  defaultLxor  natFromBitSeq  bitSeqFromNat  i1  i2
+/- 
+def  natLxor  (i1 : Nat) (i2 : Nat)  : Nat :=  defaultLxor  natFromBitSeq  bitSeqFromNat  i1  i2 -/
 
 instance   : WordXor Nat where
  
-    exclusive_or   :=  natLxor
+    exclusive_or   :=  lemNatLxor
 
 /- removed value specification -/
 
-def  natLand  (i1 : Nat) (i2 : Nat)  : Nat :=  defaultLand  natFromBitSeq  bitSeqFromNat  i1  i2
+/- 
+def  natLand  (i1 : Nat) (i2 : Nat)  : Nat :=  defaultLand  natFromBitSeq  bitSeqFromNat  i1  i2 -/
 
 instance   : WordAnd Nat where
  
-    conjunction   :=  natLand
+    conjunction   :=  lemNatLand
 
 /- removed value specification -/
 
-def  natLsl  (i : Nat) (n : Nat)  : Nat :=  defaultLsl  natFromBitSeq  bitSeqFromNat  i  n
+/- 
+def  natLsl  (i : Nat) (n : Nat)  : Nat :=  defaultLsl  natFromBitSeq  bitSeqFromNat  i  n -/
 
 instance   : WordLsl Nat where
  
-    left_shift   :=  natLsl
+    left_shift   :=  lemNatLsl
 
 /- removed value specification -/
 
-def  natAsr  (i : Nat) (n : Nat)  : Nat :=  defaultAsr  natFromBitSeq  bitSeqFromNat  i  n
+/- 
+def  natAsr  (i : Nat) (n : Nat)  : Nat :=  defaultAsr  natFromBitSeq  bitSeqFromNat  i  n -/
 
 instance    : WordAsr Nat where
  
-    arithmetic_right_shift   :=  natAsr
+    arithmetic_right_shift   :=  lemNatAsr
 
 end Lem_Word
 

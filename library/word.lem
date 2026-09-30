@@ -852,6 +852,8 @@ assert integer_bittest24 : ((~(27 : integer)) asr 2 = ~(7))
    it should be used very carefully and only for operations that don't depend on the
    bitwidth of int *)
 
+(* Lean reps: unbounded two's complement, LemLib lemInt* (finding LP4,
+   doc/lean-backend/2026-09-30_library-parity-coverage.md) *)
 val intFromBitSeq : bitSequence -> int
 let intFromBitSeq bs = intFromInteger (integerFromBitSeq (resizeBitSeq (Just 31) bs))
 
@@ -871,6 +873,7 @@ end
 val intLor  : int -> int -> int
 let intLor i1 i2 = defaultLor intFromBitSeq bitSeqFromInt i1 i2
 declare ocaml target_rep function intLor = infix `lor`
+declare lean  target_rep function intLor = `lemIntLor`
 
 instance (WordOr int) 
   let (lor) = intLor
@@ -879,6 +882,7 @@ end
 val intLxor : int -> int -> int
 let intLxor i1 i2 = defaultLxor intFromBitSeq bitSeqFromInt i1 i2
 declare ocaml target_rep function intLxor = infix `lxor`
+declare lean  target_rep function intLxor = `lemIntLxor`
 
 instance (WordXor int) 
   let (lxor) = intLxor
@@ -887,6 +891,7 @@ end
 val intLand : int -> int -> int
 let intLand i1 i2 = defaultLand intFromBitSeq bitSeqFromInt i1 i2
 declare ocaml target_rep function intLand = infix `land`
+declare lean  target_rep function intLand = `lemIntLand`
 
 instance (WordAnd int) 
   let (land) = intLand
@@ -895,6 +900,7 @@ end
 val intLsl  : int -> nat -> int
 let intLsl i n = defaultLsl intFromBitSeq bitSeqFromInt i n
 declare ocaml target_rep function intLsl = infix `lsl`
+declare lean  target_rep function intLsl = `lemIntLsl`
 
 instance (WordLsl int) 
   let (lsl) = intLsl
@@ -903,6 +909,7 @@ end
 val intAsr  : int -> nat -> int
 let intAsr i n = defaultAsr intFromBitSeq bitSeqFromInt i n
 declare ocaml target_rep function intAsr = infix `asr`
+declare lean  target_rep function intAsr = `lemIntAsr`
 
 instance  (WordAsr int) 
   let (asr) = intAsr
@@ -1020,6 +1027,7 @@ assert natural_bittest20 : ((27 : natural) asr 3 = 3)
    it should be used very carefully and only for operations that don't depend on the
    bitwidth of nat *)
 
+(* Lean reps: unbounded, LemLib lemNat* (finding LP4) *)
 val natFromBitSeq : bitSequence -> nat
 let natFromBitSeq bs = natFromNatural (naturalFromBitSeq (resizeBitSeq (Just 31) bs))
 
@@ -1031,6 +1039,7 @@ let bitSeqFromNat i = bitSeqFromNatural (Just 31) (naturalFromNat i)
 val natLor  : nat -> nat -> nat
 let natLor i1 i2 = defaultLor natFromBitSeq bitSeqFromNat i1 i2
 declare ocaml target_rep function natLor = infix `lor`
+declare lean  target_rep function natLor = `lemNatLor`
 
 instance (WordOr nat) 
   let (lor) = natLor
@@ -1039,6 +1048,7 @@ end
 val natLxor : nat -> nat -> nat
 let natLxor i1 i2 = defaultLxor natFromBitSeq bitSeqFromNat i1 i2
 declare ocaml target_rep function natLxor = infix `lxor`
+declare lean  target_rep function natLxor = `lemNatLxor`
 
 instance (WordXor nat) 
   let (lxor) = natLxor
@@ -1047,6 +1057,7 @@ end
 val natLand : nat -> nat -> nat
 let natLand i1 i2 = defaultLand natFromBitSeq bitSeqFromNat i1 i2
 declare ocaml target_rep function natLand = infix `land`
+declare lean  target_rep function natLand = `lemNatLand`
 
 instance (WordAnd nat) 
   let (land) = natLand
@@ -1055,6 +1066,7 @@ end
 val natLsl  : nat -> nat -> nat
 let natLsl i n = defaultLsl natFromBitSeq bitSeqFromNat i n
 declare ocaml target_rep function natLsl = infix `lsl`
+declare lean  target_rep function natLsl = `lemNatLsl`
 
 instance (WordLsl nat) 
   let (lsl) = natLsl
@@ -1063,6 +1075,7 @@ end
 val natAsr  : nat -> nat -> nat
 let natAsr i n = defaultAsr natFromBitSeq bitSeqFromNat i n
 declare ocaml target_rep function natAsr = infix `asr`
+declare lean  target_rep function natAsr = `lemNatAsr`
 
 instance  (WordAsr nat) 
   let (asr) = natAsr

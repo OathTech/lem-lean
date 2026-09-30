@@ -190,6 +190,11 @@ assert mw_word_concat :
 assert mw_word_extract :
   unsignedIntegerFromWord (word_extract 4 11 (wordFromNatural 43981 : mword ty16) : mword ty8) = 188
 
+(* LP7 (2026-09-30): the result keeps bits lo..hi only, even when its
+   type is wider (OCaml reference / HOL word_extract) *)
+assert mw_word_extract_masks_hi :
+  unsignedIntegerFromWord (word_extract 0 3 (wordFromNatural 171 : mword ty8) : mword ty8) = 11
+
 assert mw_word_update :
   unsignedIntegerFromWord (word_update (wordFromNatural 65280 : mword ty16) 0 7 (wordFromNatural 171 : mword ty8) : mword ty16) = 65451
 
@@ -206,6 +211,14 @@ assert mw_wordToHex :
 
 assert mw_bitlistFromWord_length :
   List.length (bitlistFromWord (wordFromNatural 5 : mword ty8)) = 8
+
+(* LP6 (2026-09-30): bit lists are MSB-first — lem's own
+   machine_word.lem asserts wordFromBitlist_test / bitlistFromWord_test *)
+assert mw_wordFromBitlist_msb_first :
+  unsignedIntegerFromWord (wordFromBitlist [false; false; true; false] : mword ty4) = 2
+
+assert mw_bitlistFromWord_msb_first :
+  bitlistFromWord (wordFromNatural 2 : mword ty4) = [false; false; true; false]
 
 assert mw_wordFromBitlist_roundtrip :
   unsignedIntegerFromWord (wordFromBitlist (bitlistFromWord (wordFromNatural 42 : mword ty8)) : mword ty8) = 42

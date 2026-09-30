@@ -36,7 +36,7 @@ open Lem_List_extra
   lem_if  n  =  0 then 
     acc
    else 
-    lemStringFromNatHelper  (/  n  10)  (Char.ofNat  (mod  n  10  +  48)  ::  acc) -/
+    lemStringFromNatHelper  (/  n  10)  (lemChr  (mod  n  10  +  48)  ::  acc) -/
 /- removed value specification -/
 
 def  stringFromNat  (n : Nat)  : String :=  
@@ -48,7 +48,7 @@ def  stringFromNat  (n : Nat)  : String :=
   lem_if  n  =  0 then 
     acc
    else 
-    lemStringFromNaturalHelper  (/  n  10)  (Char.ofNat  (lemNatFromNatural  (mod  n  10  +  48))  ::  acc) -/
+    lemStringFromNaturalHelper  (/  n  10)  (lemChr  (lemNatFromNatural  (mod  n  10  +  48))  ::  acc) -/
 /- removed value specification -/
 
 def  stringFromNatural  (n : Nat)  : String :=  

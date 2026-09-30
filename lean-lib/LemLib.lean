@@ -1738,14 +1738,46 @@ def bitSeqBinopAux (binop : Bool → Bool → Bool) (s1 : Bool) (bl1 : List Bool
   | b1 :: bl1', b2 :: bl2' => (binop b1 b2) :: bitSeqBinopAux binop s1 bl1' s2 bl2'
 termination_by bl1.length + bl2.length
 
-/- Nat bitwise operations (used by transform.lem compatibility layer) -/
-def natLand (a b : Nat) : Nat := a &&& b
-def natLor (a b : Nat) : Nat := a ||| b
-def natLxor (a b : Nat) : Nat := a ^^^ b
-@[never_extract] def natLnot (_a : Nat) : Nat := panic! "natLnot: bitwise NOT is not defined for Nat"
-def natLsl (a b : Nat) : Nat := a <<< b
-def natLsr (a b : Nat) : Nat := a >>> b
-def natAsr (a b : Nat) : Nat := a >>> b  -- same as lsr for Nat (unsigned)
+/- Nat bitwise operations (used by transform.lem compatibility layer).
+   Named lemNat* (library-parity-coverage 2026-09-30, finding LP3
+   [AGENT]): as `natLand`/`natLor`/`natLxor`/`natLsl`/`natAsr` they
+   collided with the generated `Lem_Word.natLand`/... — every direct call
+   of Word's nat bitwise functions from a lem program was an "Ambiguous
+   term" Lean build error. Regression: parity probe p_lib_word_int_nat. -/
+def lemNatLand (a b : Nat) : Nat := a &&& b
+def lemNatLor (a b : Nat) : Nat := a ||| b
+def lemNatLxor (a b : Nat) : Nat := a ^^^ b
+@[never_extract] def lemNatLnot (_a : Nat) : Nat := panic! "lemNatLnot: bitwise NOT is not defined for Nat"
+def lemNatLsl (a b : Nat) : Nat := a <<< b
+def lemNatLsr (a b : Nat) : Nat := a >>> b
+def lemNatAsr (a b : Nat) : Nat := a >>> b  -- same as lsr for Nat (unsigned)
+
+/- Int bitwise operations: UNBOUNDED two's complement, the Lean reps of
+   word.lem's intLand/intLor/intLxor/intLsl/intAsr (library-parity-coverage
+   2026-09-30, finding LP4 [AGENT]). The OCaml reference is native 63-bit
+   `land`/`lor`/`lxor`/`lsl`/`asr`; these agree with it on its whole
+   domain (and extend it where OCaml wraps: the ruled 63-bit class). Lem's
+   own definitions go through a 31-bit bitSequence and disagreed from 2^30
+   on. `Int.negSucc n` is `-(n+1)`, i.e. the complement `~~~n` of `n`, so
+   each case is a Nat identity: `a &&& ~~~b = a ^^^ (a &&& b)`,
+   `~~~a &&& ~~~b = ~~~(a ||| b)`, `~~~a ^^^ b = ~~~(a ^^^ b)`, ... -/
+def lemIntLand : Int → Int → Int
+  | .ofNat a,   .ofNat b   => .ofNat (a &&& b)
+  | .ofNat a,   .negSucc b => .ofNat (a ^^^ (a &&& b))
+  | .negSucc a, .ofNat b   => .ofNat (b ^^^ (b &&& a))
+  | .negSucc a, .negSucc b => .negSucc (a ||| b)
+def lemIntLor : Int → Int → Int
+  | .ofNat a,   .ofNat b   => .ofNat (a ||| b)
+  | .ofNat a,   .negSucc b => .negSucc (b ^^^ (b &&& a))
+  | .negSucc a, .ofNat b   => .negSucc (a ^^^ (a &&& b))
+  | .negSucc a, .negSucc b => .negSucc (a &&& b)
+def lemIntLxor : Int → Int → Int
+  | .ofNat a,   .ofNat b   => .ofNat (a ^^^ b)
+  | .ofNat a,   .negSucc b => .negSucc (a ^^^ b)
+  | .negSucc a, .ofNat b   => .negSucc (a ^^^ b)
+  | .negSucc a, .negSucc b => .ofNat (a ^^^ b)
+def lemIntLsl (a : Int) (n : Nat) : Int := a <<< n
+def lemIntAsr (a : Int) (n : Nat) : Int := a >>> n  -- Int.shiftRight: floor division by 2^n
 
 /- ============================================================ -/
 /- Deep lists: explicitly tail-recursive library functions       -/
@@ -1867,6 +1899,18 @@ def lemStringFromNatHelper (n : Nat) (acc : List Char) : List Char :=
 termination_by n
 decreasing_by exact Nat.div_lt_self (by omega) (by omega)
 
+/- String_extra.chr (library-parity-coverage 2026-09-30, finding LP8
+   [AGENT]): a lem `char` is a byte (OCaml `char`; HOL CHR and Isabelle
+   char_of are 8-bit). The OCaml reference `Char.chr` raises
+   `Invalid_argument "Char.chr"` outside 0..255; the previous rep
+   `Char.ofNat` returned the Unicode scalar (chr 256 = 'Ā', ord of it 256)
+   and succeeded where the reference fails. Fail loudly instead.
+   (0..255 → Char.ofNat as before; bytes 128..255 as Unicode scalars are
+   the F2 strings-are-bytes arc, not this fix.) Regression: failure probe
+   f_lib_chr_range. -/
+def lemChr (n : Nat) : Char :=
+  if n < 256 then Char.ofNat n else failwithI "Invalid_argument(\"Char.chr\")"
+
 /- Total stringFromNaturalHelper: identical logic (natural = nat in Lean) -/
 def lemStringFromNaturalHelper (n : Nat) (acc : List Char) : List Char :=
   if h : n = 0 then acc
@@ -1934,10 +1978,16 @@ def mwordUnsignedLessEq {n : Nat} (a b : BitVec n) : Bool := BitVec.ule a b
 /- Word concatenation and extraction -/
 def mwordConcat {n m result : Nat} (a : BitVec n) (b : BitVec m) : BitVec result :=
   (a ++ b).setWidth result
-def mwordExtract {n result : Nat} (lo _hi : Nat) (w : BitVec n) : BitVec result :=
-  -- Lem passes (lo, hi, word); result width comes from the return type.
-  -- hi is redundant (same as Isabelle's Word.slice which also ignores hi).
-  BitVec.extractLsb' lo result w
+def mwordExtract {n result : Nat} (lo hi : Nat) (w : BitVec n) : BitVec result :=
+  -- Lem passes (lo, hi, word): bits lo..hi, zero-extended/truncated to the
+  -- result width (library-parity-coverage 2026-09-30, finding LP7
+  -- [AGENT]). The OCaml reference (lem.ml word_extract: hi-lo+1 bits from
+  -- lo) and HOL (words$word_extract hi lo, then w2w) both mask by hi; the
+  -- previous rep ignored hi as Isabelle's Word.slice does, and returned
+  -- bits beyond hi whenever the result type is wider than hi-lo+1
+  -- (word_extract 0 3 (0xAB : mword ty8) : mword ty8 gave 0xAB, not 0xB).
+  -- Regression: parity probe p_lib_machine_word.
+  (BitVec.extractLsb' lo (hi + 1 - lo) w).setWidth result
 def mwordUpdate {n m : Nat} (w : BitVec n) (lo _hi : Nat) (v : BitVec m) : BitVec n :=
   -- Lem passes (word, lo, hi, value); hi is redundant given v's width m.
   let mask := ~~~(BitVec.ofNat n (((1 <<< m) - 1) <<< lo))
@@ -1955,13 +2005,18 @@ def mwordLength {n : Nat} (_ : BitVec n) : Nat := n
 def mwordToHex {n : Nat} (w : BitVec n) : String := BitVec.toHex w
 
 /- Bitlist conversion -/
+/- Bit lists are MOST-significant bit first (library-parity-coverage
+   2026-09-30, finding LP6 [AGENT]): lem's own asserts
+   (machine_word.lem wordFromBitlist_test / bitlistFromWord_test:
+   `wordFromBitlist [false;false;true;false] : mword ty4 = 2`), the OCaml
+   reference (lem.ml wordFromBitlist/bitlistFromWord), Isabelle of_bl/to_bl
+   and HOL v2w/w2v all read the head as the MSB; these reps read it as the
+   LSB. A list longer than the width keeps its low bits (HOL v2w).
+   Regression: parity probe p_lib_machine_word. -/
 def mwordFromBitlist {n : Nat} (bits : List Bool) : BitVec n :=
-  -- Convert LSB-first list of bools to BitVec
-  let val := bits.foldl (fun (acc : Nat × Nat) b =>
-    (acc.1 + (if b then 1 <<< acc.2 else 0), acc.2 + 1)) (0, 0)
-  BitVec.ofNat n val.1
+  BitVec.ofNat n (bits.foldl (fun acc b => 2 * acc + (if b then 1 else 0)) 0)
 
 def mwordToBitlist {n : Nat} (w : BitVec n) : List Bool :=
-  List.map (fun i => w.getLsbD i) (List.range n)
+  List.map (fun i => w.getLsbD (n - 1 - i)) (List.range n)
 
 

@@ -212,4 +212,16 @@ open Lean Elab Command in
 example : lemIfNew true 3 = 4 := rfl
 example : lemIfNew false 3 = 7 := rfl
 
+/-- LP4 (library-parity-coverage 2026-09-30): the unbounded Int bitwise reps
+    agree with two's complement (the OCaml `land`/`lor`/`lxor` values), in
+    every sign combination; LP6: bit lists are MSB-first; LP7:
+    word_extract masks by hi. -/
+example : lemIntLand (-6) 3 = 2 ∧ lemIntLand 6 (-3) = 4 ∧ lemIntLand (-6) (-3) = -8 ∧ lemIntLand 12 10 = 8 := by decide
+example : lemIntLor (-6) 3 = -5 ∧ lemIntLor 6 (-3) = -1 ∧ lemIntLor (-6) (-3) = -1 ∧ lemIntLor 12 10 = 14 := by decide
+example : lemIntLxor (-6) 3 = -7 ∧ lemIntLxor 6 (-3) = -5 ∧ lemIntLxor (-6) (-3) = 7 ∧ lemIntLxor 12 10 = 6 := by decide
+example : lemIntLsl (-3) 4 = -48 ∧ lemIntAsr (-7) 1 = -4 ∧ lemIntAsr 7 1 = 3 := by decide
+example : (mwordFromBitlist [false, false, true, false] : BitVec 4) = 2#4 := by decide
+example : mwordToBitlist (2#4) = [false, false, true, false] := by decide
+example : (mwordExtract 0 3 (0xAB#8) : BitVec 8) = 0xB#8 := by decide
+
 end LemLibTest
