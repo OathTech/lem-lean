@@ -1,0 +1,82 @@
+(* Library-coverage probe (2026-09-30, library-parity-coverage record):
+   the NAMED int32 and int64 operations of library/num.lem (int32Eq ...
+   int32Max, int64Eq ... int64Max) and the fixed-width conversions, over
+   the wrap boundaries (min, min+1, -1, 0, 1, max-1, max, 2^16, LCG
+   values). Both targets are two's-complement and WRAP (OCaml
+   Int32/Int64; Lean Int32/Int64): this checks they wrap identically.
+   Excluded by ruling, not by accident: int32FromNatural/int32FromInteger/
+   int64From{Natural,Integer} OUTSIDE the range (OCaml raises, Lean wraps:
+   the ruled D4 class, f_int32_overflow) and int/nat conversions of
+   values beyond 2^62 (the ruled X3 class, f_int_of_big_num). Division by
+   zero: f_div_zero. Expected values are the OCaml target's output. *)
+open import Pervasives_extra
+
+let s32 (x : int32) : string = stringFromInteger (integerFromInt32 x)
+let s64 (x : int64) : string = stringFromInteger (integerFromInt64 x)
+let sb (b : bool) : string = show b
+let so (o : ordering) : string = match o with LT -> "LT" | EQ -> "EQ" | GT -> "GT" end
+
+let lcg (s : natural) : natural = (s * 6364136223846793005 + 1442695040888963407) mod 18446744073709551616
+let rec lcg_list (n : nat) (s : natural) : list natural =
+  match n with 0 -> [] | n' + 1 -> let s' = lcg s in s' :: lcg_list n' s' end
+let rnd : list natural = lcg_list 6 27182818
+
+(* in-range conversion from an LCG value: centre on 0 *)
+let r32 (r : natural) : int32 = int32FromInteger (integerFromNatural (r mod 4294967296) - 2147483648)
+let r64 (r : natural) : int64 = int64FromInteger (integerFromNatural r - 9223372036854775808)
+
+let v32 : list int32 =
+  [int32FromInteger (0 - 2147483648); int32FromInteger (0 - 2147483647); int32FromInteger (0 - 65536);
+   int32FromInteger (0 - 1); int32FromInteger 0; int32FromInteger 1; int32FromInteger 3; int32FromInteger 65536;
+   int32FromInteger 2147483646; int32FromInteger 2147483647] ++ List.map r32 (List.take 3 rnd)
+let v64 : list int64 =
+  [int64FromInteger (0 - 9223372036854775808); int64FromInteger (0 - 9223372036854775807); int64FromInteger (0 - 4294967296);
+   int64FromInteger (0 - 1); int64FromInteger 0; int64FromInteger 1; int64FromInteger 3; int64FromInteger 4294967296;
+   int64FromInteger 9223372036854775806; int64FromInteger 9223372036854775807] ++ List.map r64 (List.drop 3 rnd)
+
+let cross (xs : list 'a) (ys : list 'b) : list ('a * 'b) = List.concatMap (fun x -> List.map (fun y -> (x, y)) ys) xs
+let bin32 (nm : string) (f : int32 -> int32 -> string) : list string =
+  List.map (fun (a, b) -> nm ^ " " ^ s32 a ^ " " ^ s32 b ^ " = " ^ f a b) (cross v32 v32)
+let bin64 (nm : string) (f : int64 -> int64 -> string) : list string =
+  List.map (fun (a, b) -> nm ^ " " ^ s64 a ^ " " ^ s64 b ^ " = " ^ f a b) (cross v64 v64)
+
+let cmp32 (a : int32) (b : int32) : string =
+  sb (int32Eq a b) ^ " " ^ sb (int32Less a b) ^ " " ^ sb (int32LessEqual a b) ^ " " ^ sb (int32Greater a b) ^ " "
+  ^ sb (int32GreaterEqual a b) ^ " " ^ so (int32Compare a b) ^ " min=" ^ s32 (int32Min a b) ^ " max=" ^ s32 (int32Max a b)
+let cmp64 (a : int64) (b : int64) : string =
+  sb (int64Eq a b) ^ " " ^ sb (int64Less a b) ^ " " ^ sb (int64LessEqual a b) ^ " " ^ sb (int64Greater a b) ^ " "
+  ^ sb (int64GreaterEqual a b) ^ " " ^ so (int64Compare a b) ^ " min=" ^ s64 (int64Min a b) ^ " max=" ^ s64 (int64Max a b)
+
+(* int/nat views of an int64 only inside the 63-bit domain (X3) *)
+let small64 (x : int64) : bool = int64Less (int64FromInteger (0 - 4611686018427387903)) x && int64Less x (int64FromInteger 4611686018427387903)
+
+let results : list string =
+  [ "rnd: " ^ show rnd ] ++
+  List.map (fun a -> "int32 " ^ s32 a ^ ": neg=" ^ s32 (int32Negate a) ^ " abs=" ^ s32 (int32Abs a) ^ " succ=" ^ s32 (int32Succ a)
+      ^ " pred=" ^ s32 (int32Pred a) ^ " pow2=" ^ s32 (int32Pow a 2) ^ " pow3=" ^ s32 (int32Pow a 3) ^ " pow0=" ^ s32 (int32Pow a 0)
+      ^ " toInt64=" ^ s64 (int64FromInt32 a) ^ " natFromInt32=" ^ show (natFromInt32 a) ^ " intFromInt32=" ^ show (intFromInt32 a)
+      ^ " naturalFromInt32=" ^ show (naturalFromInt32 a)) v32 ++
+  List.map (fun a -> "int64 " ^ s64 a ^ ": neg=" ^ s64 (int64Negate a) ^ " abs=" ^ s64 (int64Abs a) ^ " succ=" ^ s64 (int64Succ a)
+      ^ " pred=" ^ s64 (int64Pred a) ^ " pow2=" ^ s64 (int64Pow a 2) ^ " pow3=" ^ s64 (int64Pow a 3)
+      ^ " toInt32=" ^ s32 (int32FromInt64 a) ^ " naturalFromInt64=" ^ show (naturalFromInt64 a)
+      ^ (if small64 a then " natFromInt64=" ^ show (natFromInt64 a) ^ " intFromInt64=" ^ show (intFromInt64 a) else "")) v64 ++
+  List.map (fun (n : nat) -> "int32FromNat/int64FromNat " ^ show n ^ ": " ^ s32 (int32FromNat n) ^ " " ^ s64 (int64FromNat n))
+      [0; 1; 2147483647; 2147483648; 4294967295; 4294967296; 4294967297; 4611686018427387903] ++
+  List.map (fun (i : int) -> "int32FromInt/int64FromInt " ^ show i ^ ": " ^ s32 (int32FromInt i) ^ " " ^ s64 (int64FromInt i))
+      [0; 0-1; 0-2147483648; 0-2147483649; 2147483648; 0-4294967296; 4611686018427387903; 0-4611686018427387904] ++
+  List.map (fun (n : natural) -> "int32FromNatural/int64FromNatural " ^ show n ^ ": " ^ s32 (int32FromNatural n) ^ " " ^ s64 (int64FromNatural n))
+      [0; 1; 2147483647] ++
+  List.map (fun (n : natural) -> "int64FromNatural " ^ show n ^ ": " ^ s64 (int64FromNatural n))
+      [2147483648; 9223372036854775807] ++
+  bin32 "int32Add" (fun a b -> s32 (int32Add a b)) ++
+  bin32 "int32Minus" (fun a b -> s32 (int32Minus a b)) ++
+  bin32 "int32Mult" (fun a b -> s32 (int32Mult a b)) ++
+  bin32 "int32Div" (fun a b -> if int32Eq b (int32FromNat 0) then "-" else s32 (int32Div a b)) ++
+  bin32 "int32Mod" (fun a b -> if int32Eq b (int32FromNat 0) then "-" else s32 (int32Mod a b)) ++
+  bin32 "cmp" cmp32 ++
+  bin64 "int64Add" (fun a b -> s64 (int64Add a b)) ++
+  bin64 "int64Minus" (fun a b -> s64 (int64Minus a b)) ++
+  bin64 "int64Mult" (fun a b -> s64 (int64Mult a b)) ++
+  bin64 "int64Div" (fun a b -> if int64Eq b (int64FromNat 0) then "-" else s64 (int64Div a b)) ++
+  bin64 "int64Mod" (fun a b -> if int64Eq b (int64FromNat 0) then "-" else s64 (int64Mod a b)) ++
+  bin64 "cmp" cmp64

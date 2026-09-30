@@ -1,0 +1,9 @@
+(* Library-coverage failure probe (2026-09-30, library-parity-coverage
+   record): Map_extra.find of an absent key (OCaml Pmap.find: Not_found) must FAIL on both targets, after the same stdout
+   prefix. The steps take the RUNTIME nat n = 0, so neither compiler can
+   fold the failing call into module initialisation. *)
+open import Pervasives_extra
+
+let steps : list (nat -> string) =
+  [ (fun n -> "in domain: " ^ Map_extra.find (n + 1) (Map.fromList [((1:nat), "a")]));
+    (fun n -> "failing: " ^ Map_extra.find (n + 9) (Map.fromList [((1:nat), "a")])) ]

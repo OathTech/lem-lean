@@ -1,0 +1,88 @@
+(* Library-coverage probe (2026-09-30, library-parity-coverage record):
+   the NAMED nat and int operations of library/num.lem (natAdd ...
+   gen_pow_aux) over boundary values and LCG-generated values. nat/int
+   are 63-bit on the OCaml target and unbounded on Lean; the [USER
+   2026-09-03] ruling makes OCaml's wrap at 2^62 a deviation, so every
+   operand AND result here stays inside [-2^62, 2^62-1] (the domain where
+   both targets must agree); the out-of-range behaviour is the ruled
+   f_int_of_big_num class. Division by zero: f_div_zero / f_int_div_zero.
+   Expected values are the OCaml target's output. *)
+open import Pervasives_extra
+
+let sn (n : nat) : string = stringFromNat n
+let si (i : int) : string = stringFromInt i
+let sb (b : bool) : string = show b
+let so (o : ordering) : string = match o with LT -> "LT" | EQ -> "EQ" | GT -> "GT" end
+
+(* LCG on natural (Knuth MMIX constants, mod 2^64): deterministic and
+   identical on both targets (natural is unbounded on both). *)
+let lcg (s : natural) : natural = (s * 6364136223846793005 + 1442695040888963407) mod 18446744073709551616
+let rec lcg_list (n : nat) (s : natural) : list natural =
+  match n with 0 -> [] | n' + 1 -> let s' = lcg s in s' :: lcg_list n' s' end
+(* no `declare termination_argument lcg_list = automatic`: on Lean that
+   plain `def` does not compile (finding LP2 of the record) *)
+let rnd : list natural = lcg_list 12 20260930
+
+(* small operands: products stay below 2^62 *)
+let nat_small : list nat =
+  [0; 1; 2; 3; 7; 10; 255; 256; 65535; 65536; 2147483647] ++
+  List.map (fun r -> natFromNatural (r mod 1073741824)) (List.take 4 rnd)
+(* large operands: sums stay below 2^62 *)
+let nat_large : list nat =
+  [0; 1; 4294967295; 4294967296; 9223372036854775 ; 2305843009213693951] ++
+  List.map (fun r -> natFromNatural (r mod 2305843009213693952)) (List.drop 4 (List.take 7 rnd))
+
+(* mixed operands for div/mod/compare *)
+let nat_mix : list nat = [0; 1; 2; 3; 7; 256; 2147483647; 4294967296; 2305843009213693951] ++ List.take 2 nat_large ++ List.drop 11 nat_small
+
+let int_small : list int =
+  [0; 1; 0-1; 2; 0-2; 7; 0-7; 2147483647; 0-2147483647] ++
+  List.map (fun r -> intFromInteger (integerFromNatural (r mod 2147483648) - 1073741824)) (List.take 4 rnd)
+let int_large : list int =
+  [0; 1; 0-1; 4294967296; 0-4294967296; 2305843009213693951; 0-2305843009213693952] ++
+  List.map (fun r -> intFromInteger (integerFromNatural (r mod 4611686018427387904) - 2305843009213693952)) (List.drop 7 rnd)
+
+let int_mix : list int = [0; 1; 0-1; 2; 0-2; 7; 0-7; 4294967296; 0-4294967296; 2305843009213693951; 0-2305843009213693952] ++ List.drop 9 int_small
+
+let cross (xs : list 'a) (ys : list 'b) : list ('a * 'b) = List.concatMap (fun x -> List.map (fun y -> (x, y)) ys) xs
+
+let nat_bin (nm : string) (f : nat -> nat -> string) (xs : list nat) : list string =
+  List.map (fun (a, b) -> nm ^ " " ^ sn a ^ " " ^ sn b ^ " = " ^ f a b) (cross xs xs)
+let int_bin (nm : string) (f : int -> int -> string) (xs : list int) : list string =
+  List.map (fun (a, b) -> nm ^ " " ^ si a ^ " " ^ si b ^ " = " ^ f a b) (cross xs xs)
+
+let nat_cmp_all (a : nat) (b : nat) : string =
+  sb (natEq a b) ^ " " ^ sb (natLess a b) ^ " " ^ sb (natLessEqual a b) ^ " " ^ sb (natGreater a b) ^ " "
+  ^ sb (natGreaterEqual a b) ^ " " ^ so (natCompare a b) ^ " min=" ^ sn (natMin a b) ^ " max=" ^ sn (natMax a b)
+let int_cmp_all (a : int) (b : int) : string =
+  sb (intEq a b) ^ " " ^ sb (intLess a b) ^ " " ^ sb (intLessEqual a b) ^ " " ^ sb (intGreater a b) ^ " "
+  ^ sb (intGreaterEqual a b) ^ " " ^ so (intCompare a b) ^ " min=" ^ si (intMin a b) ^ " max=" ^ si (intMax a b)
+
+let results : list string =
+  [ (* the *FromNumeral functions take a `numeral`, which a probe cannot
+       name: they are reached through every numeric literal *)
+    "rnd: " ^ show rnd;
+    "natSucc/natPred 0: " ^ sn (natSucc 0) ^ " " ^ sn (natPred 0);
+    "natSucc/natPred 2^62-2: " ^ sn (natSucc 4611686018427387902) ^ " " ^ sn (natPred 4611686018427387903);
+    "intSucc/intPred: " ^ si (intSucc (0-1)) ^ " " ^ si (intPred 0) ^ " " ^ si (intSucc 4611686018427387902) ^ " " ^ si (intPred (0-4611686018427387903));
+    "intNegate: " ^ si (intNegate 0) ^ " " ^ si (intNegate 5) ^ " " ^ si (intNegate (0-4611686018427387903));
+    "intAbs: " ^ si (intAbs 0) ^ " " ^ si (intAbs (0-5)) ^ " " ^ si (intAbs (0-4611686018427387903)) ^ " " ^ si (intAbs 4611686018427387903);
+    "natPow: " ^ sn (natPow 0 0) ^ " " ^ sn (natPow 0 5) ^ " " ^ sn (natPow 2 61) ^ " " ^ sn (natPow 3 39) ^ " " ^ sn (natPow 10 18) ^ " " ^ sn (natPow 1 1000);
+    "intPow: " ^ si (intPow 0 0) ^ " " ^ si (intPow (0-2) 61) ^ " " ^ si (intPow (0-3) 39) ^ " " ^ si (intPow (0-1) 1001) ^ " " ^ si (intPow (0-10) 18);
+    "gen_pow_aux (^) \"a\" \"b\" e=1..6: " ^ gen_pow_aux (fun x y -> x ^ y) "a" "b" 1 ^ " " ^ gen_pow_aux (fun x y -> x ^ y) "a" "b" 2 ^ " "
+      ^ gen_pow_aux (fun x y -> x ^ y) "a" "b" 3 ^ " " ^ gen_pow_aux (fun x y -> x ^ y) "a" "b" 5 ^ " " ^ gen_pow_aux (fun x y -> x ^ y) "a" "b" 6;
+    "gen_pow_aux e=0: " ^ gen_pow_aux (fun x y -> x ^ y) "a" "b" 0;
+    "gen_pow_aux (-) nat: " ^ sn (gen_pow_aux (fun x y -> x - y) 100 3 7)
+  ] ++
+  nat_bin "natAdd" (fun a b -> sn (natAdd a b)) nat_large ++
+  nat_bin "natMinus" (fun a b -> sn (natMinus a b)) nat_large ++
+  nat_bin "natMult" (fun a b -> sn (natMult a b)) nat_small ++
+  nat_bin "natDiv" (fun a b -> if b = 0 then "-" else sn (natDiv a b)) nat_mix ++
+  nat_bin "natMod" (fun a b -> if b = 0 then "-" else sn (natMod a b)) nat_mix ++
+  nat_bin "cmp" nat_cmp_all nat_mix ++
+  int_bin "intAdd" (fun a b -> si (intAdd a b)) int_large ++
+  int_bin "intMinus" (fun a b -> si (intMinus a b)) int_large ++
+  int_bin "intMult" (fun a b -> si (intMult a b)) int_small ++
+  int_bin "intDiv" (fun a b -> if b = 0 then "-" else si (intDiv a b)) int_mix ++
+  int_bin "intMod" (fun a b -> if b = 0 then "-" else si (intMod a b)) int_mix ++
+  int_bin "cmp" int_cmp_all int_mix

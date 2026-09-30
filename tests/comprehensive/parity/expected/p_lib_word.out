@@ -1,0 +1,426 @@
+bitSeqFromInteger Nothing 0 = BitSeq(inf,0,) -> integerFromBitSeq 0 | (Just 8) BitSeq(8,0,) -> 0 | boolListFromInteger 0, | integerFromBoolList 0
+bitSeqFromInteger Nothing 1 = BitSeq(inf,0,1) -> integerFromBitSeq 1 | (Just 8) BitSeq(8,0,1) -> 1 | boolListFromInteger 0,1 | integerFromBoolList 1
+bitSeqFromInteger Nothing -1 = BitSeq(inf,1,) -> integerFromBitSeq -1 | (Just 8) BitSeq(8,1,) -> -1 | boolListFromInteger 1, | integerFromBoolList -1
+bitSeqFromInteger Nothing 2 = BitSeq(inf,0,01) -> integerFromBitSeq 2 | (Just 8) BitSeq(8,0,01) -> 2 | boolListFromInteger 0,01 | integerFromBoolList 2
+bitSeqFromInteger Nothing -2 = BitSeq(inf,1,0) -> integerFromBitSeq -2 | (Just 8) BitSeq(8,1,0) -> -2 | boolListFromInteger 1,0 | integerFromBoolList -2
+bitSeqFromInteger Nothing 5 = BitSeq(inf,0,101) -> integerFromBitSeq 5 | (Just 8) BitSeq(8,0,101) -> 5 | boolListFromInteger 0,101 | integerFromBoolList 5
+bitSeqFromInteger Nothing -6 = BitSeq(inf,1,010) -> integerFromBitSeq -6 | (Just 8) BitSeq(8,1,010) -> -6 | boolListFromInteger 1,010 | integerFromBoolList -6
+bitSeqFromInteger Nothing 127 = BitSeq(inf,0,1111111) -> integerFromBitSeq 127 | (Just 8) BitSeq(8,0,1111111) -> 127 | boolListFromInteger 0,1111111 | integerFromBoolList 127
+bitSeqFromInteger Nothing -128 = BitSeq(inf,1,0000000) -> integerFromBitSeq -128 | (Just 8) BitSeq(8,1,0000000) -> -128 | boolListFromInteger 1,0000000 | integerFromBoolList -128
+bitSeqFromInteger Nothing 255 = BitSeq(inf,0,11111111) -> integerFromBitSeq 255 | (Just 8) BitSeq(8,1,) -> -1 | boolListFromInteger 0,11111111 | integerFromBoolList 255
+bitSeqFromInteger Nothing 256 = BitSeq(inf,0,000000001) -> integerFromBitSeq 256 | (Just 8) BitSeq(8,0,) -> 0 | boolListFromInteger 0,000000001 | integerFromBoolList 256
+bitSeqFromInteger Nothing -256 = BitSeq(inf,1,00000000) -> integerFromBitSeq -256 | (Just 8) BitSeq(8,0,) -> 0 | boolListFromInteger 1,00000000 | integerFromBoolList -256
+bitSeqFromInteger Nothing 2147483647 = BitSeq(inf,0,1111111111111111111111111111111) -> integerFromBitSeq 2147483647 | (Just 8) BitSeq(8,1,) -> -1 | boolListFromInteger 0,1111111111111111111111111111111 | integerFromBoolList 2147483647
+bitSeqFromInteger Nothing -2147483648 = BitSeq(inf,1,0000000000000000000000000000000) -> integerFromBitSeq -2147483648 | (Just 8) BitSeq(8,0,) -> 0 | boolListFromInteger 1,0000000000000000000000000000000 | integerFromBoolList -2147483648
+bitSeqFromInteger Nothing 4294967295 = BitSeq(inf,0,11111111111111111111111111111111) -> integerFromBitSeq 4294967295 | (Just 8) BitSeq(8,1,) -> -1 | boolListFromInteger 0,11111111111111111111111111111111 | integerFromBoolList 4294967295
+bitSeqFromInteger Nothing 4611686018427387903 = BitSeq(inf,0,11111111111111111111111111111111111111111111111111111111111111) -> integerFromBitSeq 4611686018427387903 | (Just 8) BitSeq(8,1,) -> -1 | boolListFromInteger 0,11111111111111111111111111111111111111111111111111111111111111 | integerFromBoolList 4611686018427387903
+bitSeqFromInteger Nothing -4611686018427387904 = BitSeq(inf,1,00000000000000000000000000000000000000000000000000000000000000) -> integerFromBitSeq -4611686018427387904 | (Just 8) BitSeq(8,0,) -> 0 | boolListFromInteger 1,00000000000000000000000000000000000000000000000000000000000000 | integerFromBoolList -4611686018427387904
+bitSeqFromInteger Nothing 9223372036854775807 = BitSeq(inf,0,111111111111111111111111111111111111111111111111111111111111111) -> integerFromBitSeq 9223372036854775807 | (Just 8) BitSeq(8,1,) -> -1 | boolListFromInteger 0,111111111111111111111111111111111111111111111111111111111111111 | integerFromBoolList 9223372036854775807
+bitSeqFromInteger Nothing -9223372036854775808 = BitSeq(inf,1,000000000000000000000000000000000000000000000000000000000000000) -> integerFromBitSeq -9223372036854775808 | (Just 8) BitSeq(8,0,) -> 0 | boolListFromInteger 1,000000000000000000000000000000000000000000000000000000000000000 | integerFromBoolList -9223372036854775808
+bitSeqFromInteger Nothing 18446744073709551615 = BitSeq(inf,0,1111111111111111111111111111111111111111111111111111111111111111) -> integerFromBitSeq 18446744073709551615 | (Just 8) BitSeq(8,1,) -> -1 | boolListFromInteger 0,1111111111111111111111111111111111111111111111111111111111111111 | integerFromBoolList 18446744073709551615
+bitSeqFromInteger Nothing 18446744073709551616 = BitSeq(inf,0,00000000000000000000000000000000000000000000000000000000000000001) -> integerFromBitSeq 18446744073709551616 | (Just 8) BitSeq(8,0,) -> 0 | boolListFromInteger 0,00000000000000000000000000000000000000000000000000000000000000001 | integerFromBoolList 18446744073709551616
+bitSeqFromInteger Nothing -1267650600228229401496703205376 = BitSeq(inf,1,0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000) -> integerFromBitSeq -1267650600228229401496703205376 | (Just 8) BitSeq(8,0,) -> 0 | boolListFromInteger 1,0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 | integerFromBoolList -1267650600228229401496703205376
+bitSeqFromInteger Nothing 1267650600228229401496703205375 = BitSeq(inf,0,1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111) -> integerFromBitSeq 1267650600228229401496703205375 | (Just 8) BitSeq(8,1,) -> -1 | boolListFromInteger 0,1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111 | integerFromBoolList 1267650600228229401496703205375
+boolListFrombitSeq 12 (-6): 010111111111
+boolListFrombitSeq 0 5: []
+bitSeqFromBoolList 0101: BitSeq(4,1,010)
+bitSeqFromBoolList []: Nothing
+cleanBitSeq: BitSeq(inf,0,1) BitSeq(3,1,) BitSeq(0,0,)
+bitSeqTestBit: Just 0 Just 1 Just 0 Just 1 Just 1 Nothing Nothing / inf: Just 1 Just 0 Just 1 Just 0 Just 0
+bitSeqSetBit: BitSeq(inf,0,111) BitSeq(inf,0,001) BitSeq(inf,1,) BitSeq(8,0,1)
+resizeBitSeq: BitSeq(4,1,10) BitSeq(4,0,11) BitSeq(inf,1,10) BitSeq(16,1,10) BitSeq(inf,0,101) BitSeq(1,1,)
+bitSeqNot: BitSeq(inf,1,010) BitSeq(8,1,) -> -6
+bitSeqBinop xor 12 10: BitSeq(inf,0,011) and -4 7: BitSeq(inf,0,001) or 8bit -128 1: BitSeq(8,1,1000000)
+bitSeqBinopAux: 101 01
+bitSeqShiftLeft: BitSeq(inf,0,000101) BitSeq(8,0,0000001) BitSeq(inf,1,00)
+bitSeqArithmeticShiftRight: BitSeq(inf,1,00) BitSeq(8,1,0000) BitSeq(inf,0,)
+bitSeqLogicalShiftRight: BitSeq(8,0,0000111) BitSeq(inf,0,101) BitSeq(inf,1,00)
+bitSeqArithUnaryOp (x*3): BitSeq(8,1,0110100)
+bitSeqArithBinOp (+) 8bit 100 100: BitSeq(8,1,000100)
+bitSeqArithBinTest (<): false
+bitSeqEq: true false false
+bitSeq arith 0 0: false true false true EQ neg=BitSeq(inf,0,) add=BitSeq(inf,0,) minus=BitSeq(inf,0,) succ=BitSeq(inf,0,1) pred=BitSeq(inf,1,) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,) min=BitSeq(inf,0,) max=BitSeq(inf,0,) 8bit add=BitSeq(8,0,) 8bit mult=BitSeq(8,0,)
+bitSeq arith 0 1: true true false false LT neg=BitSeq(inf,0,) add=BitSeq(inf,0,1) minus=BitSeq(inf,1,) succ=BitSeq(inf,0,1) pred=BitSeq(inf,1,) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,) div=BitSeq(inf,0,) mod=BitSeq(inf,0,) min=BitSeq(inf,0,) max=BitSeq(inf,0,1) 8bit add=BitSeq(8,0,1) 8bit mult=BitSeq(8,0,)
+bitSeq arith 0 -1: false false true true GT neg=BitSeq(inf,0,) add=BitSeq(inf,1,) minus=BitSeq(inf,0,1) succ=BitSeq(inf,0,1) pred=BitSeq(inf,1,) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,) div=BitSeq(inf,0,) mod=BitSeq(inf,0,) min=BitSeq(inf,1,) max=BitSeq(inf,0,) 8bit add=BitSeq(8,1,) 8bit mult=BitSeq(8,0,)
+bitSeq arith 0 5: true true false false LT neg=BitSeq(inf,0,) add=BitSeq(inf,0,101) minus=BitSeq(inf,1,110) succ=BitSeq(inf,0,1) pred=BitSeq(inf,1,) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,) div=BitSeq(inf,0,) mod=BitSeq(inf,0,) min=BitSeq(inf,0,) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,0,101) 8bit mult=BitSeq(8,0,)
+bitSeq arith 0 -6: false false true true GT neg=BitSeq(inf,0,) add=BitSeq(inf,1,010) minus=BitSeq(inf,0,011) succ=BitSeq(inf,0,1) pred=BitSeq(inf,1,) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,) div=BitSeq(inf,0,) mod=BitSeq(inf,0,) min=BitSeq(inf,1,010) max=BitSeq(inf,0,) 8bit add=BitSeq(8,1,010) 8bit mult=BitSeq(8,0,)
+bitSeq arith 0 127: true true false false LT neg=BitSeq(inf,0,) add=BitSeq(inf,0,1111111) minus=BitSeq(inf,1,1000000) succ=BitSeq(inf,0,1) pred=BitSeq(inf,1,) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,) div=BitSeq(inf,0,) mod=BitSeq(inf,0,) min=BitSeq(inf,0,) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,0,1111111) 8bit mult=BitSeq(8,0,)
+bitSeq arith 0 -128: false false true true GT neg=BitSeq(inf,0,) add=BitSeq(inf,1,0000000) minus=BitSeq(inf,0,00000001) succ=BitSeq(inf,0,1) pred=BitSeq(inf,1,) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,) div=BitSeq(inf,0,) mod=BitSeq(inf,0,) min=BitSeq(inf,1,0000000) max=BitSeq(inf,0,) 8bit add=BitSeq(8,1,0000000) 8bit mult=BitSeq(8,0,)
+bitSeq arith 1 0: false false true true GT neg=BitSeq(inf,1,) add=BitSeq(inf,0,1) minus=BitSeq(inf,0,1) succ=BitSeq(inf,0,01) pred=BitSeq(inf,0,) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,1) min=BitSeq(inf,0,) max=BitSeq(inf,0,1) 8bit add=BitSeq(8,0,1) 8bit mult=BitSeq(8,0,)
+bitSeq arith 1 1: false true false true EQ neg=BitSeq(inf,1,) add=BitSeq(inf,0,01) minus=BitSeq(inf,0,) succ=BitSeq(inf,0,01) pred=BitSeq(inf,0,) mult=BitSeq(inf,0,1) pow2=BitSeq(inf,0,1) div=BitSeq(inf,0,1) mod=BitSeq(inf,0,) min=BitSeq(inf,0,1) max=BitSeq(inf,0,1) 8bit add=BitSeq(8,0,01) 8bit mult=BitSeq(8,0,1)
+bitSeq arith 1 -1: false false true true GT neg=BitSeq(inf,1,) add=BitSeq(inf,0,) minus=BitSeq(inf,0,01) succ=BitSeq(inf,0,01) pred=BitSeq(inf,0,) mult=BitSeq(inf,1,) pow2=BitSeq(inf,0,1) div=BitSeq(inf,1,) mod=BitSeq(inf,0,) min=BitSeq(inf,1,) max=BitSeq(inf,0,1) 8bit add=BitSeq(8,0,) 8bit mult=BitSeq(8,1,)
+bitSeq arith 1 5: true true false false LT neg=BitSeq(inf,1,) add=BitSeq(inf,0,011) minus=BitSeq(inf,1,00) succ=BitSeq(inf,0,01) pred=BitSeq(inf,0,) mult=BitSeq(inf,0,101) pow2=BitSeq(inf,0,1) div=BitSeq(inf,0,) mod=BitSeq(inf,0,1) min=BitSeq(inf,0,1) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,0,011) 8bit mult=BitSeq(8,0,101)
+bitSeq arith 1 -6: false false true true GT neg=BitSeq(inf,1,) add=BitSeq(inf,1,110) minus=BitSeq(inf,0,111) succ=BitSeq(inf,0,01) pred=BitSeq(inf,0,) mult=BitSeq(inf,1,010) pow2=BitSeq(inf,0,1) div=BitSeq(inf,0,) mod=BitSeq(inf,0,1) min=BitSeq(inf,1,010) max=BitSeq(inf,0,1) 8bit add=BitSeq(8,1,110) 8bit mult=BitSeq(8,1,010)
+bitSeq arith 1 127: true true false false LT neg=BitSeq(inf,1,) add=BitSeq(inf,0,00000001) minus=BitSeq(inf,1,0100000) succ=BitSeq(inf,0,01) pred=BitSeq(inf,0,) mult=BitSeq(inf,0,1111111) pow2=BitSeq(inf,0,1) div=BitSeq(inf,0,) mod=BitSeq(inf,0,1) min=BitSeq(inf,0,1) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,1,0000000) 8bit mult=BitSeq(8,0,1111111)
+bitSeq arith 1 -128: false false true true GT neg=BitSeq(inf,1,) add=BitSeq(inf,1,1000000) minus=BitSeq(inf,0,10000001) succ=BitSeq(inf,0,01) pred=BitSeq(inf,0,) mult=BitSeq(inf,1,0000000) pow2=BitSeq(inf,0,1) div=BitSeq(inf,0,) mod=BitSeq(inf,0,1) min=BitSeq(inf,1,0000000) max=BitSeq(inf,0,1) 8bit add=BitSeq(8,1,1000000) 8bit mult=BitSeq(8,1,0000000)
+bitSeq arith -1 0: true true false false LT neg=BitSeq(inf,0,1) add=BitSeq(inf,1,) minus=BitSeq(inf,1,) succ=BitSeq(inf,0,) pred=BitSeq(inf,1,0) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,1) min=BitSeq(inf,1,) max=BitSeq(inf,0,) 8bit add=BitSeq(8,1,) 8bit mult=BitSeq(8,0,)
+bitSeq arith -1 1: true true false false LT neg=BitSeq(inf,0,1) add=BitSeq(inf,0,) minus=BitSeq(inf,1,0) succ=BitSeq(inf,0,) pred=BitSeq(inf,1,0) mult=BitSeq(inf,1,) pow2=BitSeq(inf,0,1) div=BitSeq(inf,1,) mod=BitSeq(inf,0,) min=BitSeq(inf,1,) max=BitSeq(inf,0,1) 8bit add=BitSeq(8,0,) 8bit mult=BitSeq(8,1,)
+bitSeq arith -1 -1: false true false true EQ neg=BitSeq(inf,0,1) add=BitSeq(inf,1,0) minus=BitSeq(inf,0,) succ=BitSeq(inf,0,) pred=BitSeq(inf,1,0) mult=BitSeq(inf,0,1) pow2=BitSeq(inf,0,1) div=BitSeq(inf,0,1) mod=BitSeq(inf,0,) min=BitSeq(inf,1,) max=BitSeq(inf,1,) 8bit add=BitSeq(8,1,0) 8bit mult=BitSeq(8,0,1)
+bitSeq arith -1 5: true true false false LT neg=BitSeq(inf,0,1) add=BitSeq(inf,0,001) minus=BitSeq(inf,1,010) succ=BitSeq(inf,0,) pred=BitSeq(inf,1,0) mult=BitSeq(inf,1,110) pow2=BitSeq(inf,0,1) div=BitSeq(inf,1,) mod=BitSeq(inf,0,001) min=BitSeq(inf,1,) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,0,001) 8bit mult=BitSeq(8,1,110)
+bitSeq arith -1 -6: false false true true GT neg=BitSeq(inf,0,1) add=BitSeq(inf,1,100) minus=BitSeq(inf,0,101) succ=BitSeq(inf,0,) pred=BitSeq(inf,1,0) mult=BitSeq(inf,0,011) pow2=BitSeq(inf,0,1) div=BitSeq(inf,0,1) mod=BitSeq(inf,0,101) min=BitSeq(inf,1,010) max=BitSeq(inf,1,) 8bit add=BitSeq(8,1,100) 8bit mult=BitSeq(8,0,011)
+bitSeq arith -1 127: true true false false LT neg=BitSeq(inf,0,1) add=BitSeq(inf,0,0111111) minus=BitSeq(inf,1,0000000) succ=BitSeq(inf,0,) pred=BitSeq(inf,1,0) mult=BitSeq(inf,1,1000000) pow2=BitSeq(inf,0,1) div=BitSeq(inf,1,) mod=BitSeq(inf,0,0111111) min=BitSeq(inf,1,) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,0,0111111) 8bit mult=BitSeq(8,1,1000000)
+bitSeq arith -1 -128: false false true true GT neg=BitSeq(inf,0,1) add=BitSeq(inf,1,11111110) minus=BitSeq(inf,0,1111111) succ=BitSeq(inf,0,) pred=BitSeq(inf,1,0) mult=BitSeq(inf,0,00000001) pow2=BitSeq(inf,0,1) div=BitSeq(inf,0,1) mod=BitSeq(inf,0,1111111) min=BitSeq(inf,1,0000000) max=BitSeq(inf,1,) 8bit add=BitSeq(8,0,1111111) 8bit mult=BitSeq(8,1,0000000)
+bitSeq arith 5 0: false false true true GT neg=BitSeq(inf,1,110) add=BitSeq(inf,0,101) minus=BitSeq(inf,0,101) succ=BitSeq(inf,0,011) pred=BitSeq(inf,0,001) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,10011) min=BitSeq(inf,0,) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,0,101) 8bit mult=BitSeq(8,0,)
+bitSeq arith 5 1: false false true true GT neg=BitSeq(inf,1,110) add=BitSeq(inf,0,011) minus=BitSeq(inf,0,001) succ=BitSeq(inf,0,011) pred=BitSeq(inf,0,001) mult=BitSeq(inf,0,101) pow2=BitSeq(inf,0,10011) div=BitSeq(inf,0,101) mod=BitSeq(inf,0,) min=BitSeq(inf,0,1) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,0,011) 8bit mult=BitSeq(8,0,101)
+bitSeq arith 5 -1: false false true true GT neg=BitSeq(inf,1,110) add=BitSeq(inf,0,001) minus=BitSeq(inf,0,011) succ=BitSeq(inf,0,011) pred=BitSeq(inf,0,001) mult=BitSeq(inf,1,110) pow2=BitSeq(inf,0,10011) div=BitSeq(inf,1,110) mod=BitSeq(inf,0,) min=BitSeq(inf,1,) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,0,001) 8bit mult=BitSeq(8,1,110)
+bitSeq arith 5 5: false true false true EQ neg=BitSeq(inf,1,110) add=BitSeq(inf,0,0101) minus=BitSeq(inf,0,) succ=BitSeq(inf,0,011) pred=BitSeq(inf,0,001) mult=BitSeq(inf,0,10011) pow2=BitSeq(inf,0,10011) div=BitSeq(inf,0,1) mod=BitSeq(inf,0,) min=BitSeq(inf,0,101) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,0,0101) 8bit mult=BitSeq(8,0,10011)
+bitSeq arith 5 -6: false false true true GT neg=BitSeq(inf,1,110) add=BitSeq(inf,1,) minus=BitSeq(inf,0,1101) succ=BitSeq(inf,0,011) pred=BitSeq(inf,0,001) mult=BitSeq(inf,1,01000) pow2=BitSeq(inf,0,10011) div=BitSeq(inf,0,) mod=BitSeq(inf,0,101) min=BitSeq(inf,1,010) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,1,) 8bit mult=BitSeq(8,1,01000)
+bitSeq arith 5 127: true true false false LT neg=BitSeq(inf,1,110) add=BitSeq(inf,0,00100001) minus=BitSeq(inf,1,0110000) succ=BitSeq(inf,0,011) pred=BitSeq(inf,0,001) mult=BitSeq(inf,0,1101111001) pow2=BitSeq(inf,0,10011) div=BitSeq(inf,0,) mod=BitSeq(inf,0,101) min=BitSeq(inf,0,101) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,1,0010000) 8bit mult=BitSeq(8,0,1101111)
+bitSeq arith 5 -128: false false true true GT neg=BitSeq(inf,1,110) add=BitSeq(inf,1,1010000) minus=BitSeq(inf,0,10100001) succ=BitSeq(inf,0,011) pred=BitSeq(inf,0,001) mult=BitSeq(inf,1,0000000110) pow2=BitSeq(inf,0,10011) div=BitSeq(inf,0,) mod=BitSeq(inf,0,101) min=BitSeq(inf,1,0000000) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,1,1010000) 8bit mult=BitSeq(8,1,0000000)
+bitSeq arith -6 0: true true false false LT neg=BitSeq(inf,0,011) add=BitSeq(inf,1,010) minus=BitSeq(inf,1,010) succ=BitSeq(inf,1,110) pred=BitSeq(inf,1,100) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,001001) min=BitSeq(inf,1,010) max=BitSeq(inf,0,) 8bit add=BitSeq(8,1,010) 8bit mult=BitSeq(8,0,)
+bitSeq arith -6 1: true true false false LT neg=BitSeq(inf,0,011) add=BitSeq(inf,1,110) minus=BitSeq(inf,1,100) succ=BitSeq(inf,1,110) pred=BitSeq(inf,1,100) mult=BitSeq(inf,1,010) pow2=BitSeq(inf,0,001001) div=BitSeq(inf,1,010) mod=BitSeq(inf,0,) min=BitSeq(inf,1,010) max=BitSeq(inf,0,1) 8bit add=BitSeq(8,1,110) 8bit mult=BitSeq(8,1,010)
+bitSeq arith -6 -1: true true false false LT neg=BitSeq(inf,0,011) add=BitSeq(inf,1,100) minus=BitSeq(inf,1,110) succ=BitSeq(inf,1,110) pred=BitSeq(inf,1,100) mult=BitSeq(inf,0,011) pow2=BitSeq(inf,0,001001) div=BitSeq(inf,0,011) mod=BitSeq(inf,0,) min=BitSeq(inf,1,010) max=BitSeq(inf,1,) 8bit add=BitSeq(8,1,100) 8bit mult=BitSeq(8,0,011)
+bitSeq arith -6 5: true true false false LT neg=BitSeq(inf,0,011) add=BitSeq(inf,1,) minus=BitSeq(inf,1,1010) succ=BitSeq(inf,1,110) pred=BitSeq(inf,1,100) mult=BitSeq(inf,1,01000) pow2=BitSeq(inf,0,001001) div=BitSeq(inf,1,0) mod=BitSeq(inf,0,001) min=BitSeq(inf,1,010) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,1,) 8bit mult=BitSeq(8,1,01000)
+bitSeq arith -6 -6: false true false true EQ neg=BitSeq(inf,0,011) add=BitSeq(inf,1,0010) minus=BitSeq(inf,0,) succ=BitSeq(inf,1,110) pred=BitSeq(inf,1,100) mult=BitSeq(inf,0,001001) pow2=BitSeq(inf,0,001001) div=BitSeq(inf,0,1) mod=BitSeq(inf,0,) min=BitSeq(inf,1,010) max=BitSeq(inf,1,010) 8bit add=BitSeq(8,1,0010) 8bit mult=BitSeq(8,0,001001)
+bitSeq arith -6 127: true true false false LT neg=BitSeq(inf,0,011) add=BitSeq(inf,0,1001111) minus=BitSeq(inf,1,11011110) succ=BitSeq(inf,1,110) pred=BitSeq(inf,1,100) mult=BitSeq(inf,1,0110000010) pow2=BitSeq(inf,0,001001) div=BitSeq(inf,1,) mod=BitSeq(inf,0,1001111) min=BitSeq(inf,1,010) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,0,1001111) 8bit mult=BitSeq(8,0,011)
+bitSeq arith -6 -128: false false true true GT neg=BitSeq(inf,0,011) add=BitSeq(inf,1,01011110) minus=BitSeq(inf,0,0101111) succ=BitSeq(inf,1,110) pred=BitSeq(inf,1,100) mult=BitSeq(inf,0,0000000011) pow2=BitSeq(inf,0,001001) div=BitSeq(inf,0,1) mod=BitSeq(inf,0,0101111) min=BitSeq(inf,1,0000000) max=BitSeq(inf,1,010) 8bit add=BitSeq(8,0,0101111) 8bit mult=BitSeq(8,0,)
+bitSeq arith 127 0: false false true true GT neg=BitSeq(inf,1,1000000) add=BitSeq(inf,0,1111111) minus=BitSeq(inf,0,1111111) succ=BitSeq(inf,0,00000001) pred=BitSeq(inf,0,0111111) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,10000000111111) min=BitSeq(inf,0,) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,0,1111111) 8bit mult=BitSeq(8,0,)
+bitSeq arith 127 1: false false true true GT neg=BitSeq(inf,1,1000000) add=BitSeq(inf,0,00000001) minus=BitSeq(inf,0,0111111) succ=BitSeq(inf,0,00000001) pred=BitSeq(inf,0,0111111) mult=BitSeq(inf,0,1111111) pow2=BitSeq(inf,0,10000000111111) div=BitSeq(inf,0,1111111) mod=BitSeq(inf,0,) min=BitSeq(inf,0,1) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,1,0000000) 8bit mult=BitSeq(8,0,1111111)
+bitSeq arith 127 -1: false false true true GT neg=BitSeq(inf,1,1000000) add=BitSeq(inf,0,0111111) minus=BitSeq(inf,0,00000001) succ=BitSeq(inf,0,00000001) pred=BitSeq(inf,0,0111111) mult=BitSeq(inf,1,1000000) pow2=BitSeq(inf,0,10000000111111) div=BitSeq(inf,1,1000000) mod=BitSeq(inf,0,) min=BitSeq(inf,1,) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,0,0111111) 8bit mult=BitSeq(8,1,1000000)
+bitSeq arith 127 5: false false true true GT neg=BitSeq(inf,1,1000000) add=BitSeq(inf,0,00100001) minus=BitSeq(inf,0,0101111) succ=BitSeq(inf,0,00000001) pred=BitSeq(inf,0,0111111) mult=BitSeq(inf,0,1101111001) pow2=BitSeq(inf,0,10000000111111) div=BitSeq(inf,0,10011) mod=BitSeq(inf,0,01) min=BitSeq(inf,0,101) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,1,0010000) 8bit mult=BitSeq(8,0,1101111)
+bitSeq arith 127 -6: false false true true GT neg=BitSeq(inf,1,1000000) add=BitSeq(inf,0,1001111) minus=BitSeq(inf,0,10100001) succ=BitSeq(inf,0,00000001) pred=BitSeq(inf,0,0111111) mult=BitSeq(inf,1,0110000010) pow2=BitSeq(inf,0,10000000111111) div=BitSeq(inf,1,11010) mod=BitSeq(inf,0,1) min=BitSeq(inf,1,010) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,0,1001111) 8bit mult=BitSeq(8,0,011)
+bitSeq arith 127 127: false true false true EQ neg=BitSeq(inf,1,1000000) add=BitSeq(inf,0,01111111) minus=BitSeq(inf,0,) succ=BitSeq(inf,0,00000001) pred=BitSeq(inf,0,0111111) mult=BitSeq(inf,0,10000000111111) pow2=BitSeq(inf,0,10000000111111) div=BitSeq(inf,0,1) mod=BitSeq(inf,0,) min=BitSeq(inf,0,1111111) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,1,0) 8bit mult=BitSeq(8,0,1)
+bitSeq arith 127 -128: false false true true GT neg=BitSeq(inf,1,1000000) add=BitSeq(inf,1,) minus=BitSeq(inf,0,11111111) succ=BitSeq(inf,0,00000001) pred=BitSeq(inf,0,0111111) mult=BitSeq(inf,1,00000001000000) pow2=BitSeq(inf,0,10000000111111) div=BitSeq(inf,0,) mod=BitSeq(inf,0,1111111) min=BitSeq(inf,1,0000000) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,1,) 8bit mult=BitSeq(8,1,0000000)
+bitSeq arith -128 0: true true false false LT neg=BitSeq(inf,0,00000001) add=BitSeq(inf,1,0000000) minus=BitSeq(inf,1,0000000) succ=BitSeq(inf,1,1000000) pred=BitSeq(inf,1,11111110) mult=BitSeq(inf,0,) pow2=BitSeq(inf,0,000000000000001) min=BitSeq(inf,1,0000000) max=BitSeq(inf,0,) 8bit add=BitSeq(8,1,0000000) 8bit mult=BitSeq(8,0,)
+bitSeq arith -128 1: true true false false LT neg=BitSeq(inf,0,00000001) add=BitSeq(inf,1,1000000) minus=BitSeq(inf,1,11111110) succ=BitSeq(inf,1,1000000) pred=BitSeq(inf,1,11111110) mult=BitSeq(inf,1,0000000) pow2=BitSeq(inf,0,000000000000001) div=BitSeq(inf,1,0000000) mod=BitSeq(inf,0,) min=BitSeq(inf,1,0000000) max=BitSeq(inf,0,1) 8bit add=BitSeq(8,1,1000000) 8bit mult=BitSeq(8,1,0000000)
+bitSeq arith -128 -1: true true false false LT neg=BitSeq(inf,0,00000001) add=BitSeq(inf,1,11111110) minus=BitSeq(inf,1,1000000) succ=BitSeq(inf,1,1000000) pred=BitSeq(inf,1,11111110) mult=BitSeq(inf,0,00000001) pow2=BitSeq(inf,0,000000000000001) div=BitSeq(inf,0,00000001) mod=BitSeq(inf,0,) min=BitSeq(inf,1,0000000) max=BitSeq(inf,1,) 8bit add=BitSeq(8,0,1111111) 8bit mult=BitSeq(8,1,0000000)
+bitSeq arith -128 5: true true false false LT neg=BitSeq(inf,0,00000001) add=BitSeq(inf,1,1010000) minus=BitSeq(inf,1,11011110) succ=BitSeq(inf,1,1000000) pred=BitSeq(inf,1,11111110) mult=BitSeq(inf,1,0000000110) pow2=BitSeq(inf,0,000000000000001) div=BitSeq(inf,1,01100) mod=BitSeq(inf,0,01) min=BitSeq(inf,1,0000000) max=BitSeq(inf,0,101) 8bit add=BitSeq(8,1,1010000) 8bit mult=BitSeq(8,1,0000000)
+bitSeq arith -128 -6: true true false false LT neg=BitSeq(inf,0,00000001) add=BitSeq(inf,1,01011110) minus=BitSeq(inf,1,0110000) succ=BitSeq(inf,1,1000000) pred=BitSeq(inf,1,11111110) mult=BitSeq(inf,0,0000000011) pow2=BitSeq(inf,0,000000000000001) div=BitSeq(inf,0,01101) mod=BitSeq(inf,0,001) min=BitSeq(inf,1,0000000) max=BitSeq(inf,1,010) 8bit add=BitSeq(8,0,0101111) 8bit mult=BitSeq(8,0,)
+bitSeq arith -128 127: true true false false LT neg=BitSeq(inf,0,00000001) add=BitSeq(inf,1,) minus=BitSeq(inf,1,10000000) succ=BitSeq(inf,1,1000000) pred=BitSeq(inf,1,11111110) mult=BitSeq(inf,1,00000001000000) pow2=BitSeq(inf,0,000000000000001) div=BitSeq(inf,1,0) mod=BitSeq(inf,0,0111111) min=BitSeq(inf,1,0000000) max=BitSeq(inf,0,1111111) 8bit add=BitSeq(8,1,) 8bit mult=BitSeq(8,1,0000000)
+bitSeq arith -128 -128: false true false true EQ neg=BitSeq(inf,0,00000001) add=BitSeq(inf,1,00000000) minus=BitSeq(inf,0,) succ=BitSeq(inf,1,1000000) pred=BitSeq(inf,1,11111110) mult=BitSeq(inf,0,000000000000001) pow2=BitSeq(inf,0,000000000000001) div=BitSeq(inf,0,1) mod=BitSeq(inf,0,) min=BitSeq(inf,1,0000000) max=BitSeq(inf,1,0000000) 8bit add=BitSeq(8,0,) 8bit mult=BitSeq(8,0,)
+defaultLnot/Land/Lor/Lxor/Lsl/Lsr/Asr (integer, -6, 3): 6 2 -5 -7 -48 125 -3
+lnot (integer class method) 5 / -1: -6 0
+integerLnot 0 = -1
+integerLnot 1 = -2
+integerLnot -1 = 0
+integerLnot 2 = -3
+integerLnot -2 = 1
+integerLnot 5 = -6
+integerLnot -6 = 5
+integerLnot 127 = -128
+integerLnot -128 = 127
+integerLnot 255 = -256
+integerLnot 256 = -257
+integerLnot -256 = 255
+integerLnot 2147483647 = -2147483648
+integerLnot -2147483648 = 2147483647
+integerLnot 4294967295 = -4294967296
+integerLnot 4611686018427387903 = -4611686018427387904
+integerLnot -4611686018427387904 = 4611686018427387903
+integerLnot 9223372036854775807 = -9223372036854775808
+integerLnot -9223372036854775808 = 9223372036854775807
+integerLnot 18446744073709551615 = -18446744073709551616
+integerLnot 18446744073709551616 = -18446744073709551617
+integerLnot -1267650600228229401496703205376 = 1267650600228229401496703205375
+integerLnot 1267650600228229401496703205375 = -1267650600228229401496703205376
+integer land/lor/lxor 0 0 = 0 0 0
+integer land/lor/lxor 0 1 = 0 1 1
+integer land/lor/lxor 0 -1 = 0 -1 -1
+integer land/lor/lxor 0 5 = 0 5 5
+integer land/lor/lxor 0 -6 = 0 -6 -6
+integer land/lor/lxor 0 255 = 0 255 255
+integer land/lor/lxor 0 -256 = 0 -256 -256
+integer land/lor/lxor 0 18446744073709551616 = 0 18446744073709551616 18446744073709551616
+integer land/lor/lxor 0 -9223372036854775808 = 0 -9223372036854775808 -9223372036854775808
+integer land/lor/lxor 1 0 = 0 1 1
+integer land/lor/lxor 1 1 = 1 1 0
+integer land/lor/lxor 1 -1 = 1 -1 -2
+integer land/lor/lxor 1 5 = 1 5 4
+integer land/lor/lxor 1 -6 = 0 -5 -5
+integer land/lor/lxor 1 255 = 1 255 254
+integer land/lor/lxor 1 -256 = 0 -255 -255
+integer land/lor/lxor 1 18446744073709551616 = 0 18446744073709551617 18446744073709551617
+integer land/lor/lxor 1 -9223372036854775808 = 0 -9223372036854775807 -9223372036854775807
+integer land/lor/lxor -1 0 = 0 -1 -1
+integer land/lor/lxor -1 1 = 1 -1 -2
+integer land/lor/lxor -1 -1 = -1 -1 0
+integer land/lor/lxor -1 5 = 5 -1 -6
+integer land/lor/lxor -1 -6 = -6 -1 5
+integer land/lor/lxor -1 255 = 255 -1 -256
+integer land/lor/lxor -1 -256 = -256 -1 255
+integer land/lor/lxor -1 18446744073709551616 = 18446744073709551616 -1 -18446744073709551617
+integer land/lor/lxor -1 -9223372036854775808 = -9223372036854775808 -1 9223372036854775807
+integer land/lor/lxor 5 0 = 0 5 5
+integer land/lor/lxor 5 1 = 1 5 4
+integer land/lor/lxor 5 -1 = 5 -1 -6
+integer land/lor/lxor 5 5 = 5 5 0
+integer land/lor/lxor 5 -6 = 0 -1 -1
+integer land/lor/lxor 5 255 = 5 255 250
+integer land/lor/lxor 5 -256 = 0 -251 -251
+integer land/lor/lxor 5 18446744073709551616 = 0 18446744073709551621 18446744073709551621
+integer land/lor/lxor 5 -9223372036854775808 = 0 -9223372036854775803 -9223372036854775803
+integer land/lor/lxor -6 0 = 0 -6 -6
+integer land/lor/lxor -6 1 = 0 -5 -5
+integer land/lor/lxor -6 -1 = -6 -1 5
+integer land/lor/lxor -6 5 = 0 -1 -1
+integer land/lor/lxor -6 -6 = -6 -6 0
+integer land/lor/lxor -6 255 = 250 -1 -251
+integer land/lor/lxor -6 -256 = -256 -6 250
+integer land/lor/lxor -6 18446744073709551616 = 18446744073709551616 -6 -18446744073709551622
+integer land/lor/lxor -6 -9223372036854775808 = -9223372036854775808 -6 9223372036854775802
+integer land/lor/lxor 255 0 = 0 255 255
+integer land/lor/lxor 255 1 = 1 255 254
+integer land/lor/lxor 255 -1 = 255 -1 -256
+integer land/lor/lxor 255 5 = 5 255 250
+integer land/lor/lxor 255 -6 = 250 -1 -251
+integer land/lor/lxor 255 255 = 255 255 0
+integer land/lor/lxor 255 -256 = 0 -1 -1
+integer land/lor/lxor 255 18446744073709551616 = 0 18446744073709551871 18446744073709551871
+integer land/lor/lxor 255 -9223372036854775808 = 0 -9223372036854775553 -9223372036854775553
+integer land/lor/lxor -256 0 = 0 -256 -256
+integer land/lor/lxor -256 1 = 0 -255 -255
+integer land/lor/lxor -256 -1 = -256 -1 255
+integer land/lor/lxor -256 5 = 0 -251 -251
+integer land/lor/lxor -256 -6 = -256 -6 250
+integer land/lor/lxor -256 255 = 0 -1 -1
+integer land/lor/lxor -256 -256 = -256 -256 0
+integer land/lor/lxor -256 18446744073709551616 = 18446744073709551616 -256 -18446744073709551872
+integer land/lor/lxor -256 -9223372036854775808 = -9223372036854775808 -256 9223372036854775552
+integer land/lor/lxor 18446744073709551616 0 = 0 18446744073709551616 18446744073709551616
+integer land/lor/lxor 18446744073709551616 1 = 0 18446744073709551617 18446744073709551617
+integer land/lor/lxor 18446744073709551616 -1 = 18446744073709551616 -1 -18446744073709551617
+integer land/lor/lxor 18446744073709551616 5 = 0 18446744073709551621 18446744073709551621
+integer land/lor/lxor 18446744073709551616 -6 = 18446744073709551616 -6 -18446744073709551622
+integer land/lor/lxor 18446744073709551616 255 = 0 18446744073709551871 18446744073709551871
+integer land/lor/lxor 18446744073709551616 -256 = 18446744073709551616 -256 -18446744073709551872
+integer land/lor/lxor 18446744073709551616 18446744073709551616 = 18446744073709551616 18446744073709551616 0
+integer land/lor/lxor 18446744073709551616 -9223372036854775808 = 18446744073709551616 -9223372036854775808 -27670116110564327424
+integer land/lor/lxor -9223372036854775808 0 = 0 -9223372036854775808 -9223372036854775808
+integer land/lor/lxor -9223372036854775808 1 = 0 -9223372036854775807 -9223372036854775807
+integer land/lor/lxor -9223372036854775808 -1 = -9223372036854775808 -1 9223372036854775807
+integer land/lor/lxor -9223372036854775808 5 = 0 -9223372036854775803 -9223372036854775803
+integer land/lor/lxor -9223372036854775808 -6 = -9223372036854775808 -6 9223372036854775802
+integer land/lor/lxor -9223372036854775808 255 = 0 -9223372036854775553 -9223372036854775553
+integer land/lor/lxor -9223372036854775808 -256 = -9223372036854775808 -256 9223372036854775552
+integer land/lor/lxor -9223372036854775808 18446744073709551616 = 18446744073709551616 -9223372036854775808 -27670116110564327424
+integer land/lor/lxor -9223372036854775808 -9223372036854775808 = -9223372036854775808 -9223372036854775808 0
+integer lsl/asr 0 0 = 0 0
+integer lsl/asr 0 1 = 0 0
+integer lsl/asr 0 3 = 0 0
+integer lsl/asr 0 31 = 0 0
+integer lsl/asr 0 32 = 0 0
+integer lsl/asr 0 63 = 0 0
+integer lsl/asr 0 64 = 0 0
+integer lsl/asr 0 65 = 0 0
+integer lsl/asr 0 100 = 0 0
+integer lsl/asr 1 0 = 1 1
+integer lsl/asr 1 1 = 2 0
+integer lsl/asr 1 3 = 8 0
+integer lsl/asr 1 31 = 2147483648 0
+integer lsl/asr 1 32 = 4294967296 0
+integer lsl/asr 1 63 = 9223372036854775808 0
+integer lsl/asr 1 64 = 18446744073709551616 0
+integer lsl/asr 1 65 = 36893488147419103232 0
+integer lsl/asr 1 100 = 1267650600228229401496703205376 0
+integer lsl/asr -1 0 = -1 -1
+integer lsl/asr -1 1 = -2 -1
+integer lsl/asr -1 3 = -8 -1
+integer lsl/asr -1 31 = -2147483648 -1
+integer lsl/asr -1 32 = -4294967296 -1
+integer lsl/asr -1 63 = -9223372036854775808 -1
+integer lsl/asr -1 64 = -18446744073709551616 -1
+integer lsl/asr -1 65 = -36893488147419103232 -1
+integer lsl/asr -1 100 = -1267650600228229401496703205376 -1
+integer lsl/asr 5 0 = 5 5
+integer lsl/asr 5 1 = 10 2
+integer lsl/asr 5 3 = 40 0
+integer lsl/asr 5 31 = 10737418240 0
+integer lsl/asr 5 32 = 21474836480 0
+integer lsl/asr 5 63 = 46116860184273879040 0
+integer lsl/asr 5 64 = 92233720368547758080 0
+integer lsl/asr 5 65 = 184467440737095516160 0
+integer lsl/asr 5 100 = 6338253001141147007483516026880 0
+integer lsl/asr -6 0 = -6 -6
+integer lsl/asr -6 1 = -12 -3
+integer lsl/asr -6 3 = -48 -1
+integer lsl/asr -6 31 = -12884901888 -1
+integer lsl/asr -6 32 = -25769803776 -1
+integer lsl/asr -6 63 = -55340232221128654848 -1
+integer lsl/asr -6 64 = -110680464442257309696 -1
+integer lsl/asr -6 65 = -221360928884514619392 -1
+integer lsl/asr -6 100 = -7605903601369376408980219232256 -1
+integer lsl/asr 255 0 = 255 255
+integer lsl/asr 255 1 = 510 127
+integer lsl/asr 255 3 = 2040 31
+integer lsl/asr 255 31 = 547608330240 0
+integer lsl/asr 255 32 = 1095216660480 0
+integer lsl/asr 255 63 = 2351959869397967831040 0
+integer lsl/asr 255 64 = 4703919738795935662080 0
+integer lsl/asr 255 65 = 9407839477591871324160 0
+integer lsl/asr 255 100 = 323250903058198497381659317370880 0
+integer lsl/asr -256 0 = -256 -256
+integer lsl/asr -256 1 = -512 -128
+integer lsl/asr -256 3 = -2048 -32
+integer lsl/asr -256 31 = -549755813888 -1
+integer lsl/asr -256 32 = -1099511627776 -1
+integer lsl/asr -256 63 = -2361183241434822606848 -1
+integer lsl/asr -256 64 = -4722366482869645213696 -1
+integer lsl/asr -256 65 = -9444732965739290427392 -1
+integer lsl/asr -256 100 = -324518553658426726783156020576256 -1
+integer lsl/asr 18446744073709551616 0 = 18446744073709551616 18446744073709551616
+integer lsl/asr 18446744073709551616 1 = 36893488147419103232 9223372036854775808
+integer lsl/asr 18446744073709551616 3 = 147573952589676412928 2305843009213693952
+integer lsl/asr 18446744073709551616 31 = 39614081257132168796771975168 8589934592
+integer lsl/asr 18446744073709551616 32 = 79228162514264337593543950336 4294967296
+integer lsl/asr 18446744073709551616 63 = 170141183460469231731687303715884105728 2
+integer lsl/asr 18446744073709551616 64 = 340282366920938463463374607431768211456 1
+integer lsl/asr 18446744073709551616 65 = 680564733841876926926749214863536422912 0
+integer lsl/asr 18446744073709551616 100 = 23384026197294446691258957323460528314494920687616 0
+integer lsl/asr -9223372036854775808 0 = -9223372036854775808 -9223372036854775808
+integer lsl/asr -9223372036854775808 1 = -18446744073709551616 -4611686018427387904
+integer lsl/asr -9223372036854775808 3 = -73786976294838206464 -1152921504606846976
+integer lsl/asr -9223372036854775808 31 = -19807040628566084398385987584 -4294967296
+integer lsl/asr -9223372036854775808 32 = -39614081257132168796771975168 -2147483648
+integer lsl/asr -9223372036854775808 63 = -85070591730234615865843651857942052864 -1
+integer lsl/asr -9223372036854775808 64 = -170141183460469231731687303715884105728 -1
+integer lsl/asr -9223372036854775808 65 = -340282366920938463463374607431768211456 -1
+integer lsl/asr -9223372036854775808 100 = -11692013098647223345629478661730264157247460343808 -1
+natural land/lor/lxor 0 0 = 0 0 0
+natural land/lor/lxor 0 3 = 0 3 3
+natural land/lor/lxor 0 256 = 0 256 256
+natural land/lor/lxor 0 18446744073709551616 = 0 18446744073709551616 18446744073709551616
+natural land/lor/lxor 1 0 = 0 1 1
+natural land/lor/lxor 1 3 = 1 3 2
+natural land/lor/lxor 1 256 = 0 257 257
+natural land/lor/lxor 1 18446744073709551616 = 0 18446744073709551617 18446744073709551617
+natural land/lor/lxor 6 0 = 0 6 6
+natural land/lor/lxor 6 3 = 2 7 5
+natural land/lor/lxor 6 256 = 0 262 262
+natural land/lor/lxor 6 18446744073709551616 = 0 18446744073709551622 18446744073709551622
+natural land/lor/lxor 255 0 = 0 255 255
+natural land/lor/lxor 255 3 = 3 255 252
+natural land/lor/lxor 255 256 = 0 511 511
+natural land/lor/lxor 255 18446744073709551616 = 0 18446744073709551871 18446744073709551871
+natural land/lor/lxor 4294967296 0 = 0 4294967296 4294967296
+natural land/lor/lxor 4294967296 3 = 0 4294967299 4294967299
+natural land/lor/lxor 4294967296 256 = 0 4294967552 4294967552
+natural land/lor/lxor 4294967296 18446744073709551616 = 0 18446744078004518912 18446744078004518912
+natural land/lor/lxor 18446744073709551615 0 = 0 18446744073709551615 18446744073709551615
+natural land/lor/lxor 18446744073709551615 3 = 3 18446744073709551615 18446744073709551612
+natural land/lor/lxor 18446744073709551615 256 = 256 18446744073709551615 18446744073709551359
+natural land/lor/lxor 18446744073709551615 18446744073709551616 = 0 36893488147419103231 36893488147419103231
+natural land/lor/lxor 1267650600228229401496703205375 0 = 0 1267650600228229401496703205375 1267650600228229401496703205375
+natural land/lor/lxor 1267650600228229401496703205375 3 = 3 1267650600228229401496703205375 1267650600228229401496703205372
+natural land/lor/lxor 1267650600228229401496703205375 256 = 256 1267650600228229401496703205375 1267650600228229401496703205119
+natural land/lor/lxor 1267650600228229401496703205375 18446744073709551616 = 18446744073709551616 1267650600228229401496703205375 1267650600209782657422993653759
+natural lsl/asr 0 0 = 0 0
+natural lsl/asr 0 1 = 0 0
+natural lsl/asr 0 3 = 0 0
+natural lsl/asr 0 31 = 0 0
+natural lsl/asr 0 32 = 0 0
+natural lsl/asr 0 63 = 0 0
+natural lsl/asr 0 64 = 0 0
+natural lsl/asr 0 65 = 0 0
+natural lsl/asr 0 100 = 0 0
+natural lsl/asr 1 0 = 1 1
+natural lsl/asr 1 1 = 2 0
+natural lsl/asr 1 3 = 8 0
+natural lsl/asr 1 31 = 2147483648 0
+natural lsl/asr 1 32 = 4294967296 0
+natural lsl/asr 1 63 = 9223372036854775808 0
+natural lsl/asr 1 64 = 18446744073709551616 0
+natural lsl/asr 1 65 = 36893488147419103232 0
+natural lsl/asr 1 100 = 1267650600228229401496703205376 0
+natural lsl/asr 255 0 = 255 255
+natural lsl/asr 255 1 = 510 127
+natural lsl/asr 255 3 = 2040 31
+natural lsl/asr 255 31 = 547608330240 0
+natural lsl/asr 255 32 = 1095216660480 0
+natural lsl/asr 255 63 = 2351959869397967831040 0
+natural lsl/asr 255 64 = 4703919738795935662080 0
+natural lsl/asr 255 65 = 9407839477591871324160 0
+natural lsl/asr 255 100 = 323250903058198497381659317370880 0
+natural lsl/asr 18446744073709551617 0 = 18446744073709551617 18446744073709551617
+natural lsl/asr 18446744073709551617 1 = 36893488147419103234 9223372036854775808
+natural lsl/asr 18446744073709551617 3 = 147573952589676412936 2305843009213693952
+natural lsl/asr 18446744073709551617 31 = 39614081257132168798919458816 8589934592
+natural lsl/asr 18446744073709551617 32 = 79228162514264337597838917632 4294967296
+natural lsl/asr 18446744073709551617 63 = 170141183460469231740910675752738881536 2
+natural lsl/asr 18446744073709551617 64 = 340282366920938463481821351505477763072 1
+natural lsl/asr 18446744073709551617 65 = 680564733841876926963642703010955526144 0
+natural lsl/asr 18446744073709551617 100 = 23384026197294446692526607923688757715991623892992 0
+naturalFromBitSeq / bitSeqFromNatural: 77 BitSeq(8,0,1011001) BitSeq(inf,0,00000000000000000000000000000000000000000000000000000000000000001)
+int32 lnot/land/lor/lxor 0 0 = -1 0 0 0
+int32 lnot/land/lor/lxor 0 -1 = -1 0 -1 -1
+int32 lnot/land/lor/lxor 0 255 = -1 0 255 255
+int32 lnot/land/lor/lxor 0 -2147483648 = -1 0 -2147483648 -2147483648
+int32 lnot/land/lor/lxor -1 0 = 0 0 -1 -1
+int32 lnot/land/lor/lxor -1 -1 = 0 -1 -1 0
+int32 lnot/land/lor/lxor -1 255 = 0 255 -1 -256
+int32 lnot/land/lor/lxor -1 -2147483648 = 0 -2147483648 -1 2147483647
+int32 lnot/land/lor/lxor -2147483648 0 = 2147483647 0 -2147483648 -2147483648
+int32 lnot/land/lor/lxor -2147483648 -1 = 2147483647 -2147483648 -1 2147483647
+int32 lnot/land/lor/lxor -2147483648 255 = 2147483647 0 -2147483393 -2147483393
+int32 lnot/land/lor/lxor -2147483648 -2147483648 = 2147483647 -2147483648 -2147483648 0
+int32 lnot/land/lor/lxor 2147483647 0 = -2147483648 0 2147483647 2147483647
+int32 lnot/land/lor/lxor 2147483647 -1 = -2147483648 2147483647 -1 -2147483648
+int32 lnot/land/lor/lxor 2147483647 255 = -2147483648 255 2147483647 2147483392
+int32 lnot/land/lor/lxor 2147483647 -2147483648 = -2147483648 0 -1 -1
+int32 lnot/land/lor/lxor 1515870810 0 = -1515870811 0 1515870810 1515870810
+int32 lnot/land/lor/lxor 1515870810 -1 = -1515870811 1515870810 -1 -1515870811
+int32 lnot/land/lor/lxor 1515870810 255 = -1515870811 90 1515870975 1515870885
+int32 lnot/land/lor/lxor 1515870810 -2147483648 = -1515870811 0 -631612838 -631612838
+int32 lsl/lsr/asr 1 0 = 1 1 1
+int32 lsl/lsr/asr 1 1 = 2 0 0
+int32 lsl/lsr/asr 1 4 = 16 0 0
+int32 lsl/lsr/asr 1 30 = 1073741824 0 0
+int32 lsl/lsr/asr 1 31 = -2147483648 0 0
+int32 lsl/lsr/asr -1 0 = -1 -1 -1
+int32 lsl/lsr/asr -1 1 = -2 2147483647 -1
+int32 lsl/lsr/asr -1 4 = -16 268435455 -1
+int32 lsl/lsr/asr -1 30 = -1073741824 3 -1
+int32 lsl/lsr/asr -1 31 = -2147483648 1 -1
+int32 lsl/lsr/asr -2147483648 0 = -2147483648 -2147483648 -2147483648
+int32 lsl/lsr/asr -2147483648 1 = 0 1073741824 -1073741824
+int32 lsl/lsr/asr -2147483648 4 = 0 134217728 -134217728
+int32 lsl/lsr/asr -2147483648 30 = 0 2 -2
+int32 lsl/lsr/asr -2147483648 31 = 0 1 -1
+int32 lsl/lsr/asr 1515870810 0 = 1515870810 1515870810 1515870810
+int32 lsl/lsr/asr 1515870810 1 = -1263225676 757935405 757935405
+int32 lsl/lsr/asr 1515870810 4 = -1515870816 94741925 94741925
+int32 lsl/lsr/asr 1515870810 30 = -2147483648 1 1
+int32 lsl/lsr/asr 1515870810 31 = 0 0 0
+int64 lnot/land/lor/lxor 0 0 = -1 0 0 0
+int64 lnot/land/lor/lxor 0 -1 = -1 0 -1 -1
+int64 lnot/land/lor/lxor 0 255 = -1 0 255 255
+int64 lnot/land/lor/lxor 0 -9223372036854775808 = -1 0 -9223372036854775808 -9223372036854775808
+int64 lnot/land/lor/lxor -1 0 = 0 0 -1 -1
+int64 lnot/land/lor/lxor -1 -1 = 0 -1 -1 0
+int64 lnot/land/lor/lxor -1 255 = 0 255 -1 -256
+int64 lnot/land/lor/lxor -1 -9223372036854775808 = 0 -9223372036854775808 -1 9223372036854775807
+int64 lnot/land/lor/lxor -9223372036854775808 0 = 9223372036854775807 0 -9223372036854775808 -9223372036854775808
+int64 lnot/land/lor/lxor -9223372036854775808 -1 = 9223372036854775807 -9223372036854775808 -1 9223372036854775807
+int64 lnot/land/lor/lxor -9223372036854775808 255 = 9223372036854775807 0 -9223372036854775553 -9223372036854775553
+int64 lnot/land/lor/lxor -9223372036854775808 -9223372036854775808 = 9223372036854775807 -9223372036854775808 -9223372036854775808 0
+int64 lnot/land/lor/lxor 9223372036854775807 0 = -9223372036854775808 0 9223372036854775807 9223372036854775807
+int64 lnot/land/lor/lxor 9223372036854775807 -1 = -9223372036854775808 9223372036854775807 -1 -9223372036854775808
+int64 lnot/land/lor/lxor 9223372036854775807 255 = -9223372036854775808 255 9223372036854775807 9223372036854775552
+int64 lnot/land/lor/lxor 9223372036854775807 -9223372036854775808 = -9223372036854775808 0 -1 -1
+int64 lnot/land/lor/lxor 6510615555426900570 0 = -6510615555426900571 0 6510615555426900570 6510615555426900570
+int64 lnot/land/lor/lxor 6510615555426900570 -1 = -6510615555426900571 6510615555426900570 -1 -6510615555426900571
+int64 lnot/land/lor/lxor 6510615555426900570 255 = -6510615555426900571 90 6510615555426900735 6510615555426900645
+int64 lnot/land/lor/lxor 6510615555426900570 -9223372036854775808 = -6510615555426900571 0 -2712756481427875238 -2712756481427875238
+int64 lsl/lsr/asr 1 0 = 1 1 1
+int64 lsl/lsr/asr 1 1 = 2 0 0
+int64 lsl/lsr/asr 1 4 = 16 0 0
+int64 lsl/lsr/asr 1 32 = 4294967296 0 0
+int64 lsl/lsr/asr 1 62 = 4611686018427387904 0 0
+int64 lsl/lsr/asr 1 63 = -9223372036854775808 0 0
+int64 lsl/lsr/asr -1 0 = -1 -1 -1
+int64 lsl/lsr/asr -1 1 = -2 9223372036854775807 -1
+int64 lsl/lsr/asr -1 4 = -16 1152921504606846975 -1
+int64 lsl/lsr/asr -1 32 = -4294967296 4294967295 -1
+int64 lsl/lsr/asr -1 62 = -4611686018427387904 3 -1
+int64 lsl/lsr/asr -1 63 = -9223372036854775808 1 -1
+int64 lsl/lsr/asr -9223372036854775808 0 = -9223372036854775808 -9223372036854775808 -9223372036854775808
+int64 lsl/lsr/asr -9223372036854775808 1 = 0 4611686018427387904 -4611686018427387904
+int64 lsl/lsr/asr -9223372036854775808 4 = 0 576460752303423488 -576460752303423488
+int64 lsl/lsr/asr -9223372036854775808 32 = 0 2147483648 -2147483648
+int64 lsl/lsr/asr -9223372036854775808 62 = 0 2 -2
+int64 lsl/lsr/asr -9223372036854775808 63 = 0 1 -1
+int64 lsl/lsr/asr 6510615555426900570 0 = 6510615555426900570 6510615555426900570 6510615555426900570
+int64 lsl/lsr/asr 6510615555426900570 1 = -5425512962855750476 3255307777713450285 3255307777713450285
+int64 lsl/lsr/asr 6510615555426900570 4 = -6510615555426900576 406913472214181285 406913472214181285
+int64 lsl/lsr/asr 6510615555426900570 32 = 6510615553911029760 1515870810 1515870810
+int64 lsl/lsr/asr 6510615555426900570 62 = -9223372036854775808 1 1
+int64 lsl/lsr/asr 6510615555426900570 63 = 0 0 0

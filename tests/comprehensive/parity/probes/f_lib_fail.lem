@@ -1,0 +1,9 @@
+(* Library-coverage failure probe (2026-09-30, library-parity-coverage
+   record): Assert_extra.fail must FAIL on both targets, after the same stdout
+   prefix. The steps take the RUNTIME nat n = 0, so neither compiler can
+   fold the failing call into module initialisation. *)
+open import Pervasives_extra
+
+let steps : list (nat -> string) =
+  [ (fun n -> "in domain: " ^ show (n + 1));
+    (fun n -> "failing: " ^ (if n = 0 then fail else "unreached")) ]

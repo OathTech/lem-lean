@@ -1,0 +1,61 @@
+(* Library-coverage probe (2026-09-30, library-parity-coverage record):
+   library/list.lem functions not covered by p_list_ops / p_list_deep —
+   equality and lexicographic comparison (by class and By), snoc,
+   map_tr/count_map/reverseMap, any/all, dest_init, findIndices/
+   elemIndices, splitAtAcc/splitWhile(_tr)/takeWhile/dropWhile,
+   isPrefixOf, update, elemBy, find, lookupBy, reversePartition,
+   deleteFirst/deleteBy/deletes, allDistinct, mapMaybe, mapi, catMaybes —
+   on empty, singleton, duplicate-laden and LCG lists. Expected values
+   are the OCaml target's output. *)
+open import Pervasives_extra
+
+let sb (b : bool) : string = if b then "T" else "F"
+let so (o : ordering) : string = match o with LT -> "LT" | EQ -> "EQ" | GT -> "GT" end
+
+let lcg (s : natural) : natural = (s * 6364136223846793005 + 1442695040888963407) mod 18446744073709551616
+let rec lcg_list (n : nat) (s : natural) : list natural =
+  match n with 0 -> [] | n' + 1 -> let s' = lcg s in s' :: lcg_list n' s' end
+let rnd : list nat = List.map (fun r -> natFromNatural ((r / 4096) mod 6)) (lcg_list 14 777)
+
+let lists : list (list nat) = [[]; [0]; [3]; [1; 2]; [2; 1]; [1; 2; 3]; [1; 1; 2; 2]; [3; 1; 3; 1]; rnd]
+
+let cross (xs : list 'a) (ys : list 'b) : list ('a * 'b) = List.concatMap (fun x -> List.map (fun y -> (x, y)) ys) xs
+
+let results : list string =
+  [ "rnd: " ^ show rnd ] ++
+  List.map (fun (a, b) -> "cmp " ^ show a ^ " " ^ show b ^ ": listEqual=" ^ sb (List.listEqual a b)
+      ^ " listEqualBy(mod2)=" ^ sb (List.listEqualBy (fun x y -> x mod 2 = y mod 2) a b)
+      ^ " lexCompare=" ^ so (List.lexicographicCompare a b) ^ " lexCompareBy(rev)=" ^ so (List.lexicographicCompareBy (fun x y -> compare y x) a b)
+      ^ " lexLess=" ^ sb (List.lexicographicLess a b) ^ " lexLessEq=" ^ sb (List.lexicographicLessEq a b)
+      ^ " lexLessBy=" ^ sb (List.lexicographicLessBy (fun x y -> x < y) (fun x y -> x = y) a b)
+      ^ " lexLessEqBy=" ^ sb (List.lexicographicLessEqBy (fun x y -> x < y) (fun x y -> x = y) a b)
+      ^ " isPrefixOf=" ^ sb (List.isPrefixOf a b)) (cross lists lists) ++
+  List.map (fun l -> "list " ^ show l ^ ":"
+      ^ " null=" ^ sb (List.null l) ^ " snoc9=" ^ show (List.snoc 9 l)
+      ^ " map_tr=" ^ show (List.map_tr [100] (fun x -> x * 10) l)
+      ^ " count_map=" ^ show (List.count_map (fun x -> x + 1) l 0)
+      ^ " reverseMap=" ^ show (List.reverseMap (fun x -> x * 2) l)
+      ^ " any>2=" ^ sb (List.any (fun x -> x > 2) l) ^ " all>0=" ^ sb (List.all (fun x -> x > 0) l)
+      ^ " dest_init=" ^ show (List.dest_init l)
+      ^ " findIndices odd=" ^ show (List.findIndices (fun x -> x mod 2 = 1) l)
+      ^ " elemIndices 1=" ^ show (List.elemIndices 1 l)
+      ^ " splitAtAcc [7] 1=" ^ show (List.splitAtAcc [7] 1 l)
+      ^ " splitWhile<3=" ^ show (List.splitWhile (fun x -> x < 3) l)
+      ^ " splitWhile_tr=" ^ show (List.splitWhile_tr (fun x -> x < 3) l [8])
+      ^ " takeWhile<3=" ^ show (List.takeWhile (fun x -> x < 3) l) ^ " dropWhile<3=" ^ show (List.dropWhile (fun x -> x < 3) l)
+      ^ " update 1 7=" ^ show (List.update l 1 7) ^ " update 0 7=" ^ show (List.update l 0 7) ^ " update 99 7=" ^ show (List.update l 99 7)
+      ^ " elemBy(mod3) 4=" ^ sb (List.elemBy (fun x y -> x mod 3 = y mod 3) 4 l)
+      ^ " find>1=" ^ show (List.find (fun x -> x > 1) l)
+      ^ " reversePartition odd=" ^ show (List.reversePartition (fun x -> x mod 2 = 1) l)
+      ^ " deleteFirst=1=" ^ show (List.deleteFirst (fun x -> x = 1) l)
+      ^ " deleteBy(mod2) 3=" ^ show (List.deleteBy (fun x y -> x mod 2 = y mod 2) 3 l)
+      ^ " deletes [1;3]=" ^ show (List.deletes l [1; 3])
+      ^ " allDistinct=" ^ sb (List.allDistinct l)
+      ^ " mapMaybe=" ^ show (List.mapMaybe (fun x -> if x mod 2 = 0 then Just (x * 10) else Nothing) l)
+      ^ " mapi=" ^ show (List.mapi (fun i x -> i * 100 + x) l)) lists ++
+  [ "lookupBy (mod3) 4: " ^ show (List.lookupBy (fun x y -> x mod 3 = y mod 3) (4:nat) [(0, "a"); (1, "b"); (7, "c")]);
+    "lookupBy none: " ^ show (List.lookupBy (fun x y -> x = y) (4:nat) [(0, "a")]);
+    "catMaybes: " ^ show (List.catMaybes [Just (1:nat); Nothing; Just 3; Nothing]) ^ " " ^ show (List.catMaybes ([] : list (maybe nat)));
+    "lexicographicCompare strings: " ^ so (List.lexicographicCompare ["a"; "b"] ["a"; "ab"]);
+    "deletes empty: " ^ show (List.deletes ([] : list nat) [1]) ^ " " ^ show (List.deletes [(1:nat); 1] [])
+  ]

@@ -1,0 +1,142 @@
+unsafe_structural_equality [1;2] [1;2]: true
+unsafe_structural_equality "a" "b": false
+unsafe_structural_inequality 1 2: true
+unsafe_structural_inequality (Just 1) (Just 1): false
+orderingEqual LT LT: true
+orderingEqual LT GT: false
+defaultCompare 3 5: LT
+defaultCompare 5 5: EQ
+defaultCompare "b" "ab": GT
+defaultCompare "" "a": LT
+defaultCompare (-3) 2 (integer): LT
+defaultCompare (-3) 2 (int): LT
+defaultCompare false true: LT
+defaultCompare 'a' 'B': GT
+defaultLess 1 2: true
+defaultLessEq 2 2: true
+defaultGreater "b" "a": true
+defaultGreaterEq 1 2: false
+ordCompare 1 2: LT
+ordCompare 2 2: EQ
+ordCompare 3 2: GT
+ordCompare K1a K1b: EQ
+minByLessEqual (<=) 3 2: 2
+maxByLessEqual (<=) 3 2: 3
+minByLessEqual on equal K: K1x
+maxByLessEqual on equal K: K1x
+defaultMax 3 7: 7
+defaultMin 3 7: 3
+defaultMax "ab" "b": b
+defaultMin "ab" "b": ab
+charEqual 'a' 'a': true
+charEqual 'a' 'A': false
+stringEquality "" "": true
+stringEquality "a" "a ": false
+pairEqual (1,a) (1,a): true
+pairEqual (1,a) (1,b): false
+pairEqualBy mod2: true
+pairCompare (1,2) (1,3): LT
+pairCompare (2,0) (1,3): GT
+pairCompare (1,3) (1,3): EQ
+tripleEqual: true false
+tripleCompare: LT GT
+quadrupleEqual: true false
+quadrupleCompare: LT EQ
+quintupleEqual: true false
+quintupleCompare: GT
+sextupleEqual: true false
+sextupleCompare: LT
+compare on K (Ord instance): EQ GT
+max K2a K1z: K2a
+min K2a K1z: K1z
+xor: falsetruetruefalse
+eitherEqual L1 L1: true
+eitherEqual L1 R"1": false
+eitherEqual Ra Ra: true
+eitherEqualBy mod2: true
+isLeft/isRight: truefalsefalsetrue
+either: 7 r!
+partitionEither: ([1; 2; 3], ["a"; "b"; "c"])
+partitionEither []: ([], [])
+lefts: [1; 2; 3]
+rights: ["a"; "b"; "c"]
+id: 4
+const: 4
+comb: 50
+flip (-): 7
+Function.curry: 42
+Function.uncurry: 42
+apply/rev_apply: 5 6
+fst/snd: 1 a
+Tuple.curry: 53
+Tuple.uncurry: 53
+swap: ("a", 1)
+maybeEqual: truefalsetruefalse
+maybeEqualBy mod2: true
+maybe: 3 d
+isJust/isNothing: truefalsefalsetrue
+fromMaybe: 1 9
+Maybe.map: Just (2) Nothing
+Maybe.bind: Just (8) Nothing
+fromJust: 8
+stringFromMaybe: Just (3) Nothing
+stringFromListAux: [1; 2; 3] []
+stringFromList: [1; 2; 3] [] [7]
+stringFromPair: (1, a)
+isPermutation: truefalsetruefalse
+isPermutationBy mod3: true
+isSorted: truefalsetruetrue
+isSortedBy (>=): true
+Sorting.insert: [1; 2; 3; 4; 5] [3] [3; 3; 3]
+Sorting.insertBy on equal fst: [(0, "a"); (1, "b"); (1, "c"); (1, "new"); (2, "d")]
+insertSort: [0; 1; 3; 3; 5]
+insertSortBy stable?: [(1, "b"); (1, "d"); (2, "a"); (2, "c")]
+sortBy stable?: [(0, "e"); (1, "b"); (1, "d"); (2, "a"); (2, "c")]
+sortBy (>=): [9; 9; 4; 2; 1]
+sortByOrd []: []
+predicate_of_ord: truetruefalse
+Sorting.sort K (coarse Ord): ["K1b"; "K1d"; "K2a"; "K2c"]
+head: 4
+tail: [5] []
+init: [4; 5] []
+foldl1 (-): 5
+foldr1 (-): 3
+foldl1 singleton: 10
+findNonPure: 3
+zipSameLength: [(1, "a"); (2, "b")] []
+unfoldr: [25; 16; 9; 4; 1]
+unfoldr empty: []
+List_extra.nth 0: 7
+empty_string: [] len 0
+toCharList/toString: cba
+makeString 3 'x': xxx []
+cons_string: qrs
+string_case: empty cons x|yz
+String.concat: a, b, c [] [x]
+ord/chr: 65 10 a0~
+ord 0 / 127: 0 127
+stringFromNatHelper: 120! 
+stringFromNaturalHelper: 98765432109876543210!
+stringFromNat 0 / 4611686018427387903: 0 4611686018427387903
+stringFromNatural 2^64: 18446744073709551616
+stringFromInt -4611686018427387904: -4611686018427387904
+stringFromInteger -2^70: -1180591620717411303424
+String_extra.nth: eo
+stringConcat: abcd []
+stringCompare: LT GT EQ LT GT
+stringLess etc: truetruefalsetrue
+integerOfChar: 0 9 5
+integerOfStringHelper: 123 0
+naturalOfString: 0 123456789012345678901234567890
+integerOfString: -42 0 -123456789012345678901234567890
+setCompareBy: LT EQ GT LT GT
+setCompare: GT
+leastFixedPointUnbounded: {0; 3; 6; 9; 12}
+leastFixedPointUnbounded closure: {1; 2; 3; 4; 5; 6; 7; 8; 9; 10}
+choose singleton: 4
+toOrderedList: [1; 2; 3]
+Map_extra.mapMaybe: [(2, "b!"); (4, "d!")]
+Map_extra.mapMaybe empty: []
+Map_extra.find: b
+Map_extra.fromSet: [(1, 1); (2, 4); (3, 9)]
+Map_extra.fold: 1=a;2=b;3=c;

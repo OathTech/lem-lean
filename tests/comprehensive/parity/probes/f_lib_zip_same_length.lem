@@ -1,0 +1,9 @@
+(* Library-coverage failure probe (2026-09-30, library-parity-coverage
+   record): List_extra.zipSameLength on unequal lengths (OCaml List.combine: Invalid_argument) must FAIL on both targets, after the same stdout
+   prefix. The steps take the RUNTIME nat n = 0, so neither compiler can
+   fold the failing call into module initialisation. *)
+open import Pervasives_extra
+
+let steps : list (nat -> string) =
+  [ (fun n -> "in domain: " ^ show (List_extra.zipSameLength (List.replicate (n + 2) (1:nat)) ["a"; "b"]));
+    (fun n -> "failing: " ^ show (List_extra.zipSameLength (List.replicate (n + 1) (1:nat)) ["a"; "b"])) ]

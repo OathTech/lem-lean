@@ -1,0 +1,107 @@
+(* Library-coverage probe (2026-09-30, library-parity-coverage record):
+   library/word.lem — the bitSequence representation and its arithmetic
+   (bitSeqFromInteger ... bitSeqMax), the generic default* bitwise
+   helpers, and the NAMED bitwise operations at every numeric type
+   (integer/natural: zarith on OCaml vs lem's bitSeq definitions on Lean;
+   int/nat: OCaml native land/lor/... vs lem's 31-bit bitSeq definitions
+   on Lean; int32/int64: Int32/Int64 on both), on 0, +-1, sign-boundary
+   and multi-word values. Expected values are the OCaml target's output. *)
+open import Pervasives_extra
+
+let sI (i : integer) : string = stringFromInteger i
+let sN (n : natural) : string = stringFromNatural n
+let s32 (x : int32) : string = stringFromInteger (integerFromInt32 x)
+let s64 (x : int64) : string = stringFromInteger (integerFromInt64 x)
+let sb (b : bool) : string = if b then "1" else "0"
+let so (o : ordering) : string = match o with LT -> "LT" | EQ -> "EQ" | GT -> "GT" end
+let sbl (bl : list bool) : string = String.concat "" (List.map sb bl)
+let sbs (bs : bitSequence) : string = match bs with
+  | BitSeq len s bl -> "BitSeq(" ^ (match len with Nothing -> "inf" | Just n -> show n end) ^ "," ^ sb s ^ "," ^ sbl bl ^ ")"
+  end
+let smb (m : maybe bool) : string = match m with Nothing -> "Nothing" | Just b -> "Just " ^ sb b end
+
+let bsI (i : integer) : bitSequence = bitSeqFromInteger Nothing i
+let bs8 (i : integer) : bitSequence = bitSeqFromInteger (Just 8) i
+
+let ints : list integer =
+  [0; 1; 0-1; 2; 0-2; 5; 0-6; 127; 0-128; 255; 256; 0-256;
+   2147483647; 0-2147483648; 4294967295; 4611686018427387903; 0-4611686018427387904;
+   9223372036854775807; 0-9223372036854775808; 18446744073709551615; 18446744073709551616;
+   0-1267650600228229401496703205376; 1267650600228229401496703205375]
+let small_ints : list integer = [0; 1; 0-1; 5; 0-6; 255; 0-256; 18446744073709551616; 0-9223372036854775808]
+let shifts : list nat = [0; 1; 3; 31; 32; 63; 64; 65; 100]
+
+let cross (xs : list 'a) (ys : list 'b) : list ('a * 'b) = List.concatMap (fun x -> List.map (fun y -> (x, y)) ys) xs
+
+let results : list string =
+  (* bitSequence basics *)
+  List.map (fun i -> "bitSeqFromInteger Nothing " ^ sI i ^ " = " ^ sbs (bsI i) ^ " -> integerFromBitSeq " ^ sI (integerFromBitSeq (bsI i))
+      ^ " | (Just 8) " ^ sbs (bs8 i) ^ " -> " ^ sI (integerFromBitSeq (bs8 i))
+      ^ " | boolListFromInteger " ^ (let (s, bl) = boolListFromInteger i in sb s ^ "," ^ sbl bl)
+      ^ " | integerFromBoolList " ^ sI (integerFromBoolList (boolListFromInteger i))) ints ++
+  [ "boolListFrombitSeq 12 (-6): " ^ sbl (boolListFrombitSeq 12 (bsI (0-6)));
+    "boolListFrombitSeq 0 5: [" ^ sbl (boolListFrombitSeq 0 (bsI 5)) ^ "]";
+    "bitSeqFromBoolList 0101: " ^ (match bitSeqFromBoolList [false; true; false; true] with Nothing -> "Nothing" | Just b -> sbs b end);
+    "bitSeqFromBoolList []: " ^ (match bitSeqFromBoolList [] with Nothing -> "Nothing" | Just b -> sbs b end);
+    "cleanBitSeq: " ^ sbs (cleanBitSeq (BitSeq Nothing false [true; false; false; false])) ^ " " ^ sbs (cleanBitSeq (BitSeq (Just 3) true [true; true; true; true; false]))
+       ^ " " ^ sbs (cleanBitSeq (BitSeq (Just 0) false [true]));
+    "bitSeqTestBit: " ^ String.concat " " (List.map (fun p -> smb (bitSeqTestBit (bs8 (0-6)) p)) [0; 1; 2; 6; 7; 8; 20])
+       ^ " / inf: " ^ String.concat " " (List.map (fun p -> smb (bitSeqTestBit (bsI 5) p)) [0; 1; 2; 3; 100]);
+    "bitSeqSetBit: " ^ sbs (bitSeqSetBit (bsI 5) 1 true) ^ " " ^ sbs (bitSeqSetBit (bsI 5) 0 false) ^ " " ^ sbs (bitSeqSetBit (bsI (0-1)) 4 false)
+       ^ " " ^ sbs (bitSeqSetBit (bs8 1) 10 true);
+    "resizeBitSeq: " ^ sbs (resizeBitSeq (Just 4) (bsI 13)) ^ " " ^ sbs (resizeBitSeq (Just 4) (bsI (0-13))) ^ " " ^ sbs (resizeBitSeq Nothing (bs8 (0-3)))
+       ^ " " ^ sbs (resizeBitSeq (Just 16) (bs8 (0-3))) ^ " " ^ sbs (resizeBitSeq (Just 0) (bsI 5)) ^ " " ^ sbs (resizeBitSeq (Just 1) (bsI 5));
+    "bitSeqNot: " ^ sbs (bitSeqNot (bsI 5)) ^ " " ^ sbs (bitSeqNot (bs8 0)) ^ " -> " ^ sI (integerFromBitSeq (bitSeqNot (bsI 5)));
+    "bitSeqBinop xor 12 10: " ^ sbs (bitSeqBinop xor (bsI 12) (bsI 10)) ^ " and -4 7: " ^ sbs (bitSeqBinop (&&) (bsI (0-4)) (bsI 7))
+       ^ " or 8bit -128 1: " ^ sbs (bitSeqBinop (||) (bs8 (0-128)) (bs8 1));
+    "bitSeqBinopAux: " ^ sbl (bitSeqBinopAux (&&) true [true; false] false [true; true; true]) ^ " " ^ sbl (bitSeqBinopAux xor false [] true [false; true]);
+    "bitSeqShiftLeft: " ^ sbs (bitSeqShiftLeft (bsI 5) 3) ^ " " ^ sbs (bitSeqShiftLeft (bs8 5) 6) ^ " " ^ sbs (bitSeqShiftLeft (bsI (0-1)) 2);
+    "bitSeqArithmeticShiftRight: " ^ sbs (bitSeqArithmeticShiftRight (bsI (0-8)) 1) ^ " " ^ sbs (bitSeqArithmeticShiftRight (bs8 (0-128)) 3)
+       ^ " " ^ sbs (bitSeqArithmeticShiftRight (bsI 5) 10);
+    "bitSeqLogicalShiftRight: " ^ sbs (bitSeqLogicalShiftRight (bs8 (0-128)) 3) ^ " " ^ sbs (bitSeqLogicalShiftRight (bsI 40) 3)
+       ^ " " ^ sbs (bitSeqLogicalShiftRight (bsI (0-8)) 1);
+    "bitSeqArithUnaryOp (x*3): " ^ sbs (bitSeqArithUnaryOp (fun x -> x * 3) (bs8 50));
+    "bitSeqArithBinOp (+) 8bit 100 100: " ^ sbs (bitSeqArithBinOp (+) (bs8 100) (bs8 100));
+    "bitSeqArithBinTest (<): " ^ show (bitSeqArithBinTest (<) (bsI 3) (bsI (0-3)));
+    "bitSeqEq: " ^ show (bitSeqEq (bsI 5) (bsI 5)) ^ " " ^ show (bitSeqEq (bsI 5) (bs8 5)) ^ " " ^ show (bitSeqEq (BitSeq Nothing false [true]) (BitSeq Nothing false [true; false]))
+  ] ++
+  List.map (fun (a, b) -> "bitSeq arith " ^ sI a ^ " " ^ sI b ^ ": "
+      ^ show (bitSeqLess (bsI a) (bsI b)) ^ " " ^ show (bitSeqLessEqual (bsI a) (bsI b)) ^ " " ^ show (bitSeqGreater (bsI a) (bsI b)) ^ " "
+      ^ show (bitSeqGreaterEqual (bsI a) (bsI b)) ^ " " ^ so (bitSeqCompare (bsI a) (bsI b))
+      ^ " neg=" ^ sbs (bitSeqNegate (bsI a)) ^ " add=" ^ sbs (bitSeqAdd (bsI a) (bsI b)) ^ " minus=" ^ sbs (bitSeqMinus (bsI a) (bsI b))
+      ^ " succ=" ^ sbs (bitSeqSucc (bsI a)) ^ " pred=" ^ sbs (bitSeqPred (bsI a)) ^ " mult=" ^ sbs (bitSeqMult (bsI a) (bsI b))
+      ^ " pow2=" ^ sbs (bitSeqPow (bsI a) 2)
+      ^ (if b = 0 then "" else " div=" ^ sbs (bitSeqDiv (bsI a) (bsI b)) ^ " mod=" ^ sbs (bitSeqMod (bsI a) (bsI b)))
+      ^ " min=" ^ sbs (bitSeqMin (bsI a) (bsI b)) ^ " max=" ^ sbs (bitSeqMax (bsI a) (bsI b))
+      ^ " 8bit add=" ^ sbs (bitSeqAdd (bs8 a) (bs8 b)) ^ " 8bit mult=" ^ sbs (bitSeqMult (bs8 a) (bs8 b))) (cross [0; 1; 0-1; 5; 0-6; 127; 0-128] [0; 1; 0-1; 5; 0-6; 127; 0-128]) ++
+  (* generic helpers, instantiated at integer *)
+  [ "defaultLnot/Land/Lor/Lxor/Lsl/Lsr/Asr (integer, -6, 3): "
+      ^ sI (defaultLnot integerFromBitSeq bsI (0-6)) ^ " " ^ sI (defaultLand integerFromBitSeq bsI (0-6) 3) ^ " "
+      ^ sI (defaultLor integerFromBitSeq bsI (0-6) 3) ^ " " ^ sI (defaultLxor integerFromBitSeq bsI (0-6) 3) ^ " "
+      ^ sI (defaultLsl integerFromBitSeq bsI (0-6) 3) ^ " " ^ sI (defaultLsr integerFromBitSeq bs8 (0-6) 1) ^ " "
+      ^ sI (defaultAsr integerFromBitSeq bsI (0-6) 1);
+    "lnot (integer class method) 5 / -1: " ^ sI (Word.lnot (5 : integer)) ^ " " ^ sI (Word.lnot (0 - 1 : integer))
+  ] ++
+  (* integer bitwise: zarith vs lem bitSeq *)
+  List.map (fun i -> "integerLnot " ^ sI i ^ " = " ^ sI (integerLnot i)) ints ++
+  List.map (fun (a, b) -> "integer land/lor/lxor " ^ sI a ^ " " ^ sI b ^ " = " ^ sI (integerLand a b) ^ " " ^ sI (integerLor a b) ^ " " ^ sI (integerLxor a b))
+    (cross small_ints small_ints) ++
+  List.map (fun (a, n) -> "integer lsl/asr " ^ sI a ^ " " ^ show n ^ " = " ^ sI (integerLsl a n) ^ " " ^ sI (integerAsr a n))
+    (cross small_ints shifts) ++
+  (* natural bitwise *)
+  List.map (fun (a, b) -> "natural land/lor/lxor " ^ sN a ^ " " ^ sN b ^ " = " ^ sN (naturalLand a b) ^ " " ^ sN (naturalLor a b) ^ " " ^ sN (naturalLxor a b))
+    (cross [0; 1; 6; 255; 4294967296; 18446744073709551615; 1267650600228229401496703205375] [0; 3; 256; 18446744073709551616]) ++
+  List.map (fun (a, n) -> "natural lsl/asr " ^ sN a ^ " " ^ show n ^ " = " ^ sN (naturalLsl a n) ^ " " ^ sN (naturalAsr a n))
+    (cross [0; 1; 255; 18446744073709551617] shifts) ++
+  [ "naturalFromBitSeq / bitSeqFromNatural: " ^ sN (naturalFromBitSeq (bsI 77)) ^ " " ^ sbs (bitSeqFromNatural (Just 8) 77) ^ " " ^ sbs (bitSeqFromNatural Nothing 18446744073709551616) ] ++
+  (* int32 / int64 bitwise *)
+  List.map (fun (a, b) -> "int32 lnot/land/lor/lxor " ^ s32 a ^ " " ^ s32 b ^ " = " ^ s32 (int32Lnot a) ^ " " ^ s32 (int32Land a b) ^ " " ^ s32 (int32Lor a b) ^ " " ^ s32 (int32Lxor a b))
+    (cross [int32FromInteger 0; int32FromInteger (0-1); int32FromInteger (0-2147483648); int32FromInteger 2147483647; int32FromInteger 0x5A5A5A5A]
+           [int32FromInteger 0; int32FromInteger (0-1); int32FromInteger 255; int32FromInteger (0-2147483648)]) ++
+  List.map (fun (a, n) -> "int32 lsl/lsr/asr " ^ s32 a ^ " " ^ show n ^ " = " ^ s32 (int32Lsl a n) ^ " " ^ s32 (int32Lsr a n) ^ " " ^ s32 (int32Asr a n))
+    (cross [int32FromInteger 1; int32FromInteger (0-1); int32FromInteger (0-2147483648); int32FromInteger 0x5A5A5A5A] [0; 1; 4; 30; 31]) ++
+  List.map (fun (a, b) -> "int64 lnot/land/lor/lxor " ^ s64 a ^ " " ^ s64 b ^ " = " ^ s64 (int64Lnot a) ^ " " ^ s64 (int64Land a b) ^ " " ^ s64 (int64Lor a b) ^ " " ^ s64 (int64Lxor a b))
+    (cross [int64FromInteger 0; int64FromInteger (0-1); int64FromInteger (0-9223372036854775808); int64FromInteger 9223372036854775807; int64FromInteger 0x5A5A5A5A5A5A5A5A]
+           [int64FromInteger 0; int64FromInteger (0-1); int64FromInteger 255; int64FromInteger (0-9223372036854775808)]) ++
+  List.map (fun (a, n) -> "int64 lsl/lsr/asr " ^ s64 a ^ " " ^ show n ^ " = " ^ s64 (int64Lsl a n) ^ " " ^ s64 (int64Lsr a n) ^ " " ^ s64 (int64Asr a n))
+    (cross [int64FromInteger 1; int64FromInteger (0-1); int64FromInteger (0-9223372036854775808); int64FromInteger 0x5A5A5A5A5A5A5A5A] [0; 1; 4; 32; 62; 63])

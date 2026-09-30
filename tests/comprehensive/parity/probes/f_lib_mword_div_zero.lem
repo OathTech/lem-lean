@@ -1,0 +1,9 @@
+(* Library-coverage failure probe (2026-09-30, library-parity-coverage
+   record): machine_word unsignedDivide/modulo/signedDivide by zero (OCaml Division_by_zero) must FAIL on both targets, after the same stdout
+   prefix. The steps take the RUNTIME nat n = 0, so neither compiler can
+   fold the failing call into module initialisation. *)
+open import Pervasives_extra
+
+let steps : list (nat -> string) =
+  [ (fun n -> "in domain: " ^ show (naturalFromWord (modulo (wordFromNatural 5 : mword ty8) (wordFromNatural (naturalFromNat (n + 3))))) ^ " " ^ show (naturalFromWord (signedDivide (wordFromNatural 250 : mword ty8) (wordFromNatural (naturalFromNat (n + 3))))));
+    (fun n -> "failing: " ^ show (naturalFromWord (unsignedDivide (wordFromNatural 5 : mword ty8) (wordFromNatural (naturalFromNat n))))) ]

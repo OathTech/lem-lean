@@ -1,0 +1,96 @@
+rnd: [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]
+cmp [] []: listEqual=T listEqualBy(mod2)=T lexCompare=EQ lexCompareBy(rev)=EQ lexLess=F lexLessEq=T lexLessBy=F lexLessEqBy=T isPrefixOf=T
+cmp [] [0]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [] [3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [] [1; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [] [2; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [] [1; 2; 3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [] [1; 1; 2; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [] [3; 1; 3; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [] [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [0] []: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [0] [0]: listEqual=T listEqualBy(mod2)=T lexCompare=EQ lexCompareBy(rev)=EQ lexLess=F lexLessEq=T lexLessBy=F lexLessEqBy=T isPrefixOf=T
+cmp [0] [3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0] [1; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0] [2; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0] [1; 2; 3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0] [1; 1; 2; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0] [3; 1; 3; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0] [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [3] []: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3] [0]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3] [3]: listEqual=T listEqualBy(mod2)=T lexCompare=EQ lexCompareBy(rev)=EQ lexLess=F lexLessEq=T lexLessBy=F lexLessEqBy=T isPrefixOf=T
+cmp [3] [1; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3] [2; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3] [1; 2; 3]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3] [1; 1; 2; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3] [3; 1; 3; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [3] [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 2] []: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 2] [0]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 2] [3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 2] [1; 2]: listEqual=T listEqualBy(mod2)=T lexCompare=EQ lexCompareBy(rev)=EQ lexLess=F lexLessEq=T lexLessBy=F lexLessEqBy=T isPrefixOf=T
+cmp [1; 2] [2; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 2] [1; 2; 3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=LT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=T
+cmp [1; 2] [1; 1; 2; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 2] [3; 1; 3; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 2] [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [2; 1] []: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [2; 1] [0]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [2; 1] [3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [2; 1] [1; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [2; 1] [2; 1]: listEqual=T listEqualBy(mod2)=T lexCompare=EQ lexCompareBy(rev)=EQ lexLess=F lexLessEq=T lexLessBy=F lexLessEqBy=T isPrefixOf=T
+cmp [2; 1] [1; 2; 3]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [2; 1] [1; 1; 2; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [2; 1] [3; 1; 3; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [2; 1] [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 2; 3] []: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 2; 3] [0]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 2; 3] [3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 2; 3] [1; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 2; 3] [2; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 2; 3] [1; 2; 3]: listEqual=T listEqualBy(mod2)=T lexCompare=EQ lexCompareBy(rev)=EQ lexLess=F lexLessEq=T lexLessBy=F lexLessEqBy=T isPrefixOf=T
+cmp [1; 2; 3] [1; 1; 2; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 2; 3] [3; 1; 3; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 2; 3] [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 1; 2; 2] []: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 1; 2; 2] [0]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [1; 1; 2; 2] [3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 1; 2; 2] [1; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 1; 2; 2] [2; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 1; 2; 2] [1; 2; 3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 1; 2; 2] [1; 1; 2; 2]: listEqual=T listEqualBy(mod2)=T lexCompare=EQ lexCompareBy(rev)=EQ lexLess=F lexLessEq=T lexLessBy=F lexLessEqBy=T isPrefixOf=T
+cmp [1; 1; 2; 2] [3; 1; 3; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [1; 1; 2; 2] [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3; 1; 3; 1] []: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3; 1; 3; 1] [0]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3; 1; 3; 1] [3]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3; 1; 3; 1] [1; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3; 1; 3; 1] [2; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3; 1; 3; 1] [1; 2; 3]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3; 1; 3; 1] [1; 1; 2; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [3; 1; 3; 1] [3; 1; 3; 1]: listEqual=T listEqualBy(mod2)=T lexCompare=EQ lexCompareBy(rev)=EQ lexLess=F lexLessEq=T lexLessBy=F lexLessEqBy=T isPrefixOf=T
+cmp [3; 1; 3; 1] [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=LT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] []: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] [0]: listEqual=F listEqualBy(mod2)=F lexCompare=GT lexCompareBy(rev)=GT lexLess=F lexLessEq=F lexLessBy=F lexLessEqBy=F isPrefixOf=F
+cmp [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] [3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] [1; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] [2; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] [1; 2; 3]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] [1; 1; 2; 2]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] [3; 1; 3; 1]: listEqual=F listEqualBy(mod2)=F lexCompare=LT lexCompareBy(rev)=GT lexLess=T lexLessEq=T lexLessBy=T lexLessEqBy=T isPrefixOf=F
+cmp [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: listEqual=T listEqualBy(mod2)=T lexCompare=EQ lexCompareBy(rev)=EQ lexLess=F lexLessEq=T lexLessBy=F lexLessEqBy=T isPrefixOf=T
+list []: null=T snoc9=[9] map_tr=[100] count_map=[] reverseMap=[] any>2=F all>0=T dest_init=Nothing findIndices odd=[] elemIndices 1=[] splitAtAcc [7] 1=([7], []) splitWhile<3=([], []) splitWhile_tr=([8], []) takeWhile<3=[] dropWhile<3=[] update 1 7=[] update 0 7=[] update 99 7=[] elemBy(mod3) 4=F find>1=Nothing reversePartition odd=([], []) deleteFirst=1=Nothing deleteBy(mod2) 3=[] deletes [1;3]=[] allDistinct=T mapMaybe=[] mapi=[]
+list [0]: null=F snoc9=[0; 9] map_tr=[100; 0] count_map=[1] reverseMap=[0] any>2=F all>0=F dest_init=Just (([], 0)) findIndices odd=[] elemIndices 1=[] splitAtAcc [7] 1=([7; 0], []) splitWhile<3=([0], []) splitWhile_tr=([8; 0], []) takeWhile<3=[0] dropWhile<3=[] update 1 7=[0] update 0 7=[7] update 99 7=[0] elemBy(mod3) 4=F find>1=Nothing reversePartition odd=([], [0]) deleteFirst=1=Nothing deleteBy(mod2) 3=[0] deletes [1;3]=[0] allDistinct=T mapMaybe=[0] mapi=[0]
+list [3]: null=F snoc9=[3; 9] map_tr=[100; 30] count_map=[4] reverseMap=[6] any>2=T all>0=T dest_init=Just (([], 3)) findIndices odd=[0] elemIndices 1=[] splitAtAcc [7] 1=([7; 3], []) splitWhile<3=([], [3]) splitWhile_tr=([8], [3]) takeWhile<3=[] dropWhile<3=[3] update 1 7=[3] update 0 7=[7] update 99 7=[3] elemBy(mod3) 4=F find>1=Just (3) reversePartition odd=([3], []) deleteFirst=1=Nothing deleteBy(mod2) 3=[] deletes [1;3]=[] allDistinct=T mapMaybe=[] mapi=[3]
+list [1; 2]: null=F snoc9=[1; 2; 9] map_tr=[100; 10; 20] count_map=[2; 3] reverseMap=[4; 2] any>2=F all>0=T dest_init=Just (([1], 2)) findIndices odd=[0] elemIndices 1=[0] splitAtAcc [7] 1=([7; 1], [2]) splitWhile<3=([1; 2], []) splitWhile_tr=([8; 1; 2], []) takeWhile<3=[1; 2] dropWhile<3=[] update 1 7=[1; 7] update 0 7=[7; 2] update 99 7=[1; 2] elemBy(mod3) 4=T find>1=Just (2) reversePartition odd=([1], [2]) deleteFirst=1=Just ([2]) deleteBy(mod2) 3=[2] deletes [1;3]=[2] allDistinct=T mapMaybe=[20] mapi=[1; 102]
+list [2; 1]: null=F snoc9=[2; 1; 9] map_tr=[100; 20; 10] count_map=[3; 2] reverseMap=[2; 4] any>2=F all>0=T dest_init=Just (([2], 1)) findIndices odd=[1] elemIndices 1=[1] splitAtAcc [7] 1=([7; 2], [1]) splitWhile<3=([2; 1], []) splitWhile_tr=([8; 2; 1], []) takeWhile<3=[2; 1] dropWhile<3=[] update 1 7=[2; 7] update 0 7=[7; 1] update 99 7=[2; 1] elemBy(mod3) 4=T find>1=Just (2) reversePartition odd=([1], [2]) deleteFirst=1=Just ([2]) deleteBy(mod2) 3=[2] deletes [1;3]=[2] allDistinct=T mapMaybe=[20] mapi=[2; 101]
+list [1; 2; 3]: null=F snoc9=[1; 2; 3; 9] map_tr=[100; 10; 20; 30] count_map=[2; 3; 4] reverseMap=[6; 4; 2] any>2=T all>0=T dest_init=Just (([1; 2], 3)) findIndices odd=[0; 2] elemIndices 1=[0] splitAtAcc [7] 1=([7; 1], [2; 3]) splitWhile<3=([1; 2], [3]) splitWhile_tr=([8; 1; 2], [3]) takeWhile<3=[1; 2] dropWhile<3=[3] update 1 7=[1; 7; 3] update 0 7=[7; 2; 3] update 99 7=[1; 2; 3] elemBy(mod3) 4=T find>1=Just (2) reversePartition odd=([3; 1], [2]) deleteFirst=1=Just ([2; 3]) deleteBy(mod2) 3=[2; 3] deletes [1;3]=[2] allDistinct=T mapMaybe=[20] mapi=[1; 102; 203]
+list [1; 1; 2; 2]: null=F snoc9=[1; 1; 2; 2; 9] map_tr=[100; 10; 10; 20; 20] count_map=[2; 2; 3; 3] reverseMap=[4; 4; 2; 2] any>2=F all>0=T dest_init=Just (([1; 1; 2], 2)) findIndices odd=[0; 1] elemIndices 1=[0; 1] splitAtAcc [7] 1=([7; 1], [1; 2; 2]) splitWhile<3=([1; 1; 2; 2], []) splitWhile_tr=([8; 1; 1; 2; 2], []) takeWhile<3=[1; 1; 2; 2] dropWhile<3=[] update 1 7=[1; 7; 2; 2] update 0 7=[7; 1; 2; 2] update 99 7=[1; 1; 2; 2] elemBy(mod3) 4=T find>1=Just (2) reversePartition odd=([1; 1], [2; 2]) deleteFirst=1=Just ([1; 2; 2]) deleteBy(mod2) 3=[1; 2; 2] deletes [1;3]=[1; 2; 2] allDistinct=F mapMaybe=[20; 20] mapi=[1; 101; 202; 302]
+list [3; 1; 3; 1]: null=F snoc9=[3; 1; 3; 1; 9] map_tr=[100; 30; 10; 30; 10] count_map=[4; 2; 4; 2] reverseMap=[2; 6; 2; 6] any>2=T all>0=T dest_init=Just (([3; 1; 3], 1)) findIndices odd=[0; 1; 2; 3] elemIndices 1=[1; 3] splitAtAcc [7] 1=([7; 3], [1; 3; 1]) splitWhile<3=([], [3; 1; 3; 1]) splitWhile_tr=([8], [3; 1; 3; 1]) takeWhile<3=[] dropWhile<3=[3; 1; 3; 1] update 1 7=[3; 7; 3; 1] update 0 7=[7; 1; 3; 1] update 99 7=[3; 1; 3; 1] elemBy(mod3) 4=T find>1=Just (3) reversePartition odd=([1; 3; 1; 3], []) deleteFirst=1=Just ([3; 3; 1]) deleteBy(mod2) 3=[1; 3; 1] deletes [1;3]=[3; 1] allDistinct=F mapMaybe=[] mapi=[3; 101; 203; 301]
+list [0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]: null=F snoc9=[0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4; 9] map_tr=[100; 0; 40; 10; 10; 20; 0; 0; 20; 50; 20; 0; 40; 50; 40] count_map=[1; 5; 2; 2; 3; 1; 1; 3; 6; 3; 1; 5; 6; 5] reverseMap=[8; 10; 8; 0; 4; 10; 4; 0; 0; 4; 2; 2; 8; 0] any>2=T all>0=F dest_init=Just (([0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5], 4)) findIndices odd=[2; 3; 8; 12] elemIndices 1=[2; 3] splitAtAcc [7] 1=([7; 0], [4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]) splitWhile<3=([0], [4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]) splitWhile_tr=([8; 0], [4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]) takeWhile<3=[0] dropWhile<3=[4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] update 1 7=[0; 7; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] update 0 7=[7; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] update 99 7=[0; 4; 1; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] elemBy(mod3) 4=T find>1=Just (4) reversePartition odd=([5; 5; 1; 1], [4; 4; 0; 2; 2; 0; 0; 2; 4; 0]) deleteFirst=1=Just ([0; 4; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4]) deleteBy(mod2) 3=[0; 4; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] deletes [1;3]=[0; 4; 1; 2; 0; 0; 2; 5; 2; 0; 4; 5; 4] allDistinct=F mapMaybe=[0; 40; 20; 0; 0; 20; 20; 0; 40; 40] mapi=[0; 104; 201; 301; 402; 500; 600; 702; 805; 902; 1000; 1104; 1205; 1304]
+lookupBy (mod3) 4: Just ("b")
+lookupBy none: Nothing
+catMaybes: [1; 3] []
+lexicographicCompare strings: GT
+deletes empty: [] [1; 1]

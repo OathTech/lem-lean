@@ -1,0 +1,9 @@
+(* Library-coverage failure probe (2026-09-30, library-parity-coverage
+   record): String_extra.nth beyond the length (OCaml String.get: Invalid_argument) must FAIL on both targets, after the same stdout
+   prefix. The steps take the RUNTIME nat n = 0, so neither compiler can
+   fold the failing call into module initialisation. *)
+open import Pervasives_extra
+
+let steps : list (nat -> string) =
+  [ (fun n -> "in domain: " ^ toString [String_extra.nth "ab" (n + 1)]);
+    (fun n -> "failing: " ^ toString [String_extra.nth "ab" (n + 2)]) ]

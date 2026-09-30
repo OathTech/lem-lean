@@ -1,0 +1,65 @@
+(* Library-coverage probe (2026-09-30, library-parity-coverage record):
+   library/set.lem and map.lem functions not covered by p_set_ops /
+   p_map_ops — setEqual, null, singleton, splitMember, deleteBy,
+   bigunion(By), bigintersection, difference, intersection, mapBy,
+   bigunionMapBy, mapMaybe, removeMaybe, fromListBy, sigmaBy, crossBy,
+   finite, findMin/findMax, any/all, partition/split; Map mapEqualBy,
+   singleton, toSetBy, rangeBy, notMember, null, any/all, unions,
+   findWithDefault, deleteSwap-free delete — on empty, singleton and
+   overlapping sets, with a comparator that disagrees with the default
+   order (the By variants must follow the comparator). Expected values
+   are the OCaml target's output. *)
+open import Pervasives_extra
+
+let sb (b : bool) : string = if b then "T" else "F"
+let rev_cmp (x : nat) (y : nat) : ordering = compare y x
+
+let sets : list (set nat) =
+  [Set.empty; Set.fromList [0]; Set.fromList [3; 1; 2]; Set.fromList [2; 4; 6]; Set.fromList [1; 2; 3; 4; 5; 6]]
+
+let cross2 (xs : list 'a) (ys : list 'b) : list ('a * 'b) = List.concatMap (fun x -> List.map (fun y -> (x, y)) ys) xs
+
+let m1 : map nat string = Map.fromList [(1, "a"); (2, "b"); (3, "c")]
+let m2 : map nat string = Map.fromList [(2, "B"); (4, "D")]
+let ml (m : map nat string) : string = show (Map_extra.toList m)
+
+let results : list string =
+  List.map (fun s -> "set " ^ show s ^ ": null=" ^ sb (Set.null s) ^ " finite=" ^ sb (Set.finite s)
+      ^ " findMin=" ^ show (Set.findMin s) ^ " findMax=" ^ show (Set.findMax s)
+      ^ " any even=" ^ sb (Set.any (fun x -> x mod 2 = 0) s) ^ " all even=" ^ sb (Set.all (fun x -> x mod 2 = 0) s)
+      ^ " partition even=" ^ show (Set.partition (fun x -> x mod 2 = 0) s)
+      ^ " split 3=" ^ show (Set.split 3 s) ^ " splitMember 3=" ^ (let (lo, m, hi) = Set.splitMember 3 s in show lo ^ "," ^ sb m ^ "," ^ show hi)
+      ^ " deleteBy(mod2) 1=" ^ show (Set.deleteBy (fun x y -> x mod 2 = y mod 2) 1 s)
+      ^ " mapBy(rev) x/2=" ^ show (Set_extra.toList (Set.mapBy rev_cmp (fun x -> x / 2) s))
+      ^ " mapMaybe=" ^ show (Set.mapMaybe (fun x -> if x > 2 then Just (x * 10) else Nothing) s)
+      ^ " bigunionMapBy(rev)=" ^ show (Set_extra.toList (Set.bigunionMapBy rev_cmp (fun x -> Set.fromList [x; x + 10]) s))
+      ^ " sigmaBy=" ^ show (Set_extra.toList (Set.sigmaBy (fun (a, b) (c, d) -> pairCompare rev_cmp compare (a, b) (c, d)) s (fun x -> Set.fromList [x; 0])))) sets ++
+  List.map (fun (a, b) -> "sets " ^ show a ^ " " ^ show b ^ ": setEqual=" ^ sb (Set.setEqual a b)
+      ^ " difference=" ^ show (Set.difference a b) ^ " intersection=" ^ show (Set.intersection a b)
+      ^ " crossBy=" ^ show (Set_extra.toList (Set.crossBy (fun (p, q) (r, s) -> pairCompare rev_cmp rev_cmp (p, q) (r, s)) a b))) (cross2 sets sets) ++
+  [ "singleton: " ^ show (Set.singleton (5:nat)) ^ " " ^ show (Set.singleton "x");
+    "bigunion: " ^ show (Set.bigunion (Set.fromList [Set.fromList [(1:nat); 2]; Set.fromList [2; 3]; Set.empty]));
+    "bigunion {}: " ^ show (Set.bigunion (Set.empty : set (set nat)));
+    (* bigunionBy with a comparator OTHER than the member sets' own diverges
+       (OCaml's result carries the member sets' comparator; finding LP9,
+       awaiting a ruling): only the member sets' comparator is exercised *)
+    "bigunionBy compare: " ^ show (Set_extra.toList (Set.bigunionBy compare (Set.fromList [Set.fromList [(1:nat); 2]; Set.fromList [2; 3]])));
+    "bigintersection: " ^ show (Set.bigintersection (Set.fromList [Set.fromList [(1:nat); 2; 3]; Set.fromList [2; 3; 4]; Set.fromList [3; 2; 9]]));
+    "removeMaybe: " ^ show (Set.removeMaybe (Set.fromList [Just (1:nat); Nothing; Just 3; Just 1]));
+    "fromListBy(rev): " ^ show (Set_extra.toList (Set.fromListBy rev_cmp [(1:nat); 3; 2; 3]));
+    "fromListBy(mod3) keeps a representative: " ^ show (Set_extra.toList (Set.fromListBy (fun (x:nat) y -> compare (x mod 3) (y mod 3)) [1; 4; 2; 7; 3]));
+    (* Map *)
+    "Map.singleton: " ^ ml (Map.singleton 7 "z");
+    "Map.null: " ^ sb (Map.null (Map.empty : map nat string)) ^ " " ^ sb (Map.null m1);
+    "Map.notMember: " ^ sb (Map.notMember 2 m1) ^ " " ^ sb (Map.notMember 9 m1);
+    "Map.findWithDefault: " ^ Map.findWithDefault 2 "?" m1 ^ " " ^ Map.findWithDefault 9 "?" m1;
+    "Map.any/all: " ^ sb (Map.any (fun k v -> k > 2 && v = "c") m1) ^ " " ^ sb (Map.all (fun k v -> k < 3) m1);
+    "Map.mapEqualBy: " ^ sb (Map.mapEqualBy (fun x y -> x = y) (fun x y -> x = y) m1 m1) ^ " "
+      ^ sb (Map.mapEqualBy (fun x y -> x = y) (fun x y -> x = y) m1 m2) ^ " "
+      ^ sb (Map.mapEqualBy (fun x y -> x = y) (fun (x:string) y -> true) m1 (Map.map (fun v -> v ^ "!") m1));
+    "Map.toSetBy(rev key): " ^ show (Set_extra.toList (Map.toSetBy (fun (a, _) (b, _) -> rev_cmp a b) m1));
+    "Map.rangeBy(rev string): " ^ show (Set_extra.toList (Map.rangeBy (fun (x:string) y -> compare y x) m1));
+    "Map.unions: " ^ ml (Map.unions [m1; m2; Map.singleton 1 "A"]) ^ " " ^ ml (Map.unions ([] : list (map nat string)));
+    "Map.delete absent / present: " ^ ml (Map.delete 9 m1) ^ " " ^ ml (Map.delete 2 m1);
+    "Map.toSet: " ^ show (Map.toSet m2)
+  ]

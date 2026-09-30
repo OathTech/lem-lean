@@ -1,0 +1,86 @@
+(* Library-coverage probe (2026-09-30, library-parity-coverage record):
+   the NAMED natural and integer operations of library/num.lem
+   (naturalAdd ... naturalMax, integerNegate ... integerMax, integerSqrt,
+   integer/natural conversions from nat/int) over boundary values
+   (0, +-1, 2^31, 2^32, 2^62, 2^63, 2^64 and neighbours, 2^100, 10^30)
+   and LCG values. Both types are unbounded on both targets (zarith /
+   Lean Nat, Int), so no operand restriction applies. Division by zero:
+   f_integer_mod_zero / f_div_zero. Expected values are the OCaml
+   target's output. *)
+open import Pervasives_extra
+
+let sN (n : natural) : string = stringFromNatural n
+let sI (i : integer) : string = stringFromInteger i
+let sb (b : bool) : string = show b
+let so (o : ordering) : string = match o with LT -> "LT" | EQ -> "EQ" | GT -> "GT" end
+
+let lcg (s : natural) : natural = (s * 6364136223846793005 + 1442695040888963407) mod 18446744073709551616
+let rec lcg_list (n : nat) (s : natural) : list natural =
+  match n with 0 -> [] | n' + 1 -> let s' = lcg s in s' :: lcg_list n' s' end
+let rnd : list natural = lcg_list 6 314159
+
+let p (e : nat) : natural = naturalPow 2 e
+
+let nats : list natural =
+  [0; 1; 3; 2147483648; 4294967296; 4611686018427387904;
+   9223372036854775808; 18446744073709551615; 18446744073709551616;
+   1267650600228229401496703205376; 1000000000000000000000000000000] ++
+  List.map (fun r -> r * r + r) (List.take 3 rnd)
+
+let ints : list integer =
+  List.concatMap (fun n -> let i = integerFromNatural n in [i; integerNegate i])
+    [1; 7; 4294967296; 9223372036854775808; 18446744073709551616; 1267650600228229401496703205377]
+  ++ [0; integerFromNatural (List_extra.head rnd * 3) - 55340232221128654848]
+  ++ List.map (fun r -> integerFromNatural r - 9223372036854775808) (List.drop 4 rnd)
+
+let cross (xs : list 'a) (ys : list 'b) : list ('a * 'b) = List.concatMap (fun x -> List.map (fun y -> (x, y)) ys) xs
+
+let nbin (nm : string) (f : natural -> natural -> string) (xs : list natural) : list string =
+  List.map (fun (a, b) -> nm ^ " " ^ sN a ^ " " ^ sN b ^ " = " ^ f a b) (cross xs xs)
+let ibin (nm : string) (f : integer -> integer -> string) (xs : list integer) : list string =
+  List.map (fun (a, b) -> nm ^ " " ^ sI a ^ " " ^ sI b ^ " = " ^ f a b) (cross xs xs)
+
+let ncmp (a : natural) (b : natural) : string =
+  sb (naturalEq a b) ^ " " ^ sb (naturalLess a b) ^ " " ^ sb (naturalLessEqual a b) ^ " " ^ sb (naturalGreater a b) ^ " "
+  ^ sb (naturalGreaterEqual a b) ^ " " ^ so (naturalCompare a b) ^ " min=" ^ sN (naturalMin a b) ^ " max=" ^ sN (naturalMax a b)
+let icmp (a : integer) (b : integer) : string =
+  sb (integerEq a b) ^ " " ^ sb (integerLess a b) ^ " " ^ sb (integerLessEqual a b) ^ " " ^ sb (integerGreater a b) ^ " "
+  ^ sb (integerGreaterEqual a b) ^ " " ^ so (integerCompare a b) ^ " min=" ^ sI (integerMin a b) ^ " max=" ^ sI (integerMax a b)
+
+(* natFromInt/naturalFromInt/natFromInteger are `abs` on OCaml: abs of
+   -2^62 wraps there (the ruled 63-bit class), so -2^62 is not an input *)
+let results : list string =
+  [ "rnd: " ^ show rnd;
+    "2^e for e in 0,1,63,64,65,128: " ^ sN (p 0) ^ " " ^ sN (p 1) ^ " " ^ sN (p 63) ^ " " ^ sN (p 64) ^ " " ^ sN (p 65) ^ " " ^ sN (p 128);
+    "naturalPow 0 0 / 0 3 / 10 30: " ^ sN (naturalPow 0 0) ^ " " ^ sN (naturalPow 0 3) ^ " " ^ sN (naturalPow 10 30);
+    "integerPow (-2) 0,1,63,64,127: " ^ sI (integerPow (0-2) 0) ^ " " ^ sI (integerPow (0-2) 1) ^ " " ^ sI (integerPow (0-2) 63) ^ " " ^ sI (integerPow (0-2) 64) ^ " " ^ sI (integerPow (0-2) 127);
+    "integerPow (-1) 1000001: " ^ sI (integerPow (0-1) 1000001);
+    "integerPow 0 0: " ^ sI (integerPow 0 0)
+  ] ++
+  List.map (fun n -> "natural " ^ sN n ^ ": succ=" ^ sN (naturalSucc n) ^ " pred=" ^ sN (naturalPred n)
+      ^ " sq=" ^ sN (naturalMult n n) ^ " toInteger=" ^ sI (integerFromNatural n)
+      ^ " integerSqrt=" ^ sI (integerSqrt (integerFromNatural n))) nats ++
+  List.map (fun i -> "integer " ^ sI i ^ ": succ=" ^ sI (integerSucc i) ^ " pred=" ^ sI (integerPred i)
+      ^ " neg=" ^ sI (integerNegate i) ^ " abs=" ^ sI (integerAbs i) ^ " naturalFromInteger=" ^ sN (naturalFromInteger i)
+      ^ " cube=" ^ sI (integerPow i 3)) ints ++
+  List.map (fun (n : nat) -> "integerFromNat/naturalFromNat " ^ show n ^ ": " ^ sI (integerFromNat n) ^ " " ^ sN (naturalFromNat n))
+      [0; 1; 2147483647; 4294967296; 4611686018427387903] ++
+  List.map (fun (i : int) -> "integerFromInt/naturalFromInt " ^ show i ^ ": " ^ sI (integerFromInt i) ^ " " ^ sN (naturalFromInt i))
+      [0; 1; 0-1; 0-2147483648; 4611686018427387903; 0-4611686018427387903] ++
+  List.map (fun (n : natural) -> "natFromNatural/intFromNatural " ^ sN n ^ ": " ^ show (natFromNatural n) ^ " " ^ show (intFromNatural n))
+      [0; 1; 4294967296; 4611686018427387903] ++
+  List.map (fun (i : integer) -> "intFromInteger/natFromInteger " ^ sI i ^ ": " ^ show (intFromInteger i) ^ " " ^ show (natFromInteger i))
+      [0; 1; 0-1; 4611686018427387903; 0-4611686018427387903] ++
+  nbin "naturalAdd" (fun a b -> sN (naturalAdd a b)) nats ++
+  nbin "naturalMinus" (fun a b -> sN (naturalMinus a b)) nats ++
+  nbin "naturalMult" (fun a b -> sN (naturalMult a b)) nats ++
+  nbin "naturalDiv" (fun a b -> if b = 0 then "-" else sN (naturalDiv a b)) nats ++
+  nbin "naturalMod" (fun a b -> if b = 0 then "-" else sN (naturalMod a b)) nats ++
+  nbin "cmp" ncmp nats ++
+  ibin "integerAdd" (fun a b -> sI (integerAdd a b)) ints ++
+  ibin "integerMinus" (fun a b -> sI (integerMinus a b)) ints ++
+  ibin "integerMult" (fun a b -> sI (integerMult a b)) ints ++
+  ibin "integerDiv" (fun a b -> if b = 0 then "-" else sI (integerDiv a b)) ints ++
+  ibin "integerMod" (fun a b -> if b = 0 then "-" else sI (integerMod a b)) ints ++
+  ibin "integer div_t/rem_t/rem_f" (fun a b -> if b = 0 then "-" else sI (integerDiv_t a b) ^ " " ^ sI (integerRem_t a b) ^ " " ^ sI (integerRem_f a b)) ints ++
+  ibin "cmp" icmp ints

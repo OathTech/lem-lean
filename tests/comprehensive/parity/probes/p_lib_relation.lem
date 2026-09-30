@@ -1,0 +1,72 @@
+(* Library-coverage probe (2026-09-30, library-parity-coverage record):
+   library/relation.lem — every relation operation and property with an
+   OCaml and a Lean realisation, on the empty relation, identities,
+   cycles, chains, a strict and a non-strict order, an equivalence, and
+   an LCG-generated relation on a small carrier. Relations are finite
+   sets of pairs (Pset on OCaml, the LemLib Pset port on Lean): results
+   are shown through Set's `show` (ascending order). Expected values are
+   the OCaml target's output. *)
+open import Pervasives_extra
+import Relation
+open Relation
+
+let sb (b : bool) : string = if b then "T" else "F"
+let sr (r : rel nat nat) : string = show (relToSet r)
+
+let lcg (s : natural) : natural = (s * 6364136223846793005 + 1442695040888963407) mod 18446744073709551616
+let rec lcg_list (n : nat) (s : natural) : list natural =
+  match n with 0 -> [] | n' + 1 -> let s' = lcg s in s' :: lcg_list n' s' end
+let rnd : list nat = List.map (fun r -> natFromNatural ((r / 65536) mod 5)) (lcg_list 16 4242)
+let rec pairs_of (l : list nat) : list (nat * nat) = match l with a :: b :: t -> (a, b) :: pairs_of t | _ -> [] end
+
+let carrier : set nat = Set.fromList [0; 1; 2; 3; 4]
+let r_empty : rel nat nat = relEmpty
+let r_id : rel nat nat = relIdOn carrier
+let r_cycle : rel nat nat = relFromSet (Set.fromList [(0, 1); (1, 2); (2, 0)])
+let r_chain : rel nat nat = relFromSet (Set.fromList [(0, 1); (1, 2); (2, 3); (3, 4)])
+let r_lt : rel nat nat = relFromPred carrier carrier (fun x y -> x < y)
+let r_le : rel nat nat = relFromPred carrier carrier (fun x y -> x <= y)
+let r_eqv : rel nat nat = relFromPred carrier carrier (fun x y -> x mod 2 = y mod 2)
+let r_rnd : rel nat nat = relFromSet (Set.fromList (pairs_of rnd))
+let r_sym : rel nat nat = relFromSet (Set.fromList [(0, 1); (1, 0); (2, 2)])
+
+let named : list (string * rel nat nat) =
+  [("empty", r_empty); ("id", r_id); ("cycle", r_cycle); ("chain", r_chain); ("lt", r_lt); ("le", r_le);
+   ("eqv", r_eqv); ("rnd", r_rnd); ("sym", r_sym)]
+
+let props (r : rel nat nat) : string =
+  "reflOn=" ^ sb (isReflexiveOn r carrier) ^ " irreflOn=" ^ sb (isIrreflexiveOn r carrier) ^ " irrefl=" ^ sb (isIrreflexive r)
+  ^ " symOn=" ^ sb (isSymmetricOn r carrier) ^ " sym=" ^ sb (isSymmetric r)
+  ^ " antisymOn=" ^ sb (isAntisymmetricOn r carrier) ^ " antisym=" ^ sb (isAntisymmetric r)
+  ^ " transOn=" ^ sb (isTransitiveOn r carrier) ^ " trans=" ^ sb (isTransitive r)
+  ^ " totalOn=" ^ sb (isTotalOn r carrier) ^ " trichOn=" ^ sb (isTrichotomousOn r carrier)
+  ^ " singleValued=" ^ sb (isSingleValued r) ^ " equivOn=" ^ sb (isEquivalenceOn r carrier)
+  ^ " preorderOn=" ^ sb (isPreorderOn r carrier) ^ " partialOrderOn=" ^ sb (isPartialOrderOn r carrier)
+  ^ " strictPartialOrderOn=" ^ sb (isStrictPartialOrderOn r carrier) ^ " strictPartialOrder=" ^ sb (isStrictPartialOrder r)
+  ^ " totalOrderOn=" ^ sb (isTotalOrderOn r carrier) ^ " strictTotalOrderOn=" ^ sb (isStrictTotalOrderOn r carrier)
+  ^ " over=" ^ sb (relOver r carrier) ^ " over{0,1,2}=" ^ sb (relOver r (Set.fromList [0; 1; 2]))
+
+let results : list string =
+  [ "rnd pairs: " ^ show (pairs_of rnd) ] ++
+  List.map (fun (nm, r) -> nm ^ ": " ^ sr r) named ++
+  List.map (fun (nm, r) -> nm ^ " props: " ^ props r) named ++
+  List.map (fun (nm, r) -> nm ^ ": converse=" ^ sr (relConverse r) ^ " domain=" ^ show (relDomain r) ^ " range=" ^ show (relRange r)
+      ^ " definedOn=" ^ show (relDefinedOn r) ^ " apply{0,1}=" ^ show (relApply r (Set.fromList [0; 1]))
+      ^ " restrict{1,2,3}=" ^ sr (relRestrict r (Set.fromList [1; 2; 3]))
+      ^ " tc=" ^ sr (transitiveClosure r) ^ " rtcOn=" ^ sr (reflexiveTransitiveClosureOn r carrier)
+      ^ " withoutTransitiveEdges=" ^ sr (withoutTransitiveEdges r)) named ++
+  List.map (fun ((n1, r1), (n2, r2)) -> n1 ^ " / " ^ n2 ^ ": eq=" ^ sb (relEq r1 r2) ^ " subrel=" ^ sb (isSubrel r1 r2)
+      ^ " union=" ^ sr (relUnion r1 r2) ^ " inter=" ^ sr (relIntersection r1 r2) ^ " comp=" ^ sr (relComp r1 r2))
+    (List.concatMap (fun a -> List.map (fun b -> (a, b)) [("cycle", r_cycle); ("lt", r_lt); ("rnd", r_rnd); ("empty", r_empty)])
+       [("chain", r_chain); ("eqv", r_eqv); ("sym", r_sym); ("rnd", r_rnd)]) ++
+  [ "relToPred cycle 0 1 / 1 0: " ^ sb (relToPred r_cycle 0 1) ^ " " ^ sb (relToPred r_cycle 1 0);
+    "inRel 2 0 cycle / 0 2: " ^ sb (inRel 2 0 r_cycle) ^ " " ^ sb (inRel 0 2 r_cycle);
+    "relAdd 4 4 cycle: " ^ sr (relAdd 4 4 r_cycle);
+    "relAdd existing: " ^ sr (relAdd 0 1 r_cycle);
+    "relFromSet/relToSet round trip: " ^ show (relToSet (relFromSet (Set.fromList [((1:nat), (2:nat))])));
+    "transitiveClosureAdd 4 0 chain: " ^ sr (transitiveClosureAdd 4 0 (transitiveClosure r_chain));
+    "transitiveClosureAdd 5 6 empty: " ^ sr (transitiveClosureAdd 5 6 r_empty);
+    "transitiveClosureByCmp: " ^ sr (transitiveClosureByCmp setElemCompare r_chain);
+    "relIdOn {}: " ^ sr (relIdOn (Set.fromList ([] : list nat)));
+    "relComp on strings: " ^ show (relToSet (relComp (relFromSet (Set.fromList [("a", (1:nat)); ("b", 2)])) (relFromSet (Set.fromList [((1:nat), "x"); (1, "y"); (3, "z")]))))
+  ]

@@ -1,0 +1,204 @@
+(* Library-coverage probe (2026-09-30, library-parity-coverage record):
+   the small modules — Basic_classes (default*/ord*/tuple equality and
+   compare), Bool, Either, Function, Tuple, Maybe, Show helpers, Sorting,
+   List_extra, String, String_extra, Num_extra, Set_extra, Map_extra —
+   called BY NAME on edge inputs (empty, singleton, duplicates, equal
+   elements under a coarse order). Expected values are the OCaml
+   target's output. *)
+open import Pervasives_extra
+
+let so (o : ordering) : string = match o with LT -> "LT" | EQ -> "EQ" | GT -> "GT" end
+let sb (b : bool) : string = show b
+let sn (n : nat) : string = show n
+
+(* a type whose Ord ignores the second component: the Ord-derived
+   operations must follow the instance, not structural comparison *)
+type k = K of nat * string
+let k_cmp (K a _) (K b _) = compare a b
+instance (Ord k)
+  let compare = k_cmp
+  let (<) x y = k_cmp x y = LT
+  let (<=) x y = k_cmp x y <> GT
+  let (>) x y = k_cmp x y = GT
+  let (>=) x y = k_cmp x y <> LT
+end
+instance (Eq k)
+  let (=) x y = k_cmp x y = EQ
+  let (<>) x y = k_cmp x y <> EQ
+end
+instance (SetType k)
+  let setElemCompare = k_cmp
+end
+let sk (K a s) = "K" ^ sn a ^ s
+
+let el : list (either nat string) = [Left 1; Right "a"; Left 2; Right "b"; Right "c"; Left 3]
+let le_fst (a, _) (b, _) = (a : nat) <= b
+
+let results : list string =
+  [ (* Basic_classes *)
+    "unsafe_structural_equality [1;2] [1;2]: " ^ sb (unsafe_structural_equality [(1:nat); 2] [1; 2]);
+    "unsafe_structural_equality \"a\" \"b\": " ^ sb (unsafe_structural_equality "a" "b");
+    "unsafe_structural_inequality 1 2: " ^ sb (unsafe_structural_inequality (1:nat) 2);
+    "unsafe_structural_inequality (Just 1) (Just 1): " ^ sb (unsafe_structural_inequality (Just (1:nat)) (Just 1));
+    "orderingEqual LT LT: " ^ sb (orderingEqual LT LT);
+    "orderingEqual LT GT: " ^ sb (orderingEqual LT GT);
+    "defaultCompare 3 5: " ^ so (defaultCompare (3:nat) 5);
+    "defaultCompare 5 5: " ^ so (defaultCompare (5:nat) 5);
+    "defaultCompare \"b\" \"ab\": " ^ so (defaultCompare "b" "ab");
+    "defaultCompare \"\" \"a\": " ^ so (defaultCompare "" "a");
+    "defaultCompare (-3) 2 (integer): " ^ so (defaultCompare (0-3:integer) 2);
+    "defaultCompare (-3) 2 (int): " ^ so (defaultCompare (0-3:int) 2);
+    "defaultCompare false true: " ^ so (defaultCompare false true);
+    "defaultCompare 'a' 'B': " ^ so (defaultCompare #'a' #'B');
+    "defaultLess 1 2: " ^ sb (defaultLess (1:nat) 2);
+    "defaultLessEq 2 2: " ^ sb (defaultLessEq (2:nat) 2);
+    "defaultGreater \"b\" \"a\": " ^ sb (defaultGreater "b" "a");
+    "defaultGreaterEq 1 2: " ^ sb (defaultGreaterEq (1:nat) 2);
+    "ordCompare 1 2: " ^ so (ordCompare (1:nat) 2);
+    "ordCompare 2 2: " ^ so (ordCompare (2:nat) 2);
+    "ordCompare 3 2: " ^ so (ordCompare (3:nat) 2);
+    "ordCompare K1a K1b: " ^ so (ordCompare (K 1 "a") (K 1 "b"));
+    "minByLessEqual (<=) 3 2: " ^ sn (minByLessEqual (fun x y -> x <= y) (3:nat) 2);
+    "maxByLessEqual (<=) 3 2: " ^ sn (maxByLessEqual (fun x y -> x <= y) (3:nat) 2);
+    "minByLessEqual on equal K: " ^ sk (minByLessEqual (fun x y -> x <= y) (K 1 "x") (K 1 "y"));
+    "maxByLessEqual on equal K: " ^ sk (maxByLessEqual (fun x y -> x <= y) (K 1 "x") (K 1 "y"));
+    "defaultMax 3 7: " ^ sn (defaultMax (3:nat) 7);
+    "defaultMin 3 7: " ^ sn (defaultMin (3:nat) 7);
+    "defaultMax \"ab\" \"b\": " ^ defaultMax "ab" "b";
+    "defaultMin \"ab\" \"b\": " ^ defaultMin "ab" "b";
+    "charEqual 'a' 'a': " ^ sb (charEqual #'a' #'a');
+    "charEqual 'a' 'A': " ^ sb (charEqual #'a' #'A');
+    "stringEquality \"\" \"\": " ^ sb (stringEquality "" "");
+    "stringEquality \"a\" \"a \": " ^ sb (stringEquality "a" "a ");
+    "pairEqual (1,a) (1,a): " ^ sb (pairEqual ((1:nat), "a") (1, "a"));
+    "pairEqual (1,a) (1,b): " ^ sb (pairEqual ((1:nat), "a") (1, "b"));
+    "pairEqualBy mod2: " ^ sb (pairEqualBy (fun x y -> x mod 2 = y mod 2) (fun x y -> x = y) ((1:nat), "a") (3, "a"));
+    "pairCompare (1,2) (1,3): " ^ so (pairCompare compare compare ((1:nat), (2:nat)) (1, 3));
+    "pairCompare (2,0) (1,3): " ^ so (pairCompare compare compare ((2:nat), (0:nat)) (1, 3));
+    "pairCompare (1,3) (1,3): " ^ so (pairCompare compare compare ((1:nat), (3:nat)) (1, 3));
+    "tripleEqual: " ^ sb (tripleEqual ((1:nat), "a", true) (1, "a", true)) ^ " " ^ sb (tripleEqual ((1:nat), "a", true) (1, "a", false));
+    "tripleCompare: " ^ so (tripleCompare compare compare compare ((1:nat), (2:nat), (3:nat)) (1, 2, 4)) ^ " "
+       ^ so (tripleCompare compare compare compare ((1:nat), (3:nat), (0:nat)) (1, 2, 4));
+    "quadrupleEqual: " ^ sb (quadrupleEqual ((1:nat), (2:nat), (3:nat), (4:nat)) (1, 2, 3, 4)) ^ " " ^ sb (quadrupleEqual ((1:nat), (2:nat), (3:nat), (4:nat)) (1, 2, 3, 5));
+    "quadrupleCompare: " ^ so (quadrupleCompare compare compare compare compare ((1:nat), (2:nat), (3:nat), (4:nat)) (1, 2, 3, 5)) ^ " "
+       ^ so (quadrupleCompare compare compare compare compare ((1:nat), (2:nat), (3:nat), (4:nat)) (1, 2, 3, 4));
+    "quintupleEqual: " ^ sb (quintupleEqual ((1:nat), (2:nat), (3:nat), (4:nat), (5:nat)) (1, 2, 3, 4, 5)) ^ " " ^ sb (quintupleEqual ((1:nat), (2:nat), (3:nat), (4:nat), (5:nat)) (0, 2, 3, 4, 5));
+    "quintupleCompare: " ^ so (quintupleCompare compare compare compare compare compare ((1:nat), (2:nat), (3:nat), (4:nat), (5:nat)) (1, 2, 3, 4, 0));
+    "sextupleEqual: " ^ sb (sextupleEqual ((1:nat), (2:nat), (3:nat), (4:nat), (5:nat), (6:nat)) (1, 2, 3, 4, 5, 6)) ^ " " ^ sb (sextupleEqual ((1:nat), (2:nat), (3:nat), (4:nat), (5:nat), (6:nat)) (1, 2, 3, 4, 5, 7));
+    "sextupleCompare: " ^ so (sextupleCompare compare compare compare compare compare compare ((1:nat), (2:nat), (3:nat), (4:nat), (5:nat), (6:nat)) (1, 2, 3, 4, 5, 7));
+    "compare on K (Ord instance): " ^ so (compare (K 1 "a") (K 1 "b")) ^ " " ^ so (compare (K 2 "a") (K 1 "b"));
+    (* [AGENT 2026-09-30] max/min on Ord-EQUAL but structurally different
+       values diverge (OCaml defaultMax/defaultMin = Stdlib max/min, i.e.
+       STRUCTURAL order; Lean = lem's maxByLessEqual (<=)): finding LP1 of
+       doc/lean-backend/2026-09-30_library-parity-coverage.md, awaiting an
+       operator ruling — not exercised here. *)
+    "max K2a K1z: " ^ sk (max (K 2 "a") (K 1 "z"));
+    "min K2a K1z: " ^ sk (min (K 2 "a") (K 1 "z"));
+    (* Bool *)
+    "xor: " ^ sb (xor true true) ^ sb (xor true false) ^ sb (xor false true) ^ sb (xor false false);
+    (* Either *)
+    "eitherEqual L1 L1: " ^ sb (eitherEqual (Left (1:nat) : either nat string) (Left 1));
+    "eitherEqual L1 R\"1\": " ^ sb (eitherEqual (Left (1:nat) : either nat string) (Right "1"));
+    "eitherEqual Ra Ra: " ^ sb (eitherEqual (Right "a" : either nat string) (Right "a"));
+    "eitherEqualBy mod2: " ^ sb (eitherEqualBy (fun x y -> x mod 2 = y mod 2) (fun x y -> x = y) (Left (1:nat) : either nat string) (Left 5));
+    "isLeft/isRight: " ^ sb (isLeft (Left (1:nat) : either nat string)) ^ sb (isRight (Left (1:nat) : either nat string)) ^ sb (isLeft (Right "a" : either nat string)) ^ sb (isRight (Right "a" : either nat string));
+    "either: " ^ Either.either sn (fun s -> s ^ "!") (Left (7:nat)) ^ " " ^ Either.either sn (fun s -> s ^ "!") (Right "r");
+    "partitionEither: " ^ show (partitionEither el);
+    "partitionEither []: " ^ show (partitionEither ([] : list (either nat string)));
+    "lefts: " ^ show (lefts el);
+    "rights: " ^ show (rights el);
+    (* Function *)
+    "id: " ^ sn (id (4:nat));
+    "const: " ^ sn (const (4:nat) "ignored");
+    "comb: " ^ sn (comb (fun x -> x * 10) (fun x -> x + 1) (4:nat));
+    "flip (-): " ^ sn (flip (fun x y -> x - y) (3:nat) 10);
+    "Function.curry: " ^ sn (Function.curry (fun (a, b) -> a * 10 + b) (4:nat) 2);
+    "Function.uncurry: " ^ sn (Function.uncurry (fun a b -> a * 10 + b) ((4:nat), 2));
+    "apply/rev_apply: " ^ sn ((fun x -> x + 1) $ (4:nat)) ^ " " ^ sn ((4:nat) $> (fun x -> x + 2));
+    (* Tuple *)
+    "fst/snd: " ^ sn (fst ((1:nat), "a")) ^ " " ^ snd ((1:nat), "a");
+    "Tuple.curry: " ^ sn (Tuple.curry (fun (a, b) -> a * 10 + b) (5:nat) 3);
+    "Tuple.uncurry: " ^ sn (Tuple.uncurry (fun a b -> a * 10 + b) ((5:nat), 3));
+    "swap: " ^ show (swap ((1:nat), "a"));
+    (* Maybe *)
+    "maybeEqual: " ^ sb (maybeEqual (Just (1:nat)) (Just 1)) ^ sb (maybeEqual (Just (1:nat)) Nothing) ^ sb (maybeEqual (Nothing : maybe nat) Nothing) ^ sb (maybeEqual (Just (1:nat)) (Just 2));
+    "maybeEqualBy mod2: " ^ sb (maybeEqualBy (fun x y -> x mod 2 = y mod 2) (Just (1:nat)) (Just 3));
+    "maybe: " ^ Maybe.maybe "d" sn (Just (3:nat)) ^ " " ^ Maybe.maybe "d" sn Nothing;
+    "isJust/isNothing: " ^ sb (isJust (Just (1:nat))) ^ sb (isJust (Nothing : maybe nat)) ^ sb (isNothing (Just (1:nat))) ^ sb (isNothing (Nothing : maybe nat));
+    "fromMaybe: " ^ sn (fromMaybe 9 (Just (1:nat))) ^ " " ^ sn (fromMaybe 9 Nothing);
+    "Maybe.map: " ^ show (Maybe.map (fun x -> x + 1) (Just (1:nat))) ^ " " ^ show (Maybe.map (fun x -> x + (1:nat)) Nothing);
+    "Maybe.bind: " ^ show (Maybe.bind (Just (4:nat)) (fun x -> if x > 3 then Just (x * 2) else Nothing)) ^ " " ^ show (Maybe.bind (Just (2:nat)) (fun x -> if x > 3 then Just (x * 2) else Nothing));
+    "fromJust: " ^ sn (fromJust (Just (8:nat)));
+    (* Show helpers *)
+    "stringFromMaybe: " ^ stringFromMaybe sn (Just 3) ^ " " ^ stringFromMaybe sn Nothing;
+    "stringFromListAux: [" ^ stringFromListAux sn [1; 2; 3] ^ "] [" ^ stringFromListAux sn [] ^ "]";
+    "stringFromList: " ^ stringFromList sn [1; 2; 3] ^ " " ^ stringFromList sn [] ^ " " ^ stringFromList sn [7];
+    "stringFromPair: " ^ stringFromPair sn (fun s -> s) (1, "a");
+    (* Sorting *)
+    "isPermutation: " ^ sb (Sorting.isPermutation [(2:nat); 1; 3] [3; 2; 1]) ^ sb (Sorting.isPermutation [(2:nat); 2; 3] [3; 2; 3]) ^ sb (Sorting.isPermutation ([] : list nat) []) ^ sb (Sorting.isPermutation [(1:nat)] []);
+    "isPermutationBy mod3: " ^ sb (Sorting.isPermutationBy (fun x y -> x mod 3 = y mod 3) [(1:nat); 2] [5; 4]);
+    "isSorted: " ^ sb (Sorting.isSorted [(1:nat); 2; 2; 5]) ^ sb (Sorting.isSorted [(3:nat); 2]) ^ sb (Sorting.isSorted ([] : list nat)) ^ sb (Sorting.isSorted ["a"; "ab"; "b"]);
+    "isSortedBy (>=): " ^ sb (Sorting.isSortedBy (fun x y -> x >= y) [(5:nat); 5; 2; 0]);
+    "Sorting.insert: " ^ show (Sorting.insert (3:nat) [1; 2; 4; 5]) ^ " " ^ show (Sorting.insert (3:nat) []) ^ " " ^ show (Sorting.insert (3:nat) [3; 3]);
+    "Sorting.insertBy on equal fst: " ^ show (Sorting.insertBy le_fst ((1:nat), "new") [(0, "a"); (1, "b"); (1, "c"); (2, "d")]);
+    "insertSort: " ^ show (Sorting.insertSort [(5:nat); 3; 1; 3; 0]);
+    "insertSortBy stable?: " ^ show (Sorting.insertSortBy le_fst [((2:nat), "a"); (1, "b"); (2, "c"); (1, "d")]);
+    "sortBy stable?: " ^ show (Sorting.sortBy le_fst [((2:nat), "a"); (1, "b"); (2, "c"); (1, "d"); (0, "e")]);
+    "sortBy (>=): " ^ show (Sorting.sortBy (fun x y -> x >= y) [(2:nat); 9; 1; 9; 4]);
+    "sortByOrd []: " ^ show (Sorting.sortByOrd compare ([] : list nat));
+    "predicate_of_ord: " ^ sb (Sorting.predicate_of_ord compare (1:nat) 2) ^ sb (Sorting.predicate_of_ord compare (2:nat) 2) ^ sb (Sorting.predicate_of_ord compare (3:nat) 2);
+    "Sorting.sort K (coarse Ord): " ^ show (List.map sk (Sorting.sort [K 2 "a"; K 1 "b"; K 2 "c"; K 1 "d"]));
+    (* List_extra *)
+    "head: " ^ sn (head [(4:nat); 5]);
+    "tail: " ^ show (tail [(4:nat); 5]) ^ " " ^ show (tail [(4:nat)]);
+    "init: " ^ show (init [(4:nat); 5; 6]) ^ " " ^ show (init [(4:nat)]);
+    "foldl1 (-): " ^ sn (foldl1 (fun x y -> x - y) [(10:nat); 3; 2]);
+    "foldr1 (-): " ^ sn (foldr1 (fun x y -> x - y) [(10:nat); 3; 2]);
+    "foldl1 singleton: " ^ sn (foldl1 (fun x y -> x - y) [(10:nat)]);
+    "findNonPure: " ^ sn (findNonPure (fun x -> x > 2) [(1:nat); 3; 4]);
+    "zipSameLength: " ^ show (zipSameLength [(1:nat); 2] ["a"; "b"]) ^ " " ^ show (zipSameLength ([] : list nat) ([] : list nat));
+    "unfoldr: " ^ show (unfoldr (fun n -> if n = 0 then Nothing else Just (n * n, n - 1)) (5:nat));
+    "unfoldr empty: " ^ show (unfoldr (fun (n:nat) -> (Nothing : maybe (nat * nat))) 5);
+    "List_extra.nth 0: " ^ sn (List_extra.nth [(7:nat); 8] 0);
+    (* String / String_extra *)
+    "empty_string: [" ^ empty_string ^ "] len " ^ sn (stringLength empty_string);
+    "toCharList/toString: " ^ toString (List.reverse (toCharList "abc"));
+    "makeString 3 'x': " ^ makeString 3 #'x' ^ " [" ^ makeString 0 #'x' ^ "]";
+    "cons_string: " ^ cons_string #'q' "rs";
+    "string_case: " ^ string_case "" "empty" (fun c s -> "cons " ^ toString [c] ^ "|" ^ s) ^ " " ^ string_case "xyz" "empty" (fun c s -> "cons " ^ toString [c] ^ "|" ^ s);
+    "String.concat: " ^ String.concat ", " ["a"; "b"; "c"] ^ " [" ^ String.concat ", " [] ^ "] [" ^ String.concat ", " ["x"] ^ "]";
+    "ord/chr: " ^ sn (ord #'A') ^ " " ^ sn (ord #'\n') ^ " " ^ toString [chr 97; chr 48; chr 126];
+    "ord 0 / 127: " ^ sn (ord (chr 0)) ^ " " ^ sn (ord (chr 127));
+    "stringFromNatHelper: " ^ toString (stringFromNatHelper 120 [#'!']) ^ " " ^ toString (stringFromNatHelper 0 []);
+    "stringFromNaturalHelper: " ^ toString (stringFromNaturalHelper 98765432109876543210 [#'!']);
+    "stringFromNat 0 / 4611686018427387903: " ^ stringFromNat 0 ^ " " ^ stringFromNat 4611686018427387903;
+    "stringFromNatural 2^64: " ^ stringFromNatural 18446744073709551616;
+    "stringFromInt -4611686018427387904: " ^ stringFromInt (0 - 4611686018427387904);
+    "stringFromInteger -2^70: " ^ stringFromInteger (0 - 1180591620717411303424);
+    "String_extra.nth: " ^ toString [String_extra.nth "hello" 1; String_extra.nth "hello" 4];
+    "stringConcat: " ^ stringConcat ["ab"; ""; "cd"] ^ " [" ^ stringConcat [] ^ "]";
+    "stringCompare: " ^ so (stringCompare "a" "b") ^ " " ^ so (stringCompare "b" "a") ^ " " ^ so (stringCompare "" "") ^ " " ^ so (stringCompare "Z" "a") ^ " " ^ so (stringCompare "ab" "a");
+    "stringLess etc: " ^ sb (stringLess "a" "b") ^ sb (stringLessEq "b" "b") ^ sb (stringGreater "a" "b") ^ sb (stringGreaterEq "a" "a");
+    (* Num_extra *)
+    "integerOfChar: " ^ show (integerOfChar #'0') ^ " " ^ show (integerOfChar #'9') ^ " " ^ show (integerOfChar #'5');
+    "integerOfStringHelper: " ^ show (integerOfStringHelper (toCharList "321")) ^ " " ^ show (integerOfStringHelper []);
+    "naturalOfString: " ^ show (naturalOfString "0") ^ " " ^ show (naturalOfString "123456789012345678901234567890");
+    "integerOfString: " ^ show (integerOfString "-42") ^ " " ^ show (integerOfString "0") ^ " " ^ show (integerOfString "-123456789012345678901234567890");
+    (* Set_extra *)
+    "setCompareBy: " ^ so (setCompareBy compare (Set.fromList [(1:nat); 2]) (Set.fromList [1; 3])) ^ " "
+       ^ so (setCompareBy compare (Set.fromList [(1:nat); 2]) (Set.fromList [1; 2])) ^ " "
+       ^ so (setCompareBy compare (Set.fromList [(1:nat); 2; 3]) (Set.fromList [1; 2])) ^ " "
+       ^ so (setCompareBy compare (Set.fromList ([]:list nat)) (Set.fromList [0])) ^ " "
+       ^ so (setCompareBy compare (Set.fromList [(5:nat)]) (Set.fromList [1; 2; 3]));
+    "setCompare: " ^ so (setCompare (Set.fromList ["b"]) (Set.fromList ["a"; "c"]));
+    "leastFixedPointUnbounded: " ^ show (leastFixedPointUnbounded (fun s -> Set.map (fun x -> if x < 10 then x + 3 else x) s) (Set.fromList [(0:nat)]));
+    "leastFixedPointUnbounded closure: " ^ show (leastFixedPointUnbounded (fun s -> s union Set.map (fun x -> (x * 2) mod 11) s) (Set.fromList [(1:nat)]));
+    "choose singleton: " ^ sn (choose (Set.fromList [(4:nat)]));
+    "toOrderedList: " ^ show (toOrderedList (Set.fromList [(3:nat); 1; 2; 1]));
+    (* Map_extra *)
+    "Map_extra.mapMaybe: " ^ show (Map_extra.toList (Map_extra.mapMaybe (fun k v -> if k mod 2 = 0 then Just (v ^ "!") else Nothing) (Map.fromList [((1:nat), "a"); (2, "b"); (3, "c"); (4, "d")])));
+    "Map_extra.mapMaybe empty: " ^ show (Map_extra.toList (Map_extra.mapMaybe (fun (k:nat) (v:nat) -> Just v) Map.empty));
+    "Map_extra.find: " ^ Map_extra.find (2:nat) (Map.fromList [((1:nat), "a"); (2, "b")]);
+    "Map_extra.fromSet: " ^ show (Map_extra.toList (Map_extra.fromSet (fun x -> x * x) (Set.fromList [(3:nat); 1; 2])));
+    "Map_extra.fold: " ^ Map_extra.fold (fun k v acc -> acc ^ sn k ^ "=" ^ v ^ ";") (Map.fromList [((2:nat), "b"); (1, "a"); (3, "c")]) ""
+  ]

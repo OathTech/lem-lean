@@ -1,0 +1,9 @@
+(* Library-coverage failure probe (2026-09-30, library-parity-coverage
+   record): Set_extra.choose of the empty set must FAIL on both targets, after the same stdout
+   prefix. The steps take the RUNTIME nat n = 0, so neither compiler can
+   fold the failing call into module initialisation. *)
+open import Pervasives_extra
+
+let steps : list (nat -> string) =
+  [ (fun n -> "in domain: " ^ show (Set_extra.choose (Set.filter (fun x -> x > n) (Set.fromList [(0:nat); 2]))));
+    (fun n -> "failing: " ^ show (Set_extra.choose (Set.filter (fun x -> x > n + 10) (Set.fromList [(1:nat); 2])))) ]
