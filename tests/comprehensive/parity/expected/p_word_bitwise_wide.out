@@ -10,10 +10,9 @@ natLsl 1 62 = -4611686018427387904
 natLsl 1 63 = 0
 natLsl 5 61 = 2305843009213693952
 natAsr (natLsl 1 63) 1 = 0
-operand p61*4 (2^63): 0
-intLor (p61*4) 1 = 1
-intLand (p61*4) (p61*4) = 0
-intLxor (p61*8) 1 = 1
-natLor (n61*4) 1 = 1
-natLand (n61*4) (n61*4) = 0
-natLxor (n61*8) 1 = 1
+intLor (intLsl 1 63) 1 = 1
+intLand (intLsl 3 62) (intLsl 1 63) = 0
+intLxor (intLsl 1 64) 1 = 0
+natLor (natLsl 1 63) 1 = 1
+natLand (natLsl 3 62) (natLsl 1 63) = 0
+natLxor (natLsl 1 64) 1 = 0

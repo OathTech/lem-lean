@@ -4,15 +4,15 @@
    results; record doc/lean-backend/2026-09-30_library-parity-coverage.md
    LP4). OCaml's Lem `nat`/`int` are native `int` (library/num.lem:117) and
    the reps are `land`/`lor`/`lxor`/`lsl`/`asr` (library/word.lem:875-1078):
-   63-bit. Operands and results at and beyond 2^62 cannot be written as
-   literals on OCaml (max_int = 2^62-1), so they are computed: shifts of
-   small operands past bit 62, and operands built by multiplication (which
-   itself wraps on OCaml: the ruled [USER 2026-09-03] 63-bit class). The pin
-   is the OCaml output. Control rows first (inside 62 bits). *)
+   63-bit. This probe isolates the BITWISE operations: every operand is a
+   literal inside 62 bits or the result of another operation under test
+   (lsl); no arithmetic is involved. Rows whose wide operands are built by
+   multiplication (itself the separately ruled X3/N4 63-bit wrap) are in
+   p_word_bitwise_wide_mul. The pin is the OCaml output. Control rows first
+   (inside 62 bits). *)
 open import Pervasives_extra
 
 let p61 : int = 2305843009213693952
-let n61 : nat = 2305843009213693952
 let si (i : int) : string = show i
 let sn (n : nat) : string = show n
 
@@ -29,10 +29,9 @@ let results : list string =
     "natLsl 1 63 = " ^ sn (natLsl 1 63);
     "natLsl 5 61 = " ^ sn (natLsl 5 61);
     "natAsr (natLsl 1 63) 1 = " ^ sn (natAsr (natLsl 1 63) 1);
-    "operand p61*4 (2^63): " ^ si (p61 * 4);
-    "intLor (p61*4) 1 = " ^ si (intLor (p61 * 4) 1);
-    "intLand (p61*4) (p61*4) = " ^ si (intLand (p61 * 4) (p61 * 4));
-    "intLxor (p61*8) 1 = " ^ si (intLxor (p61 * 8) 1);
-    "natLor (n61*4) 1 = " ^ sn (natLor (n61 * 4) 1);
-    "natLand (n61*4) (n61*4) = " ^ sn (natLand (n61 * 4) (n61 * 4));
-    "natLxor (n61*8) 1 = " ^ sn (natLxor (n61 * 8) 1) ]
+    "intLor (intLsl 1 63) 1 = " ^ si (intLor (intLsl 1 63) 1);
+    "intLand (intLsl 3 62) (intLsl 1 63) = " ^ si (intLand (intLsl 3 62) (intLsl 1 63));
+    "intLxor (intLsl 1 64) 1 = " ^ si (intLxor (intLsl 1 64) 1);
+    "natLor (natLsl 1 63) 1 = " ^ sn (natLor (natLsl 1 63) 1);
+    "natLand (natLsl 3 62) (natLsl 1 63) = " ^ sn (natLand (natLsl 3 62) (natLsl 1 63));
+    "natLxor (natLsl 1 64) 1 = " ^ sn (natLxor (natLsl 1 64) 1) ]

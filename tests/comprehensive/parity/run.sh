@@ -39,16 +39,30 @@
 # is REGENERATED from the probe list on every run (a probe can never be
 # silently absent from the roots — the L0 record's lakefile gotcha).
 #
-# EXPECTED FAILURES: expected_failures.txt lists probes ("<name>,<reason>")
-# whose divergence is KNOWN and scheduled (a registered fix, not a
-# documented divergence): such a probe must still FAIL its parity check —
-# a listed probe that PASSES is reported as a failure of the suite ("the
-# expected failure now passes: remove it from the list"), so the list
-# cannot go stale and a fix cannot land silently. A listed probe counts as
-# XFAIL only on a real parity disagreement: different output with Lean
-# exiting 0, or (non-failure probe) a Lean panic abort (exit 134 after a
-# "PANIC at" line) where the OCaml reference succeeded; a broken build or
-# any other crash is red (test_failure_admission.sh).
+# EXPECTED FAILURES: expected_failures.txt lists probes
+# ("<name>,<class>,<reason>", class one of fix / ruled / open — see the
+# file's header) whose divergence is KNOWN: such a probe must still FAIL
+# its parity check — a listed probe that PASSES is reported as a failure
+# of the suite ("the expected failure now passes: remove it from the
+# list"), so the list cannot go stale and a fix cannot land silently. The
+# file is validated before any probe runs: a malformed line, an unknown
+# class, a duplicate, or an entry naming a probe that does not exist is a
+# hard error. A listed probe counts as XFAIL only if (1) it reaches a real
+# parity disagreement: different output with Lean exiting 0, or
+# (non-failure probe) a Lean panic abort (exit 134 after a "PANIC at"
+# line) where the OCaml reference succeeded — a broken build or any other
+# crash is red (test_failure_admission.sh); AND (2) the Lean side of the
+# disagreement is EXACTLY the pinned expected/<name>.lean.out: the Lean exit
+# status, the Lean stdout (for non-failure probes stdout+stderr, as run)
+# and, for failure probes, the Lean stderr, with the runtime's backtrace
+# lines and the shell's "Aborted (core dumped)" (core-dump setting
+# dependent; the exit status is pinned) removed and PANIC source
+# positions masked (`:<pos>:`). Together
+# with the OCaml pin this fixes the whole disagreement: a NEW or CHANGED
+# difference in a registered probe is red, not absorbed. Every registered
+# probe must have a Lean pin and every Lean pin must be registered.
+# Rebaseline the Lean pins of registered probes explicitly with
+# REBASELINE_XFAIL=1 and commit the diff.
 # Usage: ./run.sh [<name>...]   (default: every probes/*.lem), from any cwd,
 #        with the complete opam environment (opam exec --). Env: CAPPED, CERB_MEM_MAX.
 set -u
@@ -66,6 +80,25 @@ export CERB_MEM_MAX=${CERB_MEM_MAX:-16G}
 OUT="$HERE/_out"
 LT="$HERE/lean-test"
 mkdir -p "$OUT/ocaml" "$OUT/lean" "$LT"
+
+# --- the expected-failure registry: validated up front, fail-closed ---
+XF="$HERE/expected_failures.txt"
+if [ ! -f "$XF" ]; then echo "FAIL: registry $XF missing"; exit 1; fi
+xf_bad=$(awk -F, -v probes="$HERE/probes" -v expdir="$HERE/expected" '
+  /^[[:space:]]*(#|$)/ { next }
+  { if (NF < 3 || $3 == "") { printf "line %d: want <probe>,<class>,<reason>: %s\n", NR, $0; next }
+    if ($2 != "fix" && $2 != "ruled" && $2 != "open") { printf "line %d: unknown class \"%s\" (fix|ruled|open)\n", NR, $2 }
+    if (seen[$1]++) { printf "line %d: duplicate entry for %s\n", NR, $1 }
+    if (system("test -f \"" probes "/" $1 ".lem\"") != 0) { printf "line %d: orphan entry, no probe %s/%s.lem\n", NR, probes, $1 }
+    if (system("test -f \"" expdir "/" $1 ".lean.out\"") != 0 && ENVIRON["REBASELINE_XFAIL"] != "1") { printf "line %d: registered probe %s has no Lean pin %s/%s.lean.out\n", NR, $1, expdir, $1 } }' "$XF") \
+  || { echo "FAIL: the registry validator itself failed (awk exit $?) — refusing to run"; exit 1; }
+for pin in "$HERE"/expected/*.lean.out; do
+  [ -e "$pin" ] || continue
+  pn=$(basename "$pin" .lean.out)
+  grep -q "^$pn," "$XF" || xf_bad="$xf_bad
+orphan Lean pin $pin: $pn is not registered"
+done
+if [ -n "$xf_bad" ]; then echo "FAIL: invalid expected-failure registry $XF:"; echo "$xf_bad" | sed '/^$/d; s/^/  /'; exit 1; fi
 
 if [ $# -eq 0 ]; then
   set -- $(cd "$HERE/probes" && ls *.lem | sed 's/\.lem$//')
@@ -102,7 +135,15 @@ if [ $# -eq 0 ]; then echo "  FAIL (vacuous): no probes in $HERE/probes"; exit 1
 cp "$HERE/../lean-test/lean-toolchain" "$LT/lean-toolchain"
 
 status=0
-xfail_status=0
+n_ok=0; n_xfail=0; n_fail=0
+# The Lean side of a run, normalised for pinning: exit status, stdout, and
+# (failure probes) stderr; backtrace lines dropped, PANIC positions masked.
+lean_norm() { sed -E '/^backtrace:$/d; /\[0x[0-9a-f]+\]$/d; /^Aborted( \(core dumped\))?$/d; s/^(PANIC at [^ ]+ [^ :]+):[0-9]+:[0-9]+:/\1:<pos>:/' "$1"; }
+lean_record() {
+  { echo "lean-exit: $ln_st"; echo "--- lean stdout ---"; lean_norm "$OUT/lean/$name.out"
+    if [ -f "$OUT/lean/$name.err" ]; then echo "--- lean stderr ---"; lean_norm "$OUT/lean/$name.err"; fi
+  } > "$OUT/lean/$name.xfail"
+}
 run_one() {
   parity_mismatch=0
   name=$1
@@ -137,6 +178,7 @@ run_one() {
     echo "  FAIL: OCaml reference DRIFTED from the committed pin (re-adjudicate, then REBASELINE=1):"
     diff "$pin" "$OUT/ocaml/$name.out" | head -20; return 1; fi
   # --- Lean leg ---
+  rm -f "$OUT/lean/$name.out" "$OUT/lean/$name.err" "$OUT/lean/$name.xfail"
   rm -f "$LT/$Mod.lean" "$LT/${Mod}_auxiliary.lean" "$LT/Run_$name.lean"
   if ! ( cd "$LT" && $LEM $LEMFLAGS -outdir "$LT" -lean "$src" ) > "$OUT/lean/$name.gen.log" 2>&1; then
     echo "  FAIL: Lean generation failed:"; sed -n 1,10p "$OUT/lean/$name.gen.log"; return 1; fi
@@ -148,7 +190,7 @@ run_one() {
   exe="$LT/.lake/build/bin/run-$name"
   if [ ! -x "$exe" ]; then echo "  FAIL (vacuous): Lean exe $exe was not built"; return 1; fi
   if [ $failure_probe = 1 ]; then
-    LEAN_ABORT_ON_PANIC=1 "$exe" > "$OUT/lean/$name.out" 2> "$OUT/lean/$name.err"; ln_st=$?
+    LEAN_ABORT_ON_PANIC=1 "$exe" > "$OUT/lean/$name.out" 2> "$OUT/lean/$name.err"; ln_st=$?; lean_record
     if [ $ln_st -eq 0 ]; then parity_mismatch=1; echo "  FAIL: failure probe, but the Lean binary SUCCEEDED (exit 0) where the OCaml reference fails"; return 1; fi
     if diff "$OUT/ocaml/$name.out" "$OUT/lean/$name.out" > "$OUT/$name.diff"; then
       echo "  OK: both fail (lean exit $ln_st: $(head -c 120 "$OUT/lean/$name.err" | tr '\n' ' ')); stdout prefix identical ($(wc -l < "$OUT/lean/$name.out") lines)"; return 0
@@ -156,7 +198,7 @@ run_one() {
       parity_mismatch=1; echo "  FAIL: both fail but the stdout prefixes differ (< OCaml, > Lean):"; head -20 "$OUT/$name.diff"; return 1
     fi
   else
-    LEAN_ABORT_ON_PANIC=1 "$exe" > "$OUT/lean/$name.out" 2>&1; ln_st=$?
+    LEAN_ABORT_ON_PANIC=1 "$exe" > "$OUT/lean/$name.out" 2>&1; ln_st=$?; lean_record
     if diff "$OUT/ocaml/$name.out" "$OUT/lean/$name.out" > "$OUT/$name.diff"; then
       if [ $ln_st -ne 0 ]; then echo "  FAIL: Lean binary exited $ln_st (output identical)"; return 1
       else echo "  OK: parity ($(wc -l < "$OUT/lean/$name.out") lines byte-identical to the OCaml reference; pin matches)"; return 0; fi
@@ -174,16 +216,27 @@ run_one() {
 }
 for name in "$@"; do
   echo "=== $name ==="
-  xreason=$(grep "^$name," "$HERE/expected_failures.txt" 2>/dev/null | head -1 | cut -d, -f2-)
+  xreason=$(grep "^$name," "$XF" | head -1 | cut -d, -f2-)
+  lpin="$HERE/expected/$name.lean.out"
   if run_one "$name"; then
-    if [ -n "$xreason" ]; then echo "  FAIL: EXPECTED FAILURE NOW PASSES ($xreason) — remove it from expected_failures.txt"; status=1; fi
+    if [ -n "$xreason" ]; then echo "  FAIL: EXPECTED FAILURE NOW PASSES ($xreason) — remove it from expected_failures.txt (and its Lean pin)"; status=1; n_fail=$((n_fail+1))
+    else n_ok=$((n_ok+1)); fi
   else
     if [ -n "$xreason" ] && [ "$parity_mismatch" -eq 1 ]; then
-      echo "  XFAIL (expected, registered): $xreason"; xfail_status=1
+      if [ "${REBASELINE_XFAIL:-0}" = 1 ]; then cp "$OUT/lean/$name.xfail" "$lpin"; echo "  REBASELINED Lean pin $lpin"; fi
+      if [ ! -f "$lpin" ]; then
+        echo "  FAIL: registered probe has no Lean pin $lpin (not XFAIL)"; status=1; n_fail=$((n_fail+1))
+      elif cmp -s "$lpin" "$OUT/lean/$name.xfail"; then
+        echo "  XFAIL (expected, registered; Lean side matches its pin): $xreason"; n_xfail=$((n_xfail+1))
+      else
+        echo "  FAIL: registered probe's disagreement CHANGED — the Lean side differs from its pin (< pin, > this run; not XFAIL):"
+        diff "$lpin" "$OUT/lean/$name.xfail" | head -20; status=1; n_fail=$((n_fail+1))
+      fi
     else
       [ -z "$xreason" ] || echo "  FAIL: registered probe did not reach its expected parity disagreement (not XFAIL)"
-      status=1
+      status=1; n_fail=$((n_fail+1))
     fi
   fi
 done
+echo "parity: $# probes: $n_ok OK, $n_xfail XFAIL (registered, Lean side pinned), $n_fail FAIL"
 exit $status
