@@ -142,6 +142,24 @@ classes (a)–(c) and do not widen them.
   classification of the remaining LemLib behaviours in the paragraph
   above (failure parity for raises that are not limits) stands.
 
+  **Addendum 2026-09-30 (branch `arc/linksem`): the arithmetic-wrap
+  runner row now EXISTS.** [USER 2026-09-30], verbatim: "Yes, agree on
+  1-3. Go ahead", on the orchestrator's questions. Question (2) was to keep
+  the `p_word_bitwise_wide_mul` runner row, reversing this section's "the
+  arithmetic wrap has no runner row by design". The row is
+  `tests/comprehensive/parity/probes/p_word_bitwise_wide_mul.lem`, entry
+  class `ruled` in `tests/comprehensive/parity/expected_failures.txt`: int/nat
+  bitwise operations on operands built by multiplications that wrap at
+  63 bits on OCaml. It was acceptable because, since 2026-09-30, a
+  registered probe's Lean side is pinned exactly
+  (`expected/<probe>.lean.out`), so the row pins the known difference
+  instead of absorbing new ones. Question (1), under the same ruling,
+  accepted LP4 (unbounded int/nat bitwise reps; OCaml wraps at 63 bits) and
+  OM4 (mword width from the type; OCaml uses the runtime width) as
+  registered OCaml-target deviations of this X3 class (`p_word_bitwise_wide`,
+  `p_mword_width`, class `ruled`; record
+  `2026-09-30_library-parity-coverage.md`).
+
 ### X1 — polymorphic compare on values containing a set or map
 
 - OCaml `compare`/`=` on a `Pset`/`Pmap` value raises

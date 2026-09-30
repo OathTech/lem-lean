@@ -567,15 +567,19 @@ and is not the operator's words.
   `@[extern]`. Checked on this branch: a grep for `@[extern` and
   `implemented_by` over `lean-lib/**/*.lean` finds exactly these three
   attribute uses, and nothing else outside comments.
-- **LP4's semantics conflict** (library-parity record LP4; implemented,
-  acceptance OPEN: the D2 condition was not met): Lean's reps
+- **LP4's semantics conflict** (library-parity record LP4; ACCEPTED on
+  2026-09-30 as a ruled OCaml-target deviation, see below): Lean's reps
   are unbounded, OCaml's are 63-bit and wrap, and HOL/Isabelle/Coq use
   Lem's 31-bit definition. **Ruling D2** accepted LP4 SUBJECT TO a
   measurement that the OCaml reps are unbounded. The measurement
   (`p_word_bitwise_wide`) shows they WRAP at 63 bits, so the condition is
-  not met and LP4 is back with the operator. The verbatim diff and the
-  upstream-Lem candidate (the width-limited prover definitions) are in the
-  library-parity record.
+  not met and LP4 went back to the operator. **Ruling, 2026-09-30:**
+  [USER 2026-09-30] "Yes, agree on 1-3. Go ahead", on the orchestrator's questions (1) accept LP4 and OM4 as
+  registered OCaml-target deviations under the 2026-09-03 X3 ruling
+  ([USER 2026-09-03] "ocaml limits that are hardcoded thanks to ocaml-level execution issues are also forbidden, the real thing is the logical semantics") and (2) keep the `p_word_bitwise_wide_mul` runner
+  row. LP4 and OM4 are ACCEPTED; `p_word_bitwise_wide` and `p_mword_width`
+  are class `ruled`. The verbatim diff and the upstream-Lem candidate (the
+  width-limited prover definitions) are in the library-parity record.
 
 ## Review fixes (2026-09-30)
 

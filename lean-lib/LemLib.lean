@@ -1775,12 +1775,12 @@ def lemNatAsr (a b : Nat) : Nat := a >>> b  -- same as lsr for Nat (unsigned)
 
 /- Int bitwise operations: UNBOUNDED two's complement, the Lean reps of
    word.lem's intLand/intLor/intLxor/intLsl/intAsr (library-parity-coverage
-   2026-09-30, finding LP4 [AGENT]; implemented, acceptance OPEN: ruling D2
-   was conditional on OCaml being unbounded, and it is not (probe
-   p_word_bitwise_wide)). The OCaml reference is native 63-bit
-   `land`/`lor`/`lxor`/`lsl`/`asr`; these agree with it on its whole
-   domain and DIFFER where OCaml wraps (whether that difference is accepted
-   is the open D2 question). Lem's
+   2026-09-30, finding LP4 [AGENT]; ACCEPTED as a ruled OCaml-target
+   deviation: [USER 2026-09-30] "Yes, agree on 1-3. Go ahead", under the
+   2026-09-03 X3 ruling; probe p_word_bitwise_wide, class ruled). The OCaml
+   reference is native 63-bit `land`/`lor`/`lxor`/`lsl`/`asr`; these agree
+   with it on its whole domain and DIFFER where OCaml wraps (the accepted
+   deviation). Lem's
    own definitions go through a 31-bit bitSequence and disagreed from 2^30
    on. `Int.negSucc n` is `-(n+1)`, i.e. the complement `~~~n` of `n`, so
    each case is a Nat identity: `a &&& ~~~b = a ^^^ (a &&& b)`,

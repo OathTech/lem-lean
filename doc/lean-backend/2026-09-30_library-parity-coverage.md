@@ -2,7 +2,8 @@
 
 This record covers the Lem standard-library parity changes that are on the
 branch `arc/linksem`: the fixes LP3, LP6, LP7 and LP8, and LP4, which is
-implemented but whose acceptance is OPEN (commit `66e3cf8`). Their
+ACCEPTED as a ruled OCaml-target deviation (commit `66e3cf8`; ruling of
+2026-09-30, see LP4). Their
 regression probes are `p_lib_word_int_nat`, `p_lib_machine_word` and
 `f_lib_chr_range` in `tests/comprehensive/parity/`. It also records what
 those probes exclude and why, and the rulings those exclusions need.
@@ -46,7 +47,7 @@ Regression: `p_lib_word_int_nat` calls the Word functions by name. The
 names are now also in `library/lean_constants` (review fix 2026-09-30,
 LOW d; see the findings record).
 
-### LP4: int/nat bitwise were 31-bit on Lean (implemented; acceptance OPEN: D2 condition not met)
+### LP4: int/nat bitwise were 31-bit on Lean (ACCEPTED: ruled OCaml-target deviation, 2026-09-30)
 
 `library/word.lem` gives `intLand`, `intLor`, `intLxor`, `intLsl`, `intAsr`
 and `natLand`, `natLor`, `natLxor`, `natLsl`, `natAsr` OCaml reps (native
@@ -141,9 +142,16 @@ operations in isolation, not only through wrapped arithmetic. OCaml also yields 
 `nat` (`natLsl 1 62`), and `intLsl 1 64 = 1`: OCaml's `lsl` by at least the
 word size is unspecified. The disagreement is the 63-bit class ruled on
 [USER 2026-09-03], but D2 was given subject to the opposite finding. So
-LP4's acceptance goes BACK TO THE OPERATOR with this measurement. The
-probe is registered in `parity/expected_failures.txt` as class (3), open.
-No code was changed on the strength of D2.
+LP4's acceptance went BACK TO THE OPERATOR with this measurement.
+
+**Ruling, 2026-09-30:** [USER 2026-09-30] "Yes, agree on 1-3. Go ahead", on the orchestrator's question (1): accept
+LP4 (unbounded bitwise reps; OCaml wraps at 63 bits) as a registered
+OCaml-target deviation under the 2026-09-03 X3 ruling, [USER 2026-09-03]
+"ocaml limits that are hardcoded thanks to ocaml-level execution issues are also forbidden, the real thing is the logical semantics". LP4 is ACCEPTED. `p_word_bitwise_wide` is registered in
+`parity/expected_failures.txt` as class `ruled` (it was `open`); its Lean
+pin is unchanged. The same ruling's question (2) keeps the
+`p_word_bitwise_wide_mul` runner row (addendum in
+`2026-09-03_exception-case-rulings.md`, X3).
 
 **Upstream-Lem candidate** (recorded as D2 asks): the HOL, Isabelle and Coq
 meanings of these functions are Lem's own definitions, which are
@@ -175,7 +183,7 @@ gave 171, where the OCaml reference and HOL (`word_extract hi lo`, then
 Regressions: `p_lib_machine_word`, the `test_mword.lem` assert
 `mw_word_extract_masks_hi`, LemLibTest.
 
-### LP6/LP7 width question: type width or runtime width (OPEN discrepancy OM4; ruling needed)
+### LP6/LP7 width question: type width or runtime width (OM4: ACCEPTED, ruled OCaml-target deviation, 2026-09-30)
 
 LP6 and LP7 fixed which bits Lean returns. They left one question open:
 what is the WIDTH of the result? OCaml's `Lem.mword` carries its width at
@@ -205,10 +213,16 @@ This is a Lean-vs-OCaml discrepancy. The numeric value agrees whenever
 the result type is at least as wide as the runtime width. `word_length`
 and `bitlistFromWord` always differ at a mismatched width, and a
 too-long bit list gives an out-of-range value on OCaml (1027 in a `ty8`
-word). Lean follows the type, as HOL and Isabelle do. The probe is
-registered as class (3), open. [AGENT] recommendation: rule it an
-OCaml-target deviation (a Lem type is a width, and a `ty8` word of length 4
-has no meaning in the prover backends). The decision is the operator's.
+word). Lean follows the type, as HOL and Isabelle do. [AGENT]
+recommendation was to rule it an OCaml-target deviation (a Lem type is a
+width, and a `ty8` word of length 4 has no meaning in the prover backends).
+
+**Ruling, 2026-09-30:** [USER 2026-09-30] "Yes, agree on 1-3. Go ahead", on the orchestrator's question (1): accept
+OM4 (mword width from the type; OCaml uses the runtime width) as a
+registered OCaml-target deviation under the 2026-09-03 X3 ruling. OM4 is
+ACCEPTED. `p_mword_width` is registered as class `ruled` (it was `open`);
+its Lean pin is unchanged. The other §2 classes (LP5, OM1–OM3, OM5) are
+not covered by this ruling.
 
 ### LP8: `chr` succeeded above 255 on Lean (FIXED)
 
@@ -244,7 +258,8 @@ against this branch's `ocaml-lib/lem.ml`:
 4. **OM3, `setBit` beyond the width.** OCaml ORs in `1 lsl i` without a
    mask, so `setBit (w8 0) 10 true` has value 1024. Lean leaves the word
    unchanged, as HOL does.
-5. **OM4, width from the value, not the type.** `wordFromBitlist`,
+5. **OM4, width from the value, not the type** (ACCEPTED 2026-09-30 as a
+   ruled OCaml-target deviation, §1). `wordFromBitlist`,
    `word_extract` and `word_concat`, as in §1 above. This one is now
    MEASURED by `p_mword_width`.
 6. **OM5, rotations and arithmetic shifts raise.** On OCaml, `word_ror 0`,
@@ -275,13 +290,19 @@ not in the library build, and which has no OCaml rep for `lnot`. So
 `tests/comprehensive/negative/neg_lnot_nat.lem`, so the question comes back
 if an instance ever appears. No parity probe is possible.
 
-## 3. Decisions needed (this branch)
+## 3. Decisions (this branch)
 
-1. **LP4 / D2.** The measurement contradicts D2's condition (OCaml wraps
-   at 63 bits). Is LP4 accepted anyway, under the [USER 2026-09-03] 63-bit
-   class, or re-decided?
-2. **OM4** (width from the type or from the runtime value): OCaml-target
-   deviation, or mirror OCaml?
+1. **LP4 / D2: DECIDED.** [USER 2026-09-30] "Yes, agree on 1-3. Go ahead": LP4 is accepted as a registered
+   OCaml-target deviation under the 2026-09-03 X3 ruling
+   (`p_word_bitwise_wide`, class `ruled`).
+2. **OM4: DECIDED.** Same ruling: accepted as a registered OCaml-target
+   deviation under X3 (`p_mword_width`, class `ruled`).
+2a. **The `p_word_bitwise_wide_mul` runner row: DECIDED.** Same ruling,
+   question (2): the row is kept, reversing X3's "no runner row by design"
+   (addendum in `2026-09-03_exception-case-rulings.md`).
+
+Still open:
+
 3. **LP5, OM1, OM2, OM3, OM5** (§2): for each, OCaml-target deviation, or
    mirror OCaml?
 4. Whether OM1–OM5, LP5 and the 31-bit prover definitions (LP4) go into
