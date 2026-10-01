@@ -137,6 +137,9 @@ for line in open(os.path.join(out, 'differences.txt')):
     same = strip(a, parts[1] == 'isa') == strip(b, parts[1] == 'isa')
     print(('comments/whitespace only  ' if same else 'CODE DIFFERS              ') + rel)
 PY
+cst=$?
+# fail-closed: a crashed classifier must not read as "no code differences"
+[ "$cst" -eq 0 ] || die "the comments/whitespace classifier failed (exit $cst); classification.txt is not trustworthy"
 
 echo "upstream-drift: upstream $(cd "$UP" && git describe --always --dirty 2>/dev/null), fork $(cd "$FORK" && git describe --always --dirty 2>/dev/null); clients compared:${CLIENTS:- none}"
 echo "upstream-drift: $nfiles upstream files; $(wc -l < "$OUT/differences.txt") differ (list: $OUT/differences.txt)"
