@@ -72,13 +72,15 @@ declare isabelle target_rep function empty = `Map.empty`
 (* -------------------------------------------------------------------------- *)
 
 val insert    : forall 'k 'v. MapKeyType 'k => 'k -> 'v -> map 'k 'v -> map 'k 'v
-val insertBy  : forall 'k 'v. ('k -> 'k -> ordering) -> 'k -> 'v -> map 'k 'v -> map 'k 'v
+(* named mapInsertBy, not insertBy: a Map.insertBy shares its name with Sorting.insertBy, and Coq's
+   top-level renaming then emits Sorting's as insertBy0 (upstream-drift check, lem TODO 25) *)
+val mapInsertBy : forall 'k 'v. ('k -> 'k -> ordering) -> 'k -> 'v -> map 'k 'v -> map 'k 'v
 
 declare coq      target_rep function insert = `fmap_add`
 (* lean: the keyed Fmap representation needs the comparator at insert time
    (arc-6 S3); same By+inline pattern as lookup/delete below *)
-declare lean     target_rep function insertBy = `fmapAddBy`
-let inline {lean} insert = insertBy mapKeyCompare
+declare lean     target_rep function mapInsertBy = `fmapAddBy`
+let inline {lean} insert = mapInsertBy mapKeyCompare
 declare ocaml    target_rep function insert = `Pmap.add`
 (* declare hol      target_rep function insert k v m = `FUPDATE` m (k,v) *)
 declare hol      target_rep function insert k v m = special "%e |+ (%e, %e)" m k v
@@ -292,11 +294,12 @@ assert delete_insert_2:      (member (7 : nat) (delete 5 (insert 7 true empty)))
 assert delete_delete: (null (delete (5 : nat) (delete (5 : nat) (insert 5 true empty))))
 
 val (union)          : forall 'k 'v. MapKeyType 'k => map 'k 'v -> map 'k 'v -> map 'k 'v
-val unionBy          : forall 'k 'v. ('k -> 'k -> ordering) -> map 'k 'v -> map 'k 'v -> map 'k 'v
+(* named mapUnionBy, not unionBy: Set.unionBy already exists (the same collision class as mapInsertBy) *)
+val mapUnionBy       : forall 'k 'v. ('k -> 'k -> ordering) -> map 'k 'v -> map 'k 'v -> map 'k 'v
 declare coq      target_rep function (union) = (`@` `List.app` `_`)
 (* lean: comparator needed at insert time (arc-6 S3) *)
-declare lean     target_rep function unionBy = `fmapUnionBy`
-let inline {lean} (union) m1 m2 = unionBy mapKeyCompare m1 m2
+declare lean     target_rep function mapUnionBy = `fmapUnionBy`
+let inline {lean} (union) m1 m2 = mapUnionBy mapKeyCompare m1 m2
 declare ocaml    target_rep function (union) = `Pmap.union`
 declare isabelle target_rep function (union) = infix `++`
 declare hol      target_rep function (union) = `FUNION`
