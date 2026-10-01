@@ -51,6 +51,14 @@ do-tests:
 nonlean-regress:
 	tests/nonlean-regress/run.sh
 
+# Upstream drift check: this fork's non-Lean output vs pristine upstream Lem
+# (library + tests/backends for the 9 non-Lean emitters, and linksem's and
+# Cerberus's OCaml). Needs UPSTREAM_LEM, LINKSEM, CERBERUS (or NO_LINKSEM=1 /
+# NO_CERBERUS=1) and an output directory; see tests/upstream-drift/run.sh.
+.PHONY: upstream-drift
+upstream-drift:
+	tests/upstream-drift/run.sh $(or $(DRIFT_OUT),$(error set DRIFT_OUT to an empty output directory))
+
 lem_dep.tex: lem_dep.ott
 	ott -o lem_dep.tex -picky_multiple_parses true lem_dep.ott
 
