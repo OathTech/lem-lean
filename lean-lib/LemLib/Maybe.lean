@@ -29,63 +29,63 @@ inductive  maybe (a : Type) : Type where
   deriving BEq, Ord
  -/
 
-def  maybeEqualBy  {a : Type}  (eq : a → a → Bool) (x : Option a) (y : Option a)  : Bool :=  match x, y with  | none,  none =>  true | none,  some  _ =>  false | some  _,  none =>  false | some  x',  some  y' =>  (eq  x'  y')
+def maybeEqualBy {a : Type} (eq : a → a → Bool) (x : Option a) (y : Option a) : Bool := match x, y with | none, none => true | none, some _ => false | some _, none => false | some x', some y' => (eq x' y')
 
-instance (a : Type) [Eq0 a] : Eq0 (Option  a) where
+instance (a : Type) [Eq0 a] : Eq0 (Option a) where
 
-    isEqual   :=  (maybeEqualBy  (fun x y => x == y))
+    isEqual := (maybeEqualBy (fun x y => x == y))
 
-    isInequal   x  y  :=  not  ((maybeEqualBy  (fun x y => x == y)  x  y))
+    isInequal x y := not ((maybeEqualBy (fun x y => x == y) x y))
 
-def  maybeCompare  {a : Type} {b : Type}  (cmp : b → a → LemOrdering) (x : Option b) (y : Option a)  : LemOrdering :=  match x, y with  | none,  none =>  LemOrdering.EQ | none,  some  _ =>  LemOrdering.LT | some  _,  none =>  LemOrdering.GT | some  x',  some  y' =>  cmp  x'  y'
+def maybeCompare {a b : Type} (cmp : b → a → LemOrdering) (x : Option b) (y : Option a) : LemOrdering := match x, y with | none, none => LemOrdering.EQ | none, some _ => LemOrdering.LT | some _, none => LemOrdering.GT | some x', some y' => cmp x' y'
 
-instance (a : Type) [SetType a] : SetType (Option  a) where
+instance (a : Type) [SetType a] : SetType (Option a) where
 
-    setElemCompare   :=  maybeCompare  (@setElemCompare (a) _)
+    setElemCompare := maybeCompare (@setElemCompare a _)
 
-instance (a : Type) [Ord0 a] : Ord0 (Option  a) where
+instance (a : Type) [Ord0 a] : Ord0 (Option a) where
 
-      compare   :=  maybeCompare  Ord0.compare
+      compare := maybeCompare Ord0.compare
 
-      isLess   :=  fun  m1 =>  (fun  m2 =>  maybeCompare  Ord0.compare  m1  m2  ==  LemOrdering.LT)
+      isLess := fun m1 => (fun m2 => maybeCompare Ord0.compare m1 m2 == LemOrdering.LT)
 
-      isLessEqual   :=  fun  m1 =>  (fun  m2 =>  (let  r  := maybeCompare  Ord0.compare  m1  m2;  (r  ==  LemOrdering.LT)  ||  (r  ==  LemOrdering.EQ)))
+      isLessEqual := fun m1 => (fun m2 => (let r := maybeCompare Ord0.compare m1 m2; (r == LemOrdering.LT) || (r == LemOrdering.EQ)))
 
-      isGreater   :=  fun  m1 =>  (fun  m2 =>  maybeCompare  Ord0.compare  m1  m2  ==  LemOrdering.GT)
+      isGreater := fun m1 => (fun m2 => maybeCompare Ord0.compare m1 m2 == LemOrdering.GT)
 
-      isGreaterEqual   :=  fun  m1 =>  (fun  m2 =>  (let  r  := maybeCompare  Ord0.compare  m1  m2;  (r  ==  LemOrdering.GT)  ||  (r  ==  LemOrdering.EQ)))
+      isGreaterEqual := fun m1 => (fun m2 => (let r := maybeCompare Ord0.compare m1 m2; (r == LemOrdering.GT) || (r == LemOrdering.EQ)))
 
 /- ----------------------- -/
 /- maybe                   -/
 /- ----------------------- -/
 
-def  maybe0  {a : Type} {b : Type}  (d : b) (f : a → b) (mb : Option a)  : b :=  match  mb with  |  some  a1 =>  f  a1 |  none =>  d
+def maybe0 {a b : Type} (d : b) (f : a → b) (mb : Option a) : b := match mb with | some a1 => f a1 | none => d
 
 /- ----------------------- -/
 /- isJust / isNothing      -/
 /- ----------------------- -/
 
-def  isJust  {a : Type}  (mb : Option a)  : Bool :=  match  mb with  |  some  _ =>  true |  none =>  false
+def isJust {a : Type} (mb : Option a) : Bool := match mb with | some _ => true | none => false
 
-def  isNothing  {a : Type}  (mb : Option a)  : Bool :=  match  mb with  |  some  _ =>  false |  none =>  true
+def isNothing {a : Type} (mb : Option a) : Bool := match mb with | some _ => false | none => true
 
 /- ----------------------- -/
 /- fromMaybe               -/
 /- ----------------------- -/
 
-def  fromMaybe  {a : Type}  (d : a) (mb : Option a)  : a :=  match  mb with  |  some  v =>  v |  none =>  d
+def fromMaybe {a : Type} (d : a) (mb : Option a) : a := match mb with | some v => v | none => d
 
 /- ----------------------- -/
 /- map                     -/
 /- ----------------------- -/
 
 /- lem: replaced by its target representation:  
-def  map  {a : Type} {b : Type}  (f : a → b)  : Option a → Option b :=  maybe0  none  (fun (v : a) =>  some  (f  v)) -/
+def  map  {a b : Type}  (f : a → b)  : Option a → Option b :=  maybe0  none  (fun (v : a) =>  some  (f  v)) -/
 /- ----------------------- -/
 /- bind                    -/
 /- ----------------------- -/
 
-def  bind0  {a : Type} {b : Type}  (mb : Option a) (f : a → Option b)  : Option b :=  maybe0  none  f  mb
-abbrev  maybe (a : Type) := Option  a
+def bind0 {a b : Type} (mb : Option a) (f : a → Option b) : Option b := maybe0 none f mb
+abbrev maybe (a : Type) := Option a
 
 end Lem_Maybe

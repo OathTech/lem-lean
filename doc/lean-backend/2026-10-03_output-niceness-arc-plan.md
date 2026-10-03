@@ -368,3 +368,61 @@ cleanup (Recommended)". C and D are not in this arc; they stay candidates
 for later decisions. Order [AGENT]: B, then A. Gate for both: the
 generated declarations are unchanged, as shown by the declaration census
 on both consumers; the token check also applies to whitespace-only steps.
+
+## 10. S3-B record: printer cleanup (2026-10-03)
+
+**Changes** (`src/lean_backend.ml`):
+- **B1 spacing** (`normalize_layout`). Outside strings, character literals
+  and comments: a run of spaces inside a line becomes one space; there is
+  no space after `(`/`[` or before `)`/`]`/`,`; `×` has one space on each
+  side. Line-start indentation is untouched.
+- **B2 parentheses.**
+  - Types: a `Typ_paren` around an atom (decided on the printed text, so a
+    multi-token target representation keeps its parentheses) or around a
+    tuple or another paren is dropped, unless it holds a comment.
+  - Expressions (`normalize_layout`): `( atom )` becomes `atom`, for a name
+    or a numeral. A space is inserted where tokens would otherwise join. Not
+    taken: a numeral followed by `.`, and the name list of an `export` or
+    `open` command (it needs its parentheses).
+- **B3:** each list of `open`s is one statement, wrapped at about 80
+  columns.
+- **B4:** adjacent implicit binders of one kind share a binder,
+  `{a b : Type}`. Only adjacent ones, so the argument order and the
+  declaration types are unchanged. In Cerberus, 530 pairs of adjacent
+  separate binders became 10.
+- **B5 the garbled `§`.** Lem's lexer reads comment bytes as Latin-1
+  (upstream tray draft 02). The Lean output undoes that on each comment
+  text fragment, when the result is valid UTF-8. `Â` is gone from both
+  trees (32 files before). OCaml output is untouched.
+
+**Gate**:
+- **Declaration census** against S2:
+  - Cerberus with macro scopes erased: 0 diff lines.
+  - linksem with macro scopes erased: 0 diff lines.
+  - linksem strict census: 18 lines differ. These are the hygienic helper
+    names of `c_type_top`'s derived instances (`_hyg.261` → `_hyg.245`)
+    and the two instance bodies that reference them. Removing parentheses
+    removes macro expansions during elaboration, which renumbers the
+    module's later hygienic names; this is the same phenomenon as in S1.
+- **Comprehensive suite:**
+  `=== Generation: 68 passed, 0 failed, 0 skipped ===`,
+  `OK: Test_comments.lean: comments preserved, layout sound`,
+  `Build completed successfully (197 jobs).`,
+  `parity: 48 probes: 38 OK, 10 XFAIL (registered, Lean side pinned), 0 FAIL`.
+- `nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)`.
+- Comment coverage is unchanged (62/4060, 42/3833), with no layout
+  hazards.
+
+**Caught by the gate and fixed before this commit:**
+- `export Show (show0)` → `export Show show0`, which is invalid.
+- `Show (a × b)` → `Show(a × b)`: the removed paren's leading whitespace
+  was dropped.
+
+The first census run failed to build both consumers on these two bugs.
+
+**Process note:** linksem's primary checkout moved during the arc, to
+`3699e83`, by another agent. From this slice on, the scratch generators
+read a frozen copy of linksem's sources (the arc's starting sources) and a
+detached Cerberus worktree at `f3d9cc419`
+(`worktrees/cerberus-lean-frozen-niceness`; its `.lem` files are identical
+to `621caf996`'s).

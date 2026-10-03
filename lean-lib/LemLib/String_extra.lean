@@ -38,38 +38,38 @@ open Lem_List_extra
 /- **************************************************************************** -/
 
 /- lem: replaced by its target representation: 
- partial def  stringFromNatHelper  (n : Nat) (acc : List (Char))  : List (Char) := 
+ partial def  stringFromNatHelper  (n : Nat) (acc : List Char)  : List Char := 
   lem_if  n  =  0 then 
     acc
    else 
     lemStringFromNatHelper  (/  n  10)  (lemChr  (mod  n  10  +  48)  ::  acc) -/
-def  stringFromNat  (n : Nat)  : String :=
-  lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNatHelper  n  ([] : List (Char)))
+def stringFromNat (n : Nat) : String :=
+  lem_if n == 0 then "0" else String.ofList (lemStringFromNatHelper n ([] : List Char))
 /- lem: replaced by its target representation: 
- partial def  stringFromNaturalHelper  (n : Nat) (acc : List (Char))  : List (Char) := 
+ partial def  stringFromNaturalHelper  (n : Nat) (acc : List Char)  : List Char := 
   lem_if  n  =  0 then 
     acc
    else 
     lemStringFromNaturalHelper  (/  n  10)  (lemChr  (lemNatFromNatural  (mod  n  10  +  48))  ::  acc) -/
-def  stringFromNatural  (n : Nat)  : String :=
-  lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNaturalHelper  n  ([] : List (Char)))
-def  stringFromInt  (i : Int)  : String :=
-  lem_if  intLtb  i (( 0 :  Int)) then
-    String.append "-"  (stringFromNat  (Int.natAbs  i))
+def stringFromNatural (n : Nat) : String :=
+  lem_if n == 0 then "0" else String.ofList (lemStringFromNaturalHelper n ([] : List Char))
+def stringFromInt (i : Int) : String :=
+  lem_if intLtb i ((0 : Int)) then
+    String.append "-" (stringFromNat (Int.natAbs i))
    else
-    stringFromNat  (Int.natAbs  i)
-def  stringFromInteger  (i : Int)  : String :=
-  lem_if  intLtb  i (( 0 :  Int)) then
-    String.append "-"  (stringFromNatural  (Int.natAbs  i))
+    stringFromNat (Int.natAbs i)
+def stringFromInteger (i : Int) : String :=
+  lem_if intLtb i ((0 : Int)) then
+    String.append "-" (stringFromNatural (Int.natAbs i))
    else
-    stringFromNatural  (Int.natAbs  i)
+    stringFromNatural (Int.natAbs i)
 /- **************************************************************************** -/
 /- List-like operations                                                       -/
 /- **************************************************************************** -/
 
-def  nth  (s : String) (n : Nat)  : Char :=  listGetBang  (String.toList  s)  n
-def  stringConcat  (s : List (String))  : String :=
-  lemListFoldr  String.append  ""  s
+def nth (s : String) (n : Nat) : Char := listGetBang (String.toList s) n
+def stringConcat (s : List String) : String :=
+  lemListFoldr String.append "" s
 /- **************************************************************************** -/
 /- String comparison                                                          -/
 /- **************************************************************************** -/
@@ -77,21 +77,21 @@ def  stringConcat  (s : List (String))  : String :=
 /- TODO: -/
  /- XXX: broken -/
 
-def  stringLess  (x : String) (y : String)  : Bool :=  orderingIsLess  (defaultCompare  x  y)
-def  stringLessEq  (x : String) (y : String)  : Bool :=  not  (orderingIsGreater  (defaultCompare  x  y))
-def  stringGreater  (x : String) (y : String)  : Bool :=  stringLess  y  x
-def  stringGreaterEq  (x : String) (y : String)  : Bool :=  stringLessEq  y  x
+def stringLess (x : String) (y : String) : Bool := orderingIsLess (defaultCompare x y)
+def stringLessEq (x : String) (y : String) : Bool := not (orderingIsGreater (defaultCompare x y))
+def stringGreater (x : String) (y : String) : Bool := stringLess y x
+def stringGreaterEq (x : String) (y : String) : Bool := stringLessEq y x
 
-instance   : Ord0 String where
+instance : Ord0 String where
 
-    compare   :=  defaultCompare
+    compare := defaultCompare
 
-    isLess   :=  stringLess
+    isLess := stringLess
 
-    isLessEqual   :=  stringLessEq
+    isLessEqual := stringLessEq
 
-    isGreater   :=  stringGreater
+    isGreater := stringGreater
 
-    isGreaterEqual   :=  stringGreaterEq
+    isGreaterEqual := stringGreaterEq
 
 end Lem_String_extra

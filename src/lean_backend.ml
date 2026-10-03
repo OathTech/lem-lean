@@ -3262,6 +3262,45 @@ let lean_analysis_prepass_all env (mods : checked_module list) =
    including its own spacing. The text is escaped so it cannot end the
    Lean comment early (`-/`) or open a nested one that never closes (`/-`),
    and padded so it cannot form `/--` (doc comment) or `/-!` (module doc). *)
+(* Lem's lexer reads comment text as Latin-1 (lexer.mll, `Ulib.Text.of_latin1`;
+   upstream report doc/upstream-tray draft 02), so each byte of a UTF-8
+   character becomes a character of its own, and printing encodes each again:
+   `§` (C2 A7) comes out as `Â§` (C3 82 C2 A7). Undo that for the Lean output,
+   on each text fragment of a comment (a nested comment is its own fragment):
+   decode the UTF-8, and if every character is below 256 and those bytes form
+   valid UTF-8, they are the source text. Otherwise the text is kept as it is. *)
+let undo_latin1_reading (s : string) : string =
+  let n = String.length s in
+  let out = Buffer.create n in
+  let rec decode i =
+    if i >= n then true
+    else
+      let c = Char.code s.[i] in
+      if c < 0x80 then (Buffer.add_char out s.[i]; decode (i + 1))
+      else if c land 0xE0 = 0xC0 && i + 1 < n && Char.code s.[i + 1] land 0xC0 = 0x80 then begin
+        let cp = ((c land 0x1F) lsl 6) lor (Char.code s.[i + 1] land 0x3F) in
+        if cp < 0x100 then (Buffer.add_char out (Char.chr cp); decode (i + 2)) else false
+      end else false
+  in
+  let valid_utf8 t =
+    let m = String.length t in
+    let rec ok i =
+      if i >= m then true
+      else
+        let c = Char.code t.[i] in
+        let cont k = i + k < m && (let rec all j = j > k || (Char.code t.[i + j] land 0xC0 = 0x80 && all (j + 1)) in all 1) in
+        if c < 0x80 then ok (i + 1)
+        else if c land 0xE0 = 0xC0 && c >= 0xC2 then cont 1 && ok (i + 2)
+        else if c land 0xF0 = 0xE0 then cont 2 && ok (i + 3)
+        else if c land 0xF8 = 0xF0 && c <= 0xF4 then cont 3 && ok (i + 4)
+        else false
+    in
+    ok 0
+  in
+  if not (String.exists (fun ch -> Char.code ch >= 0x80) s) then s
+  else if decode 0 && valid_utf8 (Buffer.contents out) then Buffer.contents out
+  else s
+
 let wrap_lean_comment x =
   let s = Ulib.Text.to_string x in
   let b = Buffer.create (String.length s + 8) in
@@ -3279,26 +3318,103 @@ let wrap_lean_comment x =
 (* Comments the backend writes itself start with `lem: ` (`/- lem: … -/`),
    so a reader can tell them from the author's comments. *)
 
-(* Normalise the layout of a generated Lean file. Outside string literals and
-   comments: trailing spaces are removed and runs of blank lines become one
-   blank line. Blank lines carry no meaning in Lean (only the indentation of
-   non-blank lines does), so this changes no declaration. *)
+(* In a binder list built by the backend (no comments or strings inside),
+   adjacent implicit binders of one kind share a binder: `{a : Type} {b : Type}`
+   becomes `{a b : Type}`. Only adjacent ones: the order of the arguments,
+   and so the declaration's type, is unchanged. *)
+let merge_implicit_binders (s : string) : string =
+  let re = Str.regexp "{\\([^{}:]+\\) : \\(Type\\|Nat\\)} {\\([^{}:]+\\) : \\2}" in
+  let rec fix s =
+    let s' = Str.global_replace re "{\\1 \\3 : \\2}" s in
+    if s' = s then s else fix s'
+  in
+  fix s
+
+(* One `open` for a list of namespaces, wrapped at about 80 columns with an
+   indented continuation: `open A B C` opens what `open A`, `open B`,
+   `open C` do. *)
+let open_line (nss : string list) : string =
+  match nss with
+  | [] -> ""
+  | _ ->
+    let b = Buffer.create 256 in
+    Buffer.add_string b "open";
+    let col = ref 4 in
+    List.iter (fun ns ->
+        if !col + 1 + String.length ns > 80 && !col > 4 then begin
+          Buffer.add_string b "\n ";
+          col := 1
+        end;
+        Buffer.add_char b ' '; Buffer.add_string b ns;
+        col := !col + 1 + String.length ns)
+      nss;
+    Buffer.add_char b '\n';
+    Buffer.contents b
+
+(* Normalise the layout of a generated Lean file. Outside string literals,
+   character literals and comments:
+   - trailing spaces are removed, and runs of blank lines become one blank
+     line;
+   - inside a line, a run of spaces becomes one space; there is none after
+     `(`/`[` or before `)`/`]`/`,`; `×` has one space on each side.
+   The indentation at the start of a line is kept as it is. No token is
+   added, removed or joined, so this changes no declaration; tokens move
+   only along their own line (the declaration census checks the result). *)
 let normalize_layout (s : string) : string =
   let n = String.length s in
   let b = Buffer.create n in
   let pending_spaces = Buffer.create 16 in
   let newlines = ref 0 in
-  let flush_ws () =
+  let last_char () = if Buffer.length b = 0 then '\n' else Buffer.nth b (Buffer.length b - 1) in
+  (* [next] is the character about to be emitted *)
+  let flush_ws next =
     if !newlines > 0 then begin
       Buffer.add_string b (if !newlines >= 2 then "\n\n" else "\n");
-      newlines := 0
+      newlines := 0;
+      Buffer.add_buffer b pending_spaces
+    end else if Buffer.length pending_spaces > 0 then begin
+      let prev = last_char () in
+      if prev = '(' || prev = '[' || prev = '\n' || next = ')' || next = ']' || next = ',' then ()
+      else Buffer.add_char b ' '
     end;
-    Buffer.add_buffer b pending_spaces;
     Buffer.clear pending_spaces
   in
   let is_ident_char c =
     (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
     || c = '_' || c = '\'' || c = '.' || Char.code c >= 128
+  in
+  (* s.[i] = '(': if spaces, an atom and spaces then ')' follow, the atom and
+     the index after ')'. An atom is [A-Za-z0-9_.'] with a letter, digit or
+     `_` first; a numeral followed by `.` is not taken (`(1).f` vs `1.f`). *)
+  let atom_in_parens i =
+    let rec skip k = if k < n && s.[k] = ' ' then skip (k + 1) else k in
+    let a0 = skip (i + 1) in
+    let rec scan k =
+      if k < n && (let c = s.[k] in (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                                    || (c >= '0' && c <= '9') || c = '_' || c = '.' || c = '\'')
+      then scan (k + 1) else k in
+    let a1 = scan a0 in
+    if a1 = a0 then None
+    else
+      let first = s.[a0] in
+      if not ((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')
+              || (first >= '0' && first <= '9') || first = '_') then None
+      else if s.[a1 - 1] = '.' then None
+      else
+        let close = skip a1 in
+        if close < n && s.[close] = ')' then begin
+          let a = String.sub s a0 (a1 - a0) in
+          let numeral = first >= '0' && first <= '9' in
+          if numeral && close + 1 < n && s.[close + 1] = '.' then None
+          else Some (a, close + 1)
+        end else None
+  in
+  (* `export T (C)` and `open N (x)` need their parentheses: is position i
+     on a line that starts with one of those commands? *)
+  let in_export_or_open i =
+    let ls = try String.rindex_from s i '\n' + 1 with Not_found -> 0 in
+    let starts p = let m = String.length p in ls + m <= n && String.sub s ls m = p in
+    starts "export " || starts "open "
   in
   let rec copy_until_string_end i =
     (* s.[i-1] was the opening quote *)
@@ -3324,11 +3440,11 @@ let normalize_layout (s : string) : string =
     else match s.[i] with
       | ' ' -> Buffer.add_char pending_spaces ' '; go (i + 1)
       | '\n' -> Buffer.clear pending_spaces; incr newlines; go (i + 1)
-      | '"' -> flush_ws (); Buffer.add_char b '"'; go (copy_until_string_end (i + 1))
+      | '"' -> flush_ws '"'; Buffer.add_char b '"'; go (copy_until_string_end (i + 1))
       | '/' when i + 1 < n && s.[i + 1] = '-' ->
-          flush_ws (); Buffer.add_string b "/-"; go (copy_comment (i + 2) 1)
+          flush_ws '/'; Buffer.add_string b "/-"; go (copy_comment (i + 2) 1)
       | '-' when i + 1 < n && s.[i + 1] = '-' ->
-          flush_ws ();
+          flush_ws '-';
           let j = try String.index_from s i '\n' with Not_found -> n in
           let line = String.sub s i (j - i) in
           let k = ref (String.length line) in
@@ -3336,10 +3452,27 @@ let normalize_layout (s : string) : string =
           Buffer.add_string b (String.sub line 0 !k); go j
       | '\'' when (i = 0 || not (is_ident_char s.[i - 1]))
                   && i + 2 < n && (s.[i + 1] = '\\' || s.[i + 2] = '\'') ->
-          flush_ws ();
+          flush_ws '\'';
           let j = try String.index_from s (if s.[i + 1] = '\\' then i + 3 else i + 2) '\'' with Not_found -> n - 1 in
           Buffer.add_string b (String.sub s i (j - i + 1)); go (j + 1)
-      | c -> flush_ws (); Buffer.add_char b c; go (i + 1)
+      | '\xC3' when i + 1 < n && s.[i + 1] = '\x97' ->
+          (* `×`: one space on each side (the one after is dropped before `)`) *)
+          if Buffer.length pending_spaces = 0 && !newlines = 0 then Buffer.add_char pending_spaces ' ';
+          flush_ws '\xC3'; Buffer.add_string b "\xC3\x97";
+          Buffer.add_char pending_spaces ' '; go (i + 2)
+      | '(' when not (in_export_or_open i)
+                 && (match atom_in_parens i with Some _ -> true | None -> false) ->
+          (* `( atom )` is the atom: a name (possibly qualified) or a numeral *)
+          (match atom_in_parens i with
+           | Some (a, j) ->
+             let prev = if Buffer.length pending_spaces > 0 || !newlines > 0 then ' ' else last_char () in
+             flush_ws a.[0];
+             if is_ident_char prev then Buffer.add_char b ' ';
+             Buffer.add_string b a;
+             if j < n && is_ident_char s.[j] then Buffer.add_char pending_spaces ' ';
+             go j
+           | None -> assert false)
+      | c -> flush_ws c; Buffer.add_char b c; go (i + 1)
   in
   go 0;
   if !newlines > 0 then Buffer.add_char b '\n';
@@ -3452,7 +3585,7 @@ let sanitize_tabs r =
 
 let rec lean_comment_to_rope =
   function
-    | Ast.Chars r -> sanitize_tabs r
+    | Ast.Chars r -> sanitize_tabs (Ulib.Text.of_string (undo_latin1_reading (Ulib.Text.to_string r)))
     | Ast.Comment coms -> wrap_lean_comment (Ulib.Text.concat (r"") (List.map lean_comment_to_rope coms))
 
 let lex_skip =
@@ -6539,13 +6672,22 @@ type pat_style = FunParam | MatchArm
       if Types.TNset.is_empty tv_set || not top_level then
         emp
       else
-      let bindings =
-        List.map (fun tv -> match tv with
-          | Types.Ty tv ->
-            Output.flat [from_string "{"; id Type_var (Tyvar.to_rope tv); from_string " : Type}"]
-          | Types.Nv nv ->
-            Output.flat [from_string "{"; id Type_var (Nvar.to_rope nv); from_string " : Nat}"])
-        (Types.TNset.elements tv_set)
+      (* consecutive variables of one kind share a binder, `{a b : Type}`;
+         the order of the implicit arguments is unchanged *)
+      let named = List.map (fun tv -> match tv with
+          | Types.Ty tv -> ("Type", id Type_var (Tyvar.to_rope tv))
+          | Types.Nv nv -> ("Nat", id Type_var (Nvar.to_rope nv)))
+          (Types.TNset.elements tv_set) in
+      let rec group = function
+        | [] -> []
+        | (k, v) :: rest ->
+          (match group rest with
+           | (k', vs) :: groups when k' = k -> (k, v :: vs) :: groups
+           | groups -> (k, [v]) :: groups)
+      in
+      let bindings = List.map (fun (k, vs) ->
+          Output.flat [from_string "{"; concat_str " " vs; from_string " : "; from_string k; from_string "}"])
+          (group named)
       in
         from_string " " ^ concat_str " " bindings
     (* Expression rendering. Lean 4 parser-specific rules:
@@ -8185,7 +8327,27 @@ type pat_style = FunParam | MatchArm
                 head; space; ts_out
               ]
         | Typ_paren(skips, t, skips') ->
-            ws skips ^ from_string "(" ^ pat_typ t ^ ws skips' ^ from_string ")"
+            (* Parentheses around an atom (`Option (Nat)`) or around a type
+               that brings its own (a tuple, a doubled paren) are redundant;
+               Lem's type conversion adds them generically. Atomicity is
+               decided on the printed text: a type with a target
+               representation can print as several tokens. Comments keep
+               the parentheses. *)
+            let inner = pat_typ t in
+            let has_comments =
+              List.exists (fun sk -> split_skip_comments sk <> ([], []))
+                (skips :: skips' :: src_t_skips t) in
+            (* an atom: a (possibly qualified) name, no spaces or brackets *)
+            let text = String.trim (lean_output_str inner) in
+            let atomic =
+              text <> ""
+              && String.for_all (fun c ->
+                  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                  || c = '_' || c = '.' || c = '\'' || Char.code c >= 128) text
+            in
+            let self_parenthesised = match t.term with Typ_tup _ | Typ_paren _ -> true | _ -> false in
+            if not has_comments && (atomic || self_parenthesised) then ws skips ^ inner
+            else ws skips ^ from_string "(" ^ inner ^ ws skips' ^ from_string ")"
         | Typ_with_sort(t,_) -> raise (Reporting_basic.err_general true t.locn "Lean backend: target sort annotations are not supported")
         | Typ_len nexp -> src_nexp nexp
         | Typ_backend (p, ts) ->
@@ -8619,11 +8781,8 @@ type pat_style = FunParam | MatchArm
           let has_deriving = (emit_deriving || is_all_nullary) && texp_can_derive_beq t
                              && not (texp_needs_ocaml_rank t) in
           let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n)) in
-          let bare_tvs = concat emp @@ List.map (fun t ->
-            let name = tnvar_to_string t in
-            let kind = tnvar_kind t in
-            Output.flat [from_string " {"; from_string name; from_string " : "; from_string kind; from_string "}"]
-          ) tnvar_list in
+          let bare_tvs = from_string (merge_implicit_binders (String.concat "" (List.map (fun t ->
+              String.concat "" [" {"; tnvar_to_string t; " : "; tnvar_kind t; "}"]) tnvar_list))) in
           (* Arc-10 S2: render " [Cls tv]" binders for the given tyvar names,
              in parameter-declaration order (the inhabited_bound_binders
              pattern applied to comparison classes). *)
@@ -9096,7 +9255,7 @@ type pat_style = FunParam | MatchArm
             if List.mem nm bounds then Printf.sprintf "%s [%s %s]" base cls nm else base)
             tnvar_list) in
           let args = String.concat "" (List.map (fun tv -> String.concat "" [" "; tnvar_to_string tv]) tnvar_list) in
-          (binders, args)
+          (merge_implicit_binders binders, args)
         in
         (* Two-class OCaml rank def (only needed with >1 constructor). *)
         let rank_def type_name tnvar_list ctors : string =
@@ -9227,7 +9386,7 @@ type pat_style = FunParam | MatchArm
               | Types.Ty _ -> Printf.sprintf "{%s : Type}" nm
               | Types.Nv _ -> Printf.sprintf "{%s : Nat}" nm)
             (Types.TNset.elements fvs) in
-          (match bs with [] -> "" | _ -> String.concat "" [" "; String.concat " " bs]) in
+          (match bs with [] -> "" | _ -> merge_implicit_binders (String.concat "" [" "; String.concat " " bs])) in
         (* pattern for one field + the size terms its subterms contribute *)
         let rec build (ctr : int ref) (sh : cmp_shape) : string * string list =
           match sh with
@@ -9630,25 +9789,18 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
             end else acc
           ) [] A.env.e_env in
           let lib_namespaces = List.rev lib_namespaces in
-          Output.flat (extra_import :: bridges_import :: List.map (fun ns ->
-            from_string (String.concat "" ["open "; ns; "\n"])
-          ) lib_namespaces)
+          Output.flat [extra_import; bridges_import; from_string (open_line lib_namespaces)]
         else
           (* Just open namespaces for direct imports *)
           let ns_list = List.filter_map (fun m ->
             let ns = lean_ns_name m in
             if ns <> m then Some ns else None
           ) all_imports in
-          Output.flat (List.map (fun ns ->
-            from_string (String.concat "" ["open "; ns; "\n"])
-          ) ns_list)
+          from_string (open_line ns_list)
       end else emp in
       (* Emit open statements for type/class namespaces so auxiliary file
          can reference constructors and class methods unqualified *)
-      let opens = List.map (fun name_str ->
-        from_string (String.concat "" ["open "; name_str; "\n"])
-      ) !St.auxiliary_opens in
-      let opens_output = Output.flat opens in
+      let opens_output = from_string (open_line !St.auxiliary_opens) in
       (* Fuel-measure obligations (mechanism comment at
          lean_fuel_measure_for): the theorem statements of this module's
          measured functions go into the auxiliary file — lem's home for

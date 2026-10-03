@@ -19,13 +19,13 @@ open Lem_Basic_classes
 /- ----------------------- -/
 
 /- lem: replaced by its target representation: 
-def  fst  {a : Type} {b : Type}   ((v1 : a), (v2 : b))  : a :=  v1 -/
+def  fst  {a b : Type}   ((v1 : a), (v2 : b))  : a :=  v1 -/
 /- ----------------------- -/
 /- snd                     -/
 /- ----------------------- -/
 
 /- lem: replaced by its target representation: 
-def  snd  {a : Type} {b : Type}   ((v1 : a), (v2 : b))  : b :=  v2 -/
+def  snd  {a b : Type}   ((v1 : a), (v2 : b))  : b :=  v2 -/
 /- ----------------------- -/
 /- curry                   -/
 /- ----------------------- -/
@@ -38,5 +38,5 @@ def  snd  {a : Type} {b : Type}   ((v1 : a), (v2 : b))  : b :=  v2 -/
 /- swap                    -/
 /- ----------------------- -/
 
-def  swap  {a : Type} {b : Type}  (p : (a ×b))  : (b ×a) := match p with |  (v1,  v2) =>  (v2, v1)
+def swap {a b : Type} (p : (a × b)) : (b × a) := match p with | (v1, v2) => (v2, v1)
 end Lem_Tuple

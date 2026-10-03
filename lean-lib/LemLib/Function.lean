@@ -32,22 +32,22 @@ def  id  {a : Type}  (x : a)  : a :=  x -/
 /- ----------------------- -/
 
 /- lem: replaced by its target representation: 
-def  comb  {a : Type} {b : Type} {c : Type}  (f : b → c) (g : a → b)  : a → c :=  (fun (x : a) =>  f  (g  x)) -/
+def  comb  {a b c : Type}  (f : b → c) (g : a → b)  : a → c :=  (fun (x : a) =>  f  (g  x)) -/
 /- ----------------------- -/
 /- function application    -/
 /- ----------------------- -/
 
 /- lem: replaced by its target representation: 
-def  apply  {a : Type} {b : Type}  (f : a → b)  : a → b :=  (fun (x : a) =>  f  x) -/
-def  rev_apply  {a : Type} {b : Type}  (x : a) (f : a → b)  : b :=  f  x
+def  apply  {a b : Type}  (f : a → b)  : a → b :=  (fun (x : a) =>  f  x) -/
+def rev_apply {a b : Type} (x : a) (f : a → b) : b := f x
 /- ----------------------- -/
 /- flipping argument order -/
 /- ----------------------- -/
 
 /- lem: replaced by its target representation: 
-def  flip  {a : Type} {b : Type} {c : Type}  (f : a → b → c)  : b → a → c :=  (fun (x : b) (y : a) =>  f  y  x) -/
+def  flip  {a b c : Type}  (f : a → b → c)  : b → a → c :=  (fun (x : b) (y : a) =>  f  y  x) -/
 /- currying / uncurrying -/
 
-def  curry  {a : Type} {b : Type} {c : Type}  (f : (a ×b) → c)  : a → b → c :=  (fun (a1 : a) (b1 : b) =>  f  (a1, b1))
-def  uncurry  {a : Type} {b : Type} {c : Type}  (f : a → b → c) (p : (a ×b))  : c := match f, p with |  f,  (a1, b1) =>  f  a1  b1
+def curry {a b c : Type} (f : (a × b) → c) : a → b → c := (fun (a1 : a) (b1 : b) => f (a1, b1))
+def uncurry {a b c : Type} (f : a → b → c) (p : (a × b)) : c := match f, p with | f, (a1, b1) => f a1 b1
 end Lem_Function

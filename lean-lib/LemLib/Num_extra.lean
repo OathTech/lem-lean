@@ -22,9 +22,9 @@ open Lem_String
 
 open Lem_Assert_extra
 
-def  integerOfChar   : Char → Int :=  fun (x : Char) =>  match x with  |  '0' => ( 0 :  Int) |  '1' => ( 1 :  Int) |  '2' => ( 2 :  Int) |  '3' => ( 3 :  Int) |  '4' => ( 4 :  Int) |  '5' => ( 5 :  Int) |  '6' => ( 6 :  Int) |  '7' => ( 7 :  Int) |  '8' => ( 8 :  Int) |  '9' => ( 9 :  Int) |  _ => (failwithI  "integerOfChar: unexpected character" : Int)
+def integerOfChar : Char → Int := fun (x : Char) => match x with | '0' => (0 : Int) | '1' => (1 : Int) | '2' => (2 : Int) | '3' => (3 : Int) | '4' => (4 : Int) | '5' => (5 : Int) | '6' => (6 : Int) | '7' => (7 : Int) | '8' => (8 : Int) | '9' => (9 : Int) | _ => (failwithI "integerOfChar: unexpected character" : Int)
 
- def  integerOfStringHelper  (s : List (Char))  : Int :=  match  s with  |  d  ::  ds =>  integerOfChar  d  +  (( 10 :  Int)  *  integerOfStringHelper  ds) |  [] => ( 0 :  Int)
+ def integerOfStringHelper (s : List Char) : Int := match s with | d :: ds => integerOfChar d + ((10 : Int) * integerOfStringHelper ds) | [] => (0 : Int)
 
 /- Truncation integer division (round toward zero) -/
 

@@ -23,9 +23,9 @@ open Lem_Bool
 
 class Eq0 (a : Type) where
 
-  isEqual :  a →  a →  Bool
+  isEqual : a → a → Bool
 
-  isInequal :  a →  a →  Bool
+  isInequal : a → a → Bool
 
 export Eq0 (isEqual isInequal)
 
@@ -61,11 +61,11 @@ def  unsafe_structural_inequality  {a : Type}  (x : a) (y : a)  : Bool :=  not  
 /- The default for equality is the unsafe structural one. It can 
    (and should) be overriden for concrete types later. -/
 
-instance (priority := low) (a : Type)  [BEq a] : Eq0 a where
+instance (priority := low) (a : Type) [BEq a] : Eq0 a where
 
-    isEqual   :=  (fun x y => x == y)
+    isEqual := (fun x y => x == y)
 
-    isInequal   :=  (fun x y => x != y)
+    isInequal := (fun x y => x != y)
 
 /- for HOL and Isabelle, be even stronger and always(!) use
    standard equality -/
@@ -81,31 +81,31 @@ instance (priority := low) (a : Type)  [BEq a] : Eq0 a where
 abbrev  ordering := LemOrdering
  -/
 
-def  orderingIsLess  (r : LemOrdering)        : Bool :=  (match  r with |  LemOrdering.LT =>  true |  _ =>  false )
-def  orderingIsGreater  (r : LemOrdering)     : Bool :=  (match  r with |  LemOrdering.GT =>  true |  _ =>  false )
-def  orderingIsEqual  (r : LemOrdering)       : Bool :=  (match  r with |  LemOrdering.EQ =>  true |  _ =>  false )
+def orderingIsLess (r : LemOrdering) : Bool := (match r with | LemOrdering.LT => true | _ => false)
+def orderingIsGreater (r : LemOrdering) : Bool := (match r with | LemOrdering.GT => true | _ => false)
+def orderingIsEqual (r : LemOrdering) : Bool := (match r with | LemOrdering.EQ => true | _ => false)
 
-def  ordering_cases  {a : Type}  (r : LemOrdering) (lt : a) (eq : a) (gt : a)  : a :=
-  lem_if  orderingIsLess  r then  lt  else
-  lem_if  orderingIsEqual  r then  eq  else  gt
+def ordering_cases {a : Type} (r : LemOrdering) (lt : a) (eq : a) (gt : a) : a :=
+  lem_if orderingIsLess r then lt else
+  lem_if orderingIsEqual r then eq else gt
 
-instance   : Eq0 LemOrdering where
+instance : Eq0 LemOrdering where
 
-    isEqual   :=  (fun x y => x == y)
+    isEqual := (fun x y => x == y)
 
-    isInequal   x  y  :=  not  (x  ==  y)
+    isInequal x y := not (x == y)
 
 class Ord0 (a : Type) where
 
-  compare :                  a →  a →  LemOrdering
+  compare : a → a → LemOrdering
 
-  isLess :          a →  a →  Bool
+  isLess : a → a → Bool
 
-  isLessEqual :     a →  a →  Bool
+  isLessEqual : a → a → Bool
 
-  isGreater :       a →  a →  Bool
+  isGreater : a → a → Bool
 
-  isGreaterEqual :  a →  a →  Bool
+  isGreaterEqual : a → a → Bool
 
 export Ord0 (isLess isLessEqual isGreater isGreaterEqual)
 
@@ -116,10 +116,10 @@ export Ord0 (isLess isLessEqual isGreater isGreaterEqual)
    an error will only be raised when trying to actually output the function for a certain
    target. -/
 
-def  genericCompare  {a : Type}   (less : a →  a →  Bool)  (equal : a →  a →  Bool)  (x  : a)  (y  : a)  : LemOrdering :=
-  lem_if  less  x  y then
+def genericCompare {a : Type} (less : a → a → Bool) (equal : a → a → Bool) (x : a) (y : a) : LemOrdering :=
+  lem_if less x y then
     LemOrdering.LT
-   else  lem_if  equal  x  y then
+   else lem_if equal x y then
     LemOrdering.EQ
    else
     LemOrdering.GT
@@ -136,26 +136,26 @@ lemma ord_OK_2: (
 -/
 /- let's derive a compare function from the Ord type-class -/
 
-def  ordCompare  {a : Type} [Eq0 a] [Ord0 a]  (x : a) (y : a)  : LemOrdering :=
-  lem_if  ( isLess x  y) then  LemOrdering.LT  else
-  lem_if  (x  ==  y) then  LemOrdering.EQ  else  LemOrdering.GT
+def ordCompare {a : Type} [Eq0 a] [Ord0 a] (x : a) (y : a) : LemOrdering :=
+  lem_if (isLess x y) then LemOrdering.LT else
+  lem_if (x == y) then LemOrdering.EQ else LemOrdering.GT
 
 class OrdMaxMin (a : Type) where
 
-  max :  a →  a →  a
+  max : a → a → a
 
-  min :  a →  a →  a
+  min : a → a → a
 
 open OrdMaxMin
 
-def  minByLessEqual  {a : Type}  (le : a → a → Bool) (x : a) (y : a)  : a :=  lem_if  (le  x  y) then  x  else  y
-def  maxByLessEqual  {a : Type}  (le : a → a → Bool) (x : a) (y : a)  : a :=  lem_if  (le  y  x) then  x  else  y
+def minByLessEqual {a : Type} (le : a → a → Bool) (x : a) (y : a) : a := lem_if (le x y) then x else y
+def maxByLessEqual {a : Type} (le : a → a → Bool) (x : a) (y : a) : a := lem_if (le y x) then x else y
 
 instance (priority := low) (a : Type) [Ord0 a] : OrdMaxMin a where
 
-    max   :=  (maxByLessEqual  isLessEqual)
+    max := (maxByLessEqual isLessEqual)
 
-    min   :=  (minByLessEqual  isLessEqual)
+    min := (minByLessEqual isLessEqual)
 
 /- ========================================================================== -/
 /- SetTypes                                                                   -/
@@ -170,215 +170,215 @@ instance (priority := low) (a : Type) [Ord0 a] : OrdMaxMin a where
 
 class SetType (a : Type) where
 
-  setElemCompare :  a →  a →  LemOrdering
+  setElemCompare : a → a → LemOrdering
 
 export SetType (setElemCompare)
 
 instance (priority := 500) {a : Type} [SetType a] : BEq a where
   beq x y := match setElemCompare x y with | .EQ => true | _ => false
 
-instance (priority := low) (a : Type)  [Ord a] : SetType a where
+instance (priority := low) (a : Type) [Ord a] : SetType a where
 
-    setElemCompare   :=  defaultCompare
+    setElemCompare := defaultCompare
 
 /- ========================================================================== -/
 /- Instantiations                                                             -/
 /- ========================================================================== -/
 
-instance   : Eq0 Bool where
+instance : Eq0 Bool where
 
-    isEqual   :=  (fun x y => x == y)
+    isEqual := (fun x y => x == y)
 
-    isInequal   x  y  :=  not  ((fun x y => x == y)  x  y)
+    isInequal x y := not ((fun x y => x == y) x y)
 
-def  boolCompare  (b1 : Bool) (b2 : Bool)  : LemOrdering :=  match b1,  b2 with  | true,  true =>  LemOrdering.EQ | true,  false =>  LemOrdering.GT | false,  true =>  LemOrdering.LT | false,  false =>  LemOrdering.EQ
+def boolCompare (b1 : Bool) (b2 : Bool) : LemOrdering := match b1, b2 with | true, true => LemOrdering.EQ | true, false => LemOrdering.GT | false, true => LemOrdering.LT | false, false => LemOrdering.EQ
 
-instance   : SetType Bool where
+instance : SetType Bool where
 
-    setElemCompare   :=  boolCompare
+    setElemCompare := boolCompare
 
 /- strings -/
 
-instance   : Eq0 Char where
+instance : Eq0 Char where
 
-    isEqual   :=  (fun x y => x == y)
+    isEqual := (fun x y => x == y)
 
-    isInequal   left  right  :=  not  (left  ==  right)
+    isInequal left right := not (left == right)
 
-instance   : Eq0 String where
+instance : Eq0 String where
 
-    isEqual        :=  (fun x y => x == y)
+    isEqual := (fun x y => x == y)
 
-    isInequal   l  r  :=  not  (l  ==  r)
+    isInequal l r := not (l == r)
 
 /- pairs -/
 
-def  pairEqual  {a : Type} {b : Type} [Eq0 a] [Eq0 b]  (p : (a ×b)) (p0 : (a ×b))  : Bool := match p, p0 with |  (a1,  b1),  (a2,  b2) =>  (a1  ==  a2)  &&  (b1  ==  b2)
+def pairEqual {a b : Type} [Eq0 a] [Eq0 b] (p : (a × b)) (p0 : (a × b)) : Bool := match p, p0 with | (a1, b1), (a2, b2) => (a1 == a2) && (b1 == b2)
 
-instance (a b : Type) [Eq0 a] [Eq0 b] : Eq0 ((a  × b)) where
+instance (a b : Type) [Eq0 a] [Eq0 b] : Eq0 (a × b) where
 
-    isEqual   :=  (@pairEqual (a) (b) _ _)
+    isEqual := (@pairEqual a b _ _)
 
-    isInequal   x  y  :=  not  (pairEqual  x  y)
+    isInequal x y := not (pairEqual x y)
 
-def  pairCompare  {a : Type} {b : Type}  (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (p : (a ×b)) (p0 : (a ×b))  : LemOrdering := match cmpa, cmpb, p, p0 with |  cmpa,  cmpb,  (a1,  b1),  (a2,  b2) => ( match  cmpa  a1  a2 with  |  LemOrdering.LT =>  LemOrdering.LT |  LemOrdering.GT =>  LemOrdering.GT |  LemOrdering.EQ =>  cmpb  b1  b2   )
+def pairCompare {a b : Type} (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (p : (a × b)) (p0 : (a × b)) : LemOrdering := match cmpa, cmpb, p, p0 with | cmpa, cmpb, (a1, b1), (a2, b2) => (match cmpa a1 a2 with | LemOrdering.LT => LemOrdering.LT | LemOrdering.GT => LemOrdering.GT | LemOrdering.EQ => cmpb b1 b2)
 
-def  pairLess  {a : Type} {b : Type} [Ord0 a] [Ord0 b]  (p : (b ×a)) (p0 : (b ×a))  : Bool := match p, p0 with |  (x1,  x2),  (y1,  y2) =>  ( isLess x1  y1)  ||  (( isLessEqual x1  y1)  &&  ( isLess x2  y2))
-def  pairLessEq  {a : Type} {b : Type} [Ord0 a] [Ord0 b]  (p : (b ×a)) (p0 : (b ×a))  : Bool := match p, p0 with |  (x1,  x2),  (y1,  y2) =>  ( isLess x1  y1)  ||  (( isLessEqual x1  y1)  &&  ( isLessEqual x2  y2))
+def pairLess {a b : Type} [Ord0 a] [Ord0 b] (p : (b × a)) (p0 : (b × a)) : Bool := match p, p0 with | (x1, x2), (y1, y2) => (isLess x1 y1) || ((isLessEqual x1 y1) && (isLess x2 y2))
+def pairLessEq {a b : Type} [Ord0 a] [Ord0 b] (p : (b × a)) (p0 : (b × a)) : Bool := match p, p0 with | (x1, x2), (y1, y2) => (isLess x1 y1) || ((isLessEqual x1 y1) && (isLessEqual x2 y2))
 
-def  pairGreater  {a : Type} {b : Type} [Ord0 a] [Ord0 b]  (x12 : (a ×b)) (y12 : (a ×b))  : Bool :=  pairLess  y12  x12
-def  pairGreaterEq  {a : Type} {b : Type} [Ord0 a] [Ord0 b]  (x12 : (a ×b)) (y12 : (a ×b))  : Bool :=  pairLessEq  y12  x12
+def pairGreater {a b : Type} [Ord0 a] [Ord0 b] (x12 : (a × b)) (y12 : (a × b)) : Bool := pairLess y12 x12
+def pairGreaterEq {a b : Type} [Ord0 a] [Ord0 b] (x12 : (a × b)) (y12 : (a × b)) : Bool := pairLessEq y12 x12
 
-instance (a b : Type) [Ord0 a] [Ord0 b] : Ord0 ((a  × b)) where
+instance (a b : Type) [Ord0 a] [Ord0 b] : Ord0 (a × b) where
 
-    compare   :=  pairCompare  Ord0.compare  Ord0.compare
+    compare := pairCompare Ord0.compare Ord0.compare
 
-    isLess    :=  (@pairLess (b) (a) _ _)
+    isLess := (@pairLess b a _ _)
 
-    isLessEqual   :=  (@pairLessEq (b) (a) _ _)
+    isLessEqual := (@pairLessEq b a _ _)
 
-    isGreater    :=  (@pairGreater (a) (b) _ _)
+    isGreater := (@pairGreater a b _ _)
 
-    isGreaterEqual   :=  (@pairGreaterEq (a) (b) _ _)
+    isGreaterEqual := (@pairGreaterEq a b _ _)
 
-instance (a b : Type) [SetType a] [SetType b] : SetType ((a  × b)) where
+instance (a b : Type) [SetType a] [SetType b] : SetType (a × b) where
 
-    setElemCompare   :=  pairCompare  (@setElemCompare (a) _)  (@setElemCompare (b) _)
+    setElemCompare := pairCompare (@setElemCompare a _) (@setElemCompare b _)
 
 /- triples -/
 
-def  tripleEqual  {a : Type} {b : Type} {c : Type} [Eq0 a] [Eq0 b] [Eq0 c]  (p : (a ×b ×c)) (p0 : (a ×b ×c))  : Bool := match p, p0 with |  (x1,  x2,  x3),  (y1,  y2,  y3) =>  ( pairEqual (x1, (x2, x3))  (y1, (y2, y3)))
+def tripleEqual {a b c : Type} [Eq0 a] [Eq0 b] [Eq0 c] (p : (a × b × c)) (p0 : (a × b × c)) : Bool := match p, p0 with | (x1, x2, x3), (y1, y2, y3) => (pairEqual (x1, (x2, x3)) (y1, (y2, y3)))
 
-instance (a b c : Type) [Eq0 a] [Eq0 b] [Eq0 c] : Eq0 ((a  × b  × c)) where
+instance (a b c : Type) [Eq0 a] [Eq0 b] [Eq0 c] : Eq0 (a × b × c) where
 
-    isEqual   :=  (@tripleEqual (a) (b) (c) _ _ _)
+    isEqual := (@tripleEqual a b c _ _ _)
 
-    isInequal   x  y  :=  not  (tripleEqual  x  y)
+    isInequal x y := not (tripleEqual x y)
 
-def  tripleCompare  {a : Type} {b : Type} {c : Type}  (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (cmpc : c → c → LemOrdering) (p : (a ×b ×c)) (p0 : (a ×b ×c))  : LemOrdering := match cmpa, cmpb, cmpc, p, p0 with |  cmpa,  cmpb,  cmpc,  (a1,  b1,  c1),  (a2,  b2,  c2) =>  pairCompare  cmpa  (pairCompare  cmpb  cmpc)  (a1, (b1, c1))  (a2, (b2, c2))
+def tripleCompare {a b c : Type} (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (cmpc : c → c → LemOrdering) (p : (a × b × c)) (p0 : (a × b × c)) : LemOrdering := match cmpa, cmpb, cmpc, p, p0 with | cmpa, cmpb, cmpc, (a1, b1, c1), (a2, b2, c2) => pairCompare cmpa (pairCompare cmpb cmpc) (a1, (b1, c1)) (a2, (b2, c2))
 
-def  tripleLess  {a : Type} {b : Type} {c : Type} [Ord0 a] [Ord0 b] [Ord0 c]  (p : (a ×b ×c)) (p0 : (a ×b ×c))  : Bool := match p, p0 with |  (x1,  x2,  x3),  (y1,  y2,  y3) =>  pairLess  (x1, (x2, x3))  (y1, (y2, y3))
-def  tripleLessEq  {a : Type} {b : Type} {c : Type} [Ord0 a] [Ord0 b] [Ord0 c]  (p : (a ×b ×c)) (p0 : (a ×b ×c))  : Bool := match p, p0 with |  (x1,  x2,  x3),  (y1,  y2,  y3) =>  pairLessEq  (x1, (x2, x3))  (y1, (y2, y3))
+def tripleLess {a b c : Type} [Ord0 a] [Ord0 b] [Ord0 c] (p : (a × b × c)) (p0 : (a × b × c)) : Bool := match p, p0 with | (x1, x2, x3), (y1, y2, y3) => pairLess (x1, (x2, x3)) (y1, (y2, y3))
+def tripleLessEq {a b c : Type} [Ord0 a] [Ord0 b] [Ord0 c] (p : (a × b × c)) (p0 : (a × b × c)) : Bool := match p, p0 with | (x1, x2, x3), (y1, y2, y3) => pairLessEq (x1, (x2, x3)) (y1, (y2, y3))
 
-def  tripleGreater  {a : Type} {b : Type} {c : Type} [Ord0 a] [Ord0 b] [Ord0 c]  (x123 : (c ×b ×a)) (y123 : (c ×b ×a))  : Bool :=  tripleLess  y123  x123
-def  tripleGreaterEq  {a : Type} {b : Type} {c : Type} [Ord0 a] [Ord0 b] [Ord0 c]  (x123 : (c ×b ×a)) (y123 : (c ×b ×a))  : Bool :=  tripleLessEq  y123  x123
+def tripleGreater {a b c : Type} [Ord0 a] [Ord0 b] [Ord0 c] (x123 : (c × b × a)) (y123 : (c × b × a)) : Bool := tripleLess y123 x123
+def tripleGreaterEq {a b c : Type} [Ord0 a] [Ord0 b] [Ord0 c] (x123 : (c × b × a)) (y123 : (c × b × a)) : Bool := tripleLessEq y123 x123
 
-instance (a b c : Type) [Ord0 a] [Ord0 b] [Ord0 c] : Ord0 ((a  × b  × c)) where
+instance (a b c : Type) [Ord0 a] [Ord0 b] [Ord0 c] : Ord0 (a × b × c) where
 
-    compare   :=  tripleCompare  Ord0.compare  Ord0.compare  Ord0.compare
+    compare := tripleCompare Ord0.compare Ord0.compare Ord0.compare
 
-    isLess    :=  (@tripleLess (a) (b) (c) _ _ _)
+    isLess := (@tripleLess a b c _ _ _)
 
-    isLessEqual   :=  (@tripleLessEq (a) (b) (c) _ _ _)
+    isLessEqual := (@tripleLessEq a b c _ _ _)
 
-    isGreater    :=  (@tripleGreater (c) (b) (a) _ _ _)
+    isGreater := (@tripleGreater c b a _ _ _)
 
-    isGreaterEqual   :=  (@tripleGreaterEq (c) (b) (a) _ _ _)
+    isGreaterEqual := (@tripleGreaterEq c b a _ _ _)
 
-instance (a b c : Type) [SetType a] [SetType b] [SetType c] : SetType ((a  × b  × c)) where
+instance (a b c : Type) [SetType a] [SetType b] [SetType c] : SetType (a × b × c) where
 
-    setElemCompare   :=  tripleCompare  (@setElemCompare (a) _)  (@setElemCompare (b) _)  (@setElemCompare (c) _)
+    setElemCompare := tripleCompare (@setElemCompare a _) (@setElemCompare b _) (@setElemCompare c _)
 
 /- quadruples -/
 
-def  quadrupleEqual  {a : Type} {b : Type} {c : Type} {d : Type} [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d]  (p : (a ×b ×c ×d)) (p0 : (a ×b ×c ×d))  : Bool := match p, p0 with |  (x1,  x2,  x3,  x4),  (y1,  y2,  y3,  y4) =>  ( pairEqual (x1, (x2, (x3, x4)))  (y1, (y2, (y3, y4))))
+def quadrupleEqual {a b c d : Type} [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] (p : (a × b × c × d)) (p0 : (a × b × c × d)) : Bool := match p, p0 with | (x1, x2, x3, x4), (y1, y2, y3, y4) => (pairEqual (x1, (x2, (x3, x4))) (y1, (y2, (y3, y4))))
 
-instance (a b c d : Type) [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] : Eq0 ((a  × b  × c  × d)) where
+instance (a b c d : Type) [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] : Eq0 (a × b × c × d) where
 
-    isEqual   :=  (@quadrupleEqual (a) (b) (c) (d) _ _ _ _)
+    isEqual := (@quadrupleEqual a b c d _ _ _ _)
 
-    isInequal   x  y  :=  not  (quadrupleEqual  x  y)
+    isInequal x y := not (quadrupleEqual x y)
 
-def  quadrupleCompare  {a : Type} {b : Type} {c : Type} {d : Type}  (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (cmpc : c → c → LemOrdering) (cmpd : d → d → LemOrdering) (p : (a ×b ×c ×d)) (p0 : (a ×b ×c ×d))  : LemOrdering := match cmpa, cmpb, cmpc, cmpd, p, p0 with |  cmpa,  cmpb,  cmpc,  cmpd,  (a1,  b1,  c1,  d1),  (a2,  b2,  c2,  d2) =>  pairCompare  cmpa  (pairCompare  cmpb  (pairCompare  cmpc  cmpd))  (a1, (b1, (c1, d1)))  (a2, (b2, (c2, d2)))
+def quadrupleCompare {a b c d : Type} (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (cmpc : c → c → LemOrdering) (cmpd : d → d → LemOrdering) (p : (a × b × c × d)) (p0 : (a × b × c × d)) : LemOrdering := match cmpa, cmpb, cmpc, cmpd, p, p0 with | cmpa, cmpb, cmpc, cmpd, (a1, b1, c1, d1), (a2, b2, c2, d2) => pairCompare cmpa (pairCompare cmpb (pairCompare cmpc cmpd)) (a1, (b1, (c1, d1))) (a2, (b2, (c2, d2)))
 
-def  quadrupleLess  {a : Type} {b : Type} {c : Type} {d : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d]  (p : (a ×b ×c ×d)) (p0 : (a ×b ×c ×d))  : Bool := match p, p0 with |  (x1,  x2,  x3,  x4),  (y1,  y2,  y3,  y4) =>  pairLess  (x1, (x2, (x3, x4)))  (y1, (y2, (y3, y4)))
-def  quadrupleLessEq  {a : Type} {b : Type} {c : Type} {d : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d]  (p : (a ×b ×c ×d)) (p0 : (a ×b ×c ×d))  : Bool := match p, p0 with |  (x1,  x2,  x3,  x4),  (y1,  y2,  y3,  y4) =>  pairLessEq  (x1, (x2, (x3, x4)))  (y1, (y2, (y3, y4)))
+def quadrupleLess {a b c d : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] (p : (a × b × c × d)) (p0 : (a × b × c × d)) : Bool := match p, p0 with | (x1, x2, x3, x4), (y1, y2, y3, y4) => pairLess (x1, (x2, (x3, x4))) (y1, (y2, (y3, y4)))
+def quadrupleLessEq {a b c d : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] (p : (a × b × c × d)) (p0 : (a × b × c × d)) : Bool := match p, p0 with | (x1, x2, x3, x4), (y1, y2, y3, y4) => pairLessEq (x1, (x2, (x3, x4))) (y1, (y2, (y3, y4)))
 
-def  quadrupleGreater  {a : Type} {b : Type} {c : Type} {d : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d]  (x1234 : (d ×c ×b ×a)) (y1234 : (d ×c ×b ×a))  : Bool :=  quadrupleLess  y1234  x1234
-def  quadrupleGreaterEq  {a : Type} {b : Type} {c : Type} {d : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d]  (x1234 : (d ×c ×b ×a)) (y1234 : (d ×c ×b ×a))  : Bool :=  quadrupleLessEq  y1234  x1234
+def quadrupleGreater {a b c d : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] (x1234 : (d × c × b × a)) (y1234 : (d × c × b × a)) : Bool := quadrupleLess y1234 x1234
+def quadrupleGreaterEq {a b c d : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] (x1234 : (d × c × b × a)) (y1234 : (d × c × b × a)) : Bool := quadrupleLessEq y1234 x1234
 
-instance (a b c d : Type) [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] : Ord0 ((a  × b  × c  × d)) where
+instance (a b c d : Type) [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] : Ord0 (a × b × c × d) where
 
-    compare   :=  quadrupleCompare  Ord0.compare  Ord0.compare  Ord0.compare  Ord0.compare
+    compare := quadrupleCompare Ord0.compare Ord0.compare Ord0.compare Ord0.compare
 
-    isLess    :=  (@quadrupleLess (a) (b) (c) (d) _ _ _ _)
+    isLess := (@quadrupleLess a b c d _ _ _ _)
 
-    isLessEqual   :=  (@quadrupleLessEq (a) (b) (c) (d) _ _ _ _)
+    isLessEqual := (@quadrupleLessEq a b c d _ _ _ _)
 
-    isGreater    :=  (@quadrupleGreater (d) (c) (b) (a) _ _ _ _)
+    isGreater := (@quadrupleGreater d c b a _ _ _ _)
 
-    isGreaterEqual   :=  (@quadrupleGreaterEq (d) (c) (b) (a) _ _ _ _)
+    isGreaterEqual := (@quadrupleGreaterEq d c b a _ _ _ _)
 
-instance (a b c d : Type) [SetType a] [SetType b] [SetType c] [SetType d] : SetType ((a  × b  × c  × d)) where
+instance (a b c d : Type) [SetType a] [SetType b] [SetType c] [SetType d] : SetType (a × b × c × d) where
 
-    setElemCompare   :=  quadrupleCompare  (@setElemCompare (a) _)  (@setElemCompare (b) _)  (@setElemCompare (c) _)  (@setElemCompare (d) _)
+    setElemCompare := quadrupleCompare (@setElemCompare a _) (@setElemCompare b _) (@setElemCompare c _) (@setElemCompare d _)
 
 /- quintuples -/
 
-def  quintupleEqual  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] [Eq0 e]  (p : (a ×b ×c ×d ×e)) (p0 : (a ×b ×c ×d ×e))  : Bool := match p, p0 with |  (x1,  x2,  x3,  x4,  x5),  (y1,  y2,  y3,  y4,  y5) =>  ( pairEqual (x1, (x2, (x3, (x4, x5))))  (y1, (y2, (y3, (y4, y5)))))
+def quintupleEqual {a b c d e : Type} [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] [Eq0 e] (p : (a × b × c × d × e)) (p0 : (a × b × c × d × e)) : Bool := match p, p0 with | (x1, x2, x3, x4, x5), (y1, y2, y3, y4, y5) => (pairEqual (x1, (x2, (x3, (x4, x5)))) (y1, (y2, (y3, (y4, y5)))))
 
-instance (a b c d e : Type) [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] [Eq0 e] : Eq0 ((a  × b  × c  × d  × e)) where
+instance (a b c d e : Type) [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] [Eq0 e] : Eq0 (a × b × c × d × e) where
 
-    isEqual   :=  (@quintupleEqual (a) (b) (c) (d) (e) _ _ _ _ _)
+    isEqual := (@quintupleEqual a b c d e _ _ _ _ _)
 
-    isInequal   x  y  :=  not  (quintupleEqual  x  y)
+    isInequal x y := not (quintupleEqual x y)
 
-def  quintupleCompare  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type}  (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (cmpc : c → c → LemOrdering) (cmpd : d → d → LemOrdering) (cmpe : e → e → LemOrdering) (p : (a ×b ×c ×d ×e)) (p0 : (a ×b ×c ×d ×e))  : LemOrdering := match cmpa, cmpb, cmpc, cmpd, cmpe, p, p0 with |  cmpa,  cmpb,  cmpc,  cmpd,  cmpe,  (a1,  b1,  c1,  d1,  e1),  (a2,  b2,  c2,  d2,  e2) =>  pairCompare  cmpa  (pairCompare  cmpb  (pairCompare  cmpc  (pairCompare  cmpd  cmpe)))  (a1, (b1, (c1, (d1, e1))))  (a2, (b2, (c2, (d2, e2))))
+def quintupleCompare {a b c d e : Type} (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (cmpc : c → c → LemOrdering) (cmpd : d → d → LemOrdering) (cmpe : e → e → LemOrdering) (p : (a × b × c × d × e)) (p0 : (a × b × c × d × e)) : LemOrdering := match cmpa, cmpb, cmpc, cmpd, cmpe, p, p0 with | cmpa, cmpb, cmpc, cmpd, cmpe, (a1, b1, c1, d1, e1), (a2, b2, c2, d2, e2) => pairCompare cmpa (pairCompare cmpb (pairCompare cmpc (pairCompare cmpd cmpe))) (a1, (b1, (c1, (d1, e1)))) (a2, (b2, (c2, (d2, e2))))
 
-def  quintupleLess  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e]  (p : (a ×b ×c ×d ×e)) (p0 : (a ×b ×c ×d ×e))  : Bool := match p, p0 with |  (x1,  x2,  x3,  x4,  x5),  (y1,  y2,  y3,  y4,  y5) =>  pairLess  (x1, (x2, (x3, (x4, x5))))  (y1, (y2, (y3, (y4, y5))))
-def  quintupleLessEq  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e]  (p : (a ×b ×c ×d ×e)) (p0 : (a ×b ×c ×d ×e))  : Bool := match p, p0 with |  (x1,  x2,  x3,  x4,  x5),  (y1,  y2,  y3,  y4,  y5) =>  pairLessEq  (x1, (x2, (x3, (x4, x5))))  (y1, (y2, (y3, (y4, y5))))
+def quintupleLess {a b c d e : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] (p : (a × b × c × d × e)) (p0 : (a × b × c × d × e)) : Bool := match p, p0 with | (x1, x2, x3, x4, x5), (y1, y2, y3, y4, y5) => pairLess (x1, (x2, (x3, (x4, x5)))) (y1, (y2, (y3, (y4, y5))))
+def quintupleLessEq {a b c d e : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] (p : (a × b × c × d × e)) (p0 : (a × b × c × d × e)) : Bool := match p, p0 with | (x1, x2, x3, x4, x5), (y1, y2, y3, y4, y5) => pairLessEq (x1, (x2, (x3, (x4, x5)))) (y1, (y2, (y3, (y4, y5))))
 
-def  quintupleGreater  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e]  (x12345 : (e ×d ×c ×b ×a)) (y12345 : (e ×d ×c ×b ×a))  : Bool :=  quintupleLess  y12345  x12345
-def  quintupleGreaterEq  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e]  (x12345 : (e ×d ×c ×b ×a)) (y12345 : (e ×d ×c ×b ×a))  : Bool :=  quintupleLessEq  y12345  x12345
+def quintupleGreater {a b c d e : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] (x12345 : (e × d × c × b × a)) (y12345 : (e × d × c × b × a)) : Bool := quintupleLess y12345 x12345
+def quintupleGreaterEq {a b c d e : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] (x12345 : (e × d × c × b × a)) (y12345 : (e × d × c × b × a)) : Bool := quintupleLessEq y12345 x12345
 
-instance (a b c d e : Type) [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] : Ord0 ((a  × b  × c  × d  × e)) where
+instance (a b c d e : Type) [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] : Ord0 (a × b × c × d × e) where
 
-    compare   :=  quintupleCompare  Ord0.compare  Ord0.compare  Ord0.compare  Ord0.compare  Ord0.compare
+    compare := quintupleCompare Ord0.compare Ord0.compare Ord0.compare Ord0.compare Ord0.compare
 
-    isLess    :=  (@quintupleLess (a) (b) (c) (d) (e) _ _ _ _ _)
+    isLess := (@quintupleLess a b c d e _ _ _ _ _)
 
-    isLessEqual   :=  (@quintupleLessEq (a) (b) (c) (d) (e) _ _ _ _ _)
+    isLessEqual := (@quintupleLessEq a b c d e _ _ _ _ _)
 
-    isGreater    :=  (@quintupleGreater (e) (d) (c) (b) (a) _ _ _ _ _)
+    isGreater := (@quintupleGreater e d c b a _ _ _ _ _)
 
-    isGreaterEqual   :=  (@quintupleGreaterEq (e) (d) (c) (b) (a) _ _ _ _ _)
+    isGreaterEqual := (@quintupleGreaterEq e d c b a _ _ _ _ _)
 
-instance (a b c d e : Type) [SetType a] [SetType b] [SetType c] [SetType d] [SetType e] : SetType ((a  × b  × c  × d  × e)) where
+instance (a b c d e : Type) [SetType a] [SetType b] [SetType c] [SetType d] [SetType e] : SetType (a × b × c × d × e) where
 
-    setElemCompare   :=  quintupleCompare  (@setElemCompare (a) _)  (@setElemCompare (b) _)  (@setElemCompare (c) _)  (@setElemCompare (d) _)  (@setElemCompare (e) _)
+    setElemCompare := quintupleCompare (@setElemCompare a _) (@setElemCompare b _) (@setElemCompare c _) (@setElemCompare d _) (@setElemCompare e _)
 
 /- sextuples -/
 
-def  sextupleEqual  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} {f : Type} [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] [Eq0 e] [Eq0 f]  (p : (a ×b ×c ×d ×e ×f)) (p0 : (a ×b ×c ×d ×e ×f))  : Bool := match p, p0 with |  (x1,  x2,  x3,  x4,  x5,  x6),  (y1,  y2,  y3,  y4,  y5,  y6) =>  ( pairEqual (x1, (x2, (x3, (x4, (x5, x6)))))  (y1, (y2, (y3, (y4, (y5, y6))))))
+def sextupleEqual {a b c d e f : Type} [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] [Eq0 e] [Eq0 f] (p : (a × b × c × d × e × f)) (p0 : (a × b × c × d × e × f)) : Bool := match p, p0 with | (x1, x2, x3, x4, x5, x6), (y1, y2, y3, y4, y5, y6) => (pairEqual (x1, (x2, (x3, (x4, (x5, x6))))) (y1, (y2, (y3, (y4, (y5, y6))))))
 
-instance (a b c d e f : Type) [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] [Eq0 e] [Eq0 f] : Eq0 ((a  × b  × c  × d  × e  × f)) where
+instance (a b c d e f : Type) [Eq0 a] [Eq0 b] [Eq0 c] [Eq0 d] [Eq0 e] [Eq0 f] : Eq0 (a × b × c × d × e × f) where
 
-    isEqual   :=  (@sextupleEqual (a) (b) (c) (d) (e) (f) _ _ _ _ _ _)
+    isEqual := (@sextupleEqual a b c d e f _ _ _ _ _ _)
 
-    isInequal   x  y  :=  not  (sextupleEqual  x  y)
+    isInequal x y := not (sextupleEqual x y)
 
-def  sextupleCompare  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} {f : Type}  (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (cmpc : c → c → LemOrdering) (cmpd : d → d → LemOrdering) (cmpe : e → e → LemOrdering) (cmpf : f → f → LemOrdering) (p : (a ×b ×c ×d ×e ×f)) (p0 : (a ×b ×c ×d ×e ×f))  : LemOrdering := match cmpa, cmpb, cmpc, cmpd, cmpe, cmpf, p, p0 with |  cmpa,  cmpb,  cmpc,  cmpd,  cmpe,  cmpf,  (a1,  b1,  c1,  d1,  e1,  f1),  (a2,  b2,  c2,  d2,  e2,  f2) =>  pairCompare  cmpa  (pairCompare  cmpb  (pairCompare  cmpc  (pairCompare  cmpd  (pairCompare  cmpe  cmpf))))  (a1, (b1, (c1, (d1, (e1, f1)))))  (a2, (b2, (c2, (d2, (e2, f2)))))
+def sextupleCompare {a b c d e f : Type} (cmpa : a → a → LemOrdering) (cmpb : b → b → LemOrdering) (cmpc : c → c → LemOrdering) (cmpd : d → d → LemOrdering) (cmpe : e → e → LemOrdering) (cmpf : f → f → LemOrdering) (p : (a × b × c × d × e × f)) (p0 : (a × b × c × d × e × f)) : LemOrdering := match cmpa, cmpb, cmpc, cmpd, cmpe, cmpf, p, p0 with | cmpa, cmpb, cmpc, cmpd, cmpe, cmpf, (a1, b1, c1, d1, e1, f1), (a2, b2, c2, d2, e2, f2) => pairCompare cmpa (pairCompare cmpb (pairCompare cmpc (pairCompare cmpd (pairCompare cmpe cmpf)))) (a1, (b1, (c1, (d1, (e1, f1))))) (a2, (b2, (c2, (d2, (e2, f2)))))
 
-def  sextupleLess  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} {f : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f]  (p : (a ×b ×c ×d ×e ×f)) (p0 : (a ×b ×c ×d ×e ×f))  : Bool := match p, p0 with |  (x1,  x2,  x3,  x4,  x5,  x6),  (y1,  y2,  y3,  y4,  y5,  y6) =>  pairLess  (x1, (x2, (x3, (x4, (x5, x6)))))  (y1, (y2, (y3, (y4, (y5, y6)))))
-def  sextupleLessEq  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} {f : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f]  (p : (a ×b ×c ×d ×e ×f)) (p0 : (a ×b ×c ×d ×e ×f))  : Bool := match p, p0 with |  (x1,  x2,  x3,  x4,  x5,  x6),  (y1,  y2,  y3,  y4,  y5,  y6) =>  pairLessEq  (x1, (x2, (x3, (x4, (x5, x6)))))  (y1, (y2, (y3, (y4, (y5, y6)))))
+def sextupleLess {a b c d e f : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f] (p : (a × b × c × d × e × f)) (p0 : (a × b × c × d × e × f)) : Bool := match p, p0 with | (x1, x2, x3, x4, x5, x6), (y1, y2, y3, y4, y5, y6) => pairLess (x1, (x2, (x3, (x4, (x5, x6))))) (y1, (y2, (y3, (y4, (y5, y6)))))
+def sextupleLessEq {a b c d e f : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f] (p : (a × b × c × d × e × f)) (p0 : (a × b × c × d × e × f)) : Bool := match p, p0 with | (x1, x2, x3, x4, x5, x6), (y1, y2, y3, y4, y5, y6) => pairLessEq (x1, (x2, (x3, (x4, (x5, x6))))) (y1, (y2, (y3, (y4, (y5, y6)))))
 
-def  sextupleGreater  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} {f : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f]  (x123456 : (f ×e ×d ×c ×b ×a)) (y123456 : (f ×e ×d ×c ×b ×a))  : Bool :=  sextupleLess  y123456  x123456
-def  sextupleGreaterEq  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} {f : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f]  (x123456 : (f ×e ×d ×c ×b ×a)) (y123456 : (f ×e ×d ×c ×b ×a))  : Bool :=  sextupleLessEq  y123456  x123456
+def sextupleGreater {a b c d e f : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f] (x123456 : (f × e × d × c × b × a)) (y123456 : (f × e × d × c × b × a)) : Bool := sextupleLess y123456 x123456
+def sextupleGreaterEq {a b c d e f : Type} [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f] (x123456 : (f × e × d × c × b × a)) (y123456 : (f × e × d × c × b × a)) : Bool := sextupleLessEq y123456 x123456
 
-instance (a b c d e f : Type) [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f] : Ord0 ((a  × b  × c  × d  × e  × f)) where
+instance (a b c d e f : Type) [Ord0 a] [Ord0 b] [Ord0 c] [Ord0 d] [Ord0 e] [Ord0 f] : Ord0 (a × b × c × d × e × f) where
 
-    compare   :=  sextupleCompare  Ord0.compare  Ord0.compare  Ord0.compare  Ord0.compare  Ord0.compare  Ord0.compare
+    compare := sextupleCompare Ord0.compare Ord0.compare Ord0.compare Ord0.compare Ord0.compare Ord0.compare
 
-    isLess    :=  (@sextupleLess (a) (b) (c) (d) (e) (f) _ _ _ _ _ _)
+    isLess := (@sextupleLess a b c d e f _ _ _ _ _ _)
 
-    isLessEqual   :=  (@sextupleLessEq (a) (b) (c) (d) (e) (f) _ _ _ _ _ _)
+    isLessEqual := (@sextupleLessEq a b c d e f _ _ _ _ _ _)
 
-    isGreater    :=  (@sextupleGreater (f) (e) (d) (c) (b) (a) _ _ _ _ _ _)
+    isGreater := (@sextupleGreater f e d c b a _ _ _ _ _ _)
 
-    isGreaterEqual   :=  (@sextupleGreaterEq (f) (e) (d) (c) (b) (a) _ _ _ _ _ _)
+    isGreaterEqual := (@sextupleGreaterEq f e d c b a _ _ _ _ _ _)
 
-instance (a b c d e f : Type) [SetType a] [SetType b] [SetType c] [SetType d] [SetType e] [SetType f] : SetType ((a  × b  × c  × d  × e  × f)) where
+instance (a b c d e f : Type) [SetType a] [SetType b] [SetType c] [SetType d] [SetType e] [SetType f] : SetType (a × b × c × d × e × f) where
 
-    setElemCompare   :=  sextupleCompare  (@setElemCompare (a) _)  (@setElemCompare (b) _)  (@setElemCompare (c) _)  (@setElemCompare (d) _)  (@setElemCompare (e) _)  (@setElemCompare (f) _)
+    setElemCompare := sextupleCompare (@setElemCompare a _) (@setElemCompare b _) (@setElemCompare c _) (@setElemCompare d _) (@setElemCompare e _) (@setElemCompare f _)
 
 end Lem_Basic_classes

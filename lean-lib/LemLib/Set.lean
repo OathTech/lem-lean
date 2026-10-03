@@ -56,11 +56,11 @@ open Lem_Set_helpers
 /- Equality check          -/
 /- ----------------------- -/
 
-instance (a : Type) [SetType a] : Eq0 (Pset  a) where
+instance (a : Type) [SetType a] : Eq0 (Pset a) where
 
-    isEqual   :=  (setEqualBy  (@setElemCompare (a) _))
+    isEqual := (setEqualBy (@setElemCompare a _))
 
-    isInequal   s1  s2  :=  not  ((setEqualBy  (@setElemCompare (a) _)  s1  s2))
+    isInequal s1 s2 := not ((setEqualBy (@setElemCompare a _) s1 s2))
 
 /- ----------------------- -/
 /- Empty set               -/
@@ -112,7 +112,7 @@ let set_case s c_empty c_sing c_else =
 /- insert                  -/
 /- ----------------------- -/
  /- before add -/
-/- arc-14 S2 B3 (be:G4): comparator-keyed insert â dedupe by the SetType
+/- arc-14 S2 B3 (be:G4): comparator-keyed insert — dedupe by the SetType
    comparator (OCaml Pset.add parity), never by BEq. The args form
    splices the setElemCompare dictionary method at each call site (the
    leastFixedPoint precedent below); insert's lem type carries
@@ -128,13 +128,13 @@ def  filter  {a : Type} [SetType a]  (P : a → Bool) (s : Pset a)  : Pset a := 
 /- partition               -/
 /- ----------------------- -/
 
-def  partition0  {a : Type} [SetType a]  (P : a → Bool) (s : Pset a)  : (Pset a ×Pset a) :=  (setFilterBy  setElemCompare  P  s, setFilterBy  setElemCompare  (fun (e : a) =>  not  (P  e))  s)
+def partition0 {a : Type} [SetType a] (P : a → Bool) (s : Pset a) : (Pset a × Pset a) := (setFilterBy setElemCompare P s, setFilterBy setElemCompare (fun (e : a) => not (P e)) s)
 /- ----------------------- -/
 /- split                   -/
 /- ----------------------- -/
 
-def  split  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : Pset a)  : (Pset a ×Pset a) :=  (setFilterBy  setElemCompare  (isGreater  p)  s, setFilterBy  setElemCompare  (isLess  p)  s)
-def  splitMember  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : Pset a)  : (Pset a ×Bool ×Pset a) :=  (setFilterBy  setElemCompare  (isLess  p)  s, (setMemberBy  (@setElemCompare (a) _)  p  s), setFilterBy  setElemCompare  (isGreater  p)  s)
+def split {a : Type} [SetType a] [Ord0 a] (p : a) (s : Pset a) : (Pset a × Pset a) := (setFilterBy setElemCompare (isGreater p) s, setFilterBy setElemCompare (isLess p) s)
+def splitMember {a : Type} [SetType a] [Ord0 a] (p : a) (s : Pset a) : (Pset a × Bool × Pset a) := (setFilterBy setElemCompare (isLess p) s, (setMemberBy (@setElemCompare a _) p s), setFilterBy setElemCompare (isGreater p) s)
 /- ------------------------ -/
 /- subset and proper subset -/
 /- ------------------------ -/
@@ -157,7 +157,7 @@ def  bigunion  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a := (sorry 
  * Lem maintainer...
  -/
 
-def  bigintersection  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a :=  let  x2   := (setEmpty);  setFold  (fun (x : a) (x2 : Pset a) =>  lem_if  setForAll  (fun (s : Pset a) =>  (setMemberBy  (@setElemCompare (a) _)  x  s))  bs then setAddBy  setElemCompare  x  x2  else  x2)  ((setBigunionBy  (@setElemCompare (a) _)  bs))  x2
+def bigintersection {a : Type} [SetType a] (bs : Pset (Pset a)) : Pset a := let x2 := setEmpty; setFold (fun (x : a) (x2 : Pset a) => lem_if setForAll (fun (s : Pset a) => (setMemberBy (@setElemCompare a _) x s)) bs then setAddBy setElemCompare x x2 else x2) ((setBigunionBy (@setElemCompare a _) bs)) x2
 /- ------------------------ -/
 /- difference               -/
 /- ------------------------ -/
@@ -171,7 +171,7 @@ def  bigintersection  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a := 
 /- ------------------------ -/
 
 /- lem: replaced by its target representation:  /- before image -/
-def  map  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → b) (s : Pset a)  : Pset b := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+def  map  {a b : Type} [SetType a] [SetType b]  (f : a → b) (s : Pset a)  : Pset b := (sorry /- Lean backend: set comprehension binding not supported -/) -/
 /- ------------------------ -/
 /- bigunionMap              -/
 /- ------------------------ -/
@@ -184,13 +184,13 @@ def  map  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → b) (s : Pset
 /- If the mapping function returns Just x, x is added to the result
    set. If it returns Nothing, no element is added. -/
 
-def  setMapMaybe  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → Option b) (s : Pset a)  : Pset b :=
-  (setBigunionMapBy  (@setElemCompare (b) _)  (fun (x : a) =>  match  f  x with  |  some  y =>  setSingleton  y |  none =>  setEmpty
+def setMapMaybe {a b : Type} [SetType a] [SetType b] (f : a → Option b) (s : Pset a) : Pset b :=
+  (setBigunionMapBy (@setElemCompare b _) (fun (x : a) => match f x with | some y => setSingleton y | none => setEmpty
                         )
               s)
 /- The name mapMaybe is already being used in the list.lem -/
 
-def  removeMaybe  {a : Type} [SetType a]  (s : Pset (Option a))  : Pset a :=  setMapMaybe  (fun (x : Option a) =>  x)  s
+def removeMaybe {a : Type} [SetType a] (s : Pset (Option a)) : Pset a := setMapMaybe (fun (x : Option a) => x) s
 /- ------------------------ -/
 /- min and max              -/
 /- ------------------------ -/
@@ -216,14 +216,14 @@ let inline findMax = findMinBy (>=) (=)
 
 /- lem: replaced by its target representation: 
 
-def  sigma  {a : Type} {b : Type} [SetType a] [SetType b]  (sa : Pset a) (sb : a → Pset b)  : Pset ((a ×b)) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+def  sigma  {a b : Type} [SetType a] [SetType b]  (sa : Pset a) (sb : a → Pset b)  : Pset (a ×b) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
 /- ------------------------ -/
 /- cross product            -/
 /- ------------------------ -/
 
 /- lem: replaced by its target representation: 
 
-def  cross  {a : Type} {b : Type} [SetType a] [SetType b]  (s1 : Pset a) (s2 : Pset b)  : Pset ((a ×b)) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+def  cross  {a b : Type} [SetType a] [SetType b]  (s1 : Pset a) (s2 : Pset b)  : Pset (a ×b) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
 /- ------------------------ -/
 /- finite                   -/
 /- ------------------------ -/

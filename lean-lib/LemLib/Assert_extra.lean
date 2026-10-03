@@ -18,14 +18,14 @@ namespace Lem_Assert_extra
 /- failing without an error message     -/
 /- ------------------------------------ -/
 
-@[never_extract] def  fail  {a : Type} [Inhabited a]   : a := (failwithI  "fail" : a)
+@[never_extract] def fail {a : Type} [Inhabited a] : a := (failwithI "fail" : a)
 /- ------------------------------------- -/
 /- assertions                            -/
 /- ------------------------------------- -/
 
-def  ensure  (test : Bool) (msg : String)  : Unit :=
-  lem_if  test then
+def ensure (test : Bool) (msg : String) : Unit :=
+  lem_if test then
     ()
-   else (failwithI  msg : Unit)
+   else (failwithI msg : Unit)
 
 end Lem_Assert_extra
