@@ -693,3 +693,25 @@ variables, review L3).
 [USER 2026-10-03]: the package ruling. [AGENT]: every deletion decision,
 the reserved-name-table population split, the message wordings, the TODO
 texts, the kept items and this record.
+
+## Orchestrator verification of package C (2026-10-03)
+
+The orchestrator re-ran the gates independently on `1ecf93f`, from the same
+frozen inputs:
+```
+arc make exit 0   [tree clean after make]
+cerb: 0 differing files / linksem: 0 differing files   [vs 5dfcd25's lem]
+lemlib exit 0  (Build completed successfully (39 jobs).)
+=== Generation: 73 passed, 0 failed, 0 skipped ===
+  OK: equation form for f and len2, match form for g
+Build completed successfully (208 jobs).
+parity: 49 probes: 38 OK, 11 XFAIL (registered, Lean side pinned), 0 FAIL
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+upstream-drift: 944 upstream files; 198 differ   [library code rows all comments/whitespace only; cerberus-ocaml / linksem-ocaml absent]
+```
+Deleted LemLib definitions: a spot check of `natDiv`, `natMod`,
+`lemBoolToProp`, `listGet?`, `listGet!`, `setPartitionBy`, `lemListMapiAux`
+and `unsupportedNatFrom` finds no use in hand-written consumer Lean
+(Cerberus `lean_frontend/*.lean`, cerberus-sl, linksem handwritten/driver).
+The same names, plus `listSet` and the `Pmap` mirrors, have no use in the
+regenerated consumer trees either.
