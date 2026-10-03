@@ -248,8 +248,9 @@ Finite tests and local Pset/Pmap laws are not a general OCaml–Lean
 correspondence theorem. The runtime translations retain their source
 notices and license terms: [NOTICE](../../lean-lib/NOTICE.md).
 
-Lem theorem/lemma statements are emitted as comments, not translated
-proofs; Lem assertions become build-time evaluation checks.
+Lem theorems and lemmas are not translated: each leaves a
+`/- lem: theorem NAME not translated -/` marker, without its statement;
+Lem assertions become build-time evaluation checks.
 
 General fuel-completion monotonicity and propagation are **not proved by
 the backend** (TODO item 13). A per-function `fuel_measure` obligation

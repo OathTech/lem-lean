@@ -37,10 +37,11 @@ Then run `lake build` to compile. The library pins its toolchain in `lean-lib/le
 
 Each Lem source becomes one Lean module. Definitions of user modules are emitted at top level; the Lem library modules are wrapped in `Lem_`-prefixed namespaces (`LemLib.Set` becomes `namespace Lem_Set`) so they stay clear of Lean's own names.
 
-- Datatypes become `inductive` declarations, records become `structure ... where`. After each `inductive` the constructors are brought into scope with `export TypeName (Ctor1 Ctor2 ...)`. Mutually recursive types are wrapped in `mutual`/`end`; a mutual block whose members have *different* numbers of type parameters is emitted as indexed families (the parameters become indices) in `Type 1`, since a uniform universe is required.
+- Datatypes become `inductive` declarations, records become `structure ... where`. After each `inductive` the constructors are brought into scope with `export TypeName (Ctor1 Ctor2 ...)`. Mutually recursive types are wrapped in `mutual`/`end`; a mutual block whose members have *different* numbers of type parameters is emitted as indexed families (the parameters become indices) in `Type 1`, since a uniform universe is required. A record in a mutual block is a `structure` too, except in such an indexed block: a structure cannot have indices, so there a record is a single-constructor inductive with generated accessor functions, and its literals are built positionally in field-declaration order.
 - Functions become `def`; recursive functions become `partial def` unless a totality declaration applies (see *Recursive Definitions and Totality*).
 - Type classes become `class`, instances become `instance` with an explicit priority (see *Comparison Instances*); class methods are brought into scope with `open ClassName`.
 - Lean syntax is used natively: `→`, `×`, `∀`, `∃`; record update as `{ r with field := value }`; local names that coincide with Lean keywords are escaped with `«»` guillemets.
+- The comments of the Lem source are carried over as Lean `/- … -/` comments, next to the item they were written next to (inside a definition printed on one line, a comment's line breaks become spaces). Comments the backend writes itself start with `lem:` (`/- lem: … -/`). Known loss: comments before `and` in a recursive function group.
 - Failure sites — constants whose Lean target representation is `failwith`, and `undefined`-style literals — are emitted as calls to `LemLib.failwithI` (see *Failure Sites*).
 - The shipped runtime declares no axioms and the backend adds none. Bare `sorry` target representations are rejected. Audit hand-written imports and raw Lean target text in the downstream dependency cone with `#print axioms` and suitable source gates.
 
@@ -258,7 +259,7 @@ The runtime is checked by `cd lean-lib && ../scripts/capped lake build`, which b
 
 ### Known Limitations
 
-- **Lemmata and theorems** in Lem sources are dropped (emitted as comments); only assertions become checks.
+- **Lemmata and theorems** in Lem sources are not translated: each leaves a `/- lem: theorem NAME not translated -/` marker, without its statement; only assertions become checks.
 - **`partial def` by default.** Without a `termination_argument` or fuel declaration a recursive definition is kernel-opaque.
 - **Fuel propagation and general completion monotonicity are not proved by the backend** (TODO item 13); a measured wrapper has only its stated per-function stability theorem.
 - **Fuel is a depth bound**, not a proof of termination; the caller chooses it, and exhaustion is loud rather than impossible. A fuel-lifted definition cannot be exercised by a lem `assert` (no fuel is in scope); pin it from Lean with an explicit instance.
