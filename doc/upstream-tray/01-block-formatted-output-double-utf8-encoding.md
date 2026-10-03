@@ -4,8 +4,9 @@ Target: `rems-project/lem`, `src/output.ml` (all backends that format
 blocks; the value change is on OCaml). State: **Draft**, not filed.
 Drafted 2026-10-03.
 
-Patch branch: **`upstream-pr/lem-block-format-utf8`** (one code commit
-on `3802cb0`, `PR-DESCRIPTION.md` at its root). See INDEX.md.
+No patch branch. A one-line fix (below) was built and checked on a local
+branch on `3802cb0`; that branch was deleted, as this tray prepares
+reports only, not pull requests: [USER 2026-10-03] "We aren't doing upstream-pr writing, that's a waste of time. Delete those".
 
 ## Affected code (upstream `3802cb0`)
 
@@ -80,7 +81,7 @@ Compiled against upstream's OCaml library and run:
 String.length (g 0) = 8 (source literal is 6 bytes)
 ```
 
-With the patch branch's `lem` the OCaml line is
+With that fix applied, `lem` printed the OCaml line
 `(if(n = 0) then "§zero" else "§succ")`, the program prints
 `String.length (g 0) = 6 (source literal is 6 bytes)`, and the HOL4,
 Isabelle and Coq output for this file is byte-identical to `3802cb0`'s.
@@ -103,7 +104,7 @@ generated library files byte-identical).
 ## Proposed remedy
 
 `src/output.ml:448`: `([], Ulib.Text.of_string s, (0, Kwd s, Kwd s))`.
-This is the whole of the patch branch.
+This line is the whole fix.
 
 ## Origin
 

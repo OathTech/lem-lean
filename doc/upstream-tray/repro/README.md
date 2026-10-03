@@ -47,9 +47,9 @@ writes `<case>/transcript.txt`. The 2026-10-03 run printed
 `lem -v: Lem 3802cb0`, `5.4.0` and `zarith (version: 1.14)` first.
 Timings (`genlist/`, `replicate/`) vary between runs.
 
-The two patch-branch checks quoted in drafts 01 and 03 were run by hand
-with the branch builds; they are not part of `run-all.sh`. When
-re-running anything with an `upstream-pr/*` branch build, use the `lem`
-symlink at the root of that checkout (to `src/main.native`), not
+The checks of the fixes quoted in drafts 01 and 03 were run by hand on
+local branch builds, which have since been deleted (README §5); they are
+not part of `run-all.sh`. To run a patched upstream build, use the `lem`
+symlink at the root of the checkout (to `src/main.native`), not
 `bin/lem`: `bin/lem` looks for the library next to `bin/` and fails to
 find `Pervasives` (an independent verifier's note, 2026-10-03).

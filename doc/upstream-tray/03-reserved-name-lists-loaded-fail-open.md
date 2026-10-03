@@ -3,8 +3,9 @@
 Target: `rems-project/lem`, `src/initial_env.ml`. State: **Draft**, not
 filed. Drafted 2026-10-03.
 
-Patch branch: **`upstream-pr/lem-reserved-names-fail-closed`** (one code
-commit on `3802cb0`, `PR-DESCRIPTION.md` at its root). See INDEX.md.
+No patch branch. A fix (below) was built and checked on a local branch on
+`3802cb0`; that branch was deleted, as this tray prepares reports only,
+not pull requests: [USER 2026-10-03] "We aren't doing upstream-pr writing, that's a waste of time. Delete those".
 
 ## Affected code (upstream `3802cb0`)
 
@@ -78,7 +79,7 @@ Error: Syntax error
 [exit 2]
 ```
 
-With the patch branch's `lem`, the first run is byte-identical and the
+With that fix applied, the first run was byte-identical and the
 second stops:
 
 ```
@@ -114,7 +115,7 @@ suite run with exactly those errors." §B12 gives the cause: a relative
 
 ## Proposed remedy
 
-The patch branch: for hol, ocaml, isabelle and coq, a missing file or a
+The fix: for hol, ocaml, isabelle and coq, a missing file or a
 `Sys_error` while reading it is a fatal error naming the file; tex, html
 and lem keep the empty set. Verified there: `make` (bin/lem, every library
 backend, ocaml-lib and its tests) succeeds and the 145 library files Lem generates
@@ -129,12 +130,11 @@ while porting linksem; fix in lem-lean commit `8c3a4ca` ("Lean backend:
 fixes found by porting linksem (B1-B12)", 2026-09-28), whose message
 states "B10 Initial_env: a missing/unreadable <target>_constants is fatal
 for targets that ship one (was silently empty: renaming disabled)". The
-record is [AGENT] work; the patch branch adapts the target-independent
+record is [AGENT] work; the fix adapts the target-independent
 part to upstream's target list (no Lean target).
 
 ## Provenance
 
 Found, fixed and analysed by AI agents (Claude, Anthropic) working under
-the direction and review of a human operator. The branch commit carries a
-`Co-Authored-By: Claude` trailer; any filed issue or PR must carry the
-provenance note (INDEX.md).
+the direction and review of a human operator. Any filed issue must carry
+the provenance note (INDEX.md).
