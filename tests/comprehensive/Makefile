@@ -14,7 +14,7 @@ LAKE = "$(CAPPED)" lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-wide-patterns lean-outdir-refusal lean-comments lean-layout lean-text-fidelity lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
+.PHONY: all lean lean-wide-patterns lean-outdir-refusal lean-comments lean-layout lean-text-fidelity lean-multiclause lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -23,7 +23,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-version lean-constants-required lean-parity-admission lean-wide-patterns lean-outdir-refusal lean-generate lean-comments lean-layout lean-text-fidelity lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+lean: lean-version lean-constants-required lean-parity-admission lean-wide-patterns lean-outdir-refusal lean-generate lean-comments lean-layout lean-text-fidelity lean-multiclause lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
 
 # The reserved-name list is required (linksem 2026-09-28, B10): with the
 # library's lean_constants missing, lem must refuse to generate Lean (it used
@@ -164,6 +164,21 @@ lean-layout: lean-generate
 lean-text-fidelity: lean-generate
 	@echo "=== Target_rep text fidelity (gate) ==="
 	@python3 check_text_fidelity.py Test_text_fidelity.lean Test_text_fidelity_auxiliary.lean
+
+# Multi-clause definitions render as Lean equations (TODO item 39): the
+# generated Test_multiclause.lean must carry the equation form for the
+# literal- and cons-pattern groups and a single `match` for the constructor
+# pattern group; the asserts in the auxiliary file pin the behaviour.
+lean-multiclause: lean-generate
+	@echo "=== Multi-clause definitions render as Lean equations (TODO item 39 pin) ==="
+	@f=Test_multiclause.lean; fail=0; \
+	for pat in '^def f : Nat → Nat$$' '^  | (0 : Nat) => 1$$' '^  | (n : Nat) => n$$' \
+	           '^partial def len2 : List Nat → Nat$$' '^  | (\[\] : List Nat) => 0$$' '^  | (x :: xs) => 1 + len2 xs$$' \
+	           '^def g (m : Option Nat) : Nat :=$$' '^  match m with$$'; do \
+		if ! grep -q -- "$$pat" $$f; then echo "  FAIL: $$f lacks the line /$$pat/"; fail=1; fi; \
+	done; \
+	if grep -q '^def g : Option Nat' $$f; then echo "  FAIL: the constructor-pattern group rendered as equations"; fail=1; fi; \
+	test $$fail -eq 0 && echo "  OK: equation form for f and len2, match form for g"
 
 lean-no-fuel-numerals:
 	@echo "=== No fuel numerals in LemLib or generated code (gate) ==="

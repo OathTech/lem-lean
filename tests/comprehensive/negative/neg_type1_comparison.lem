@@ -1,4 +1,4 @@
-(* EXPECT: Lean backend: cannot derive BEq/Ord instances for type 't1': heterogeneous type-parameter counts put its mutual block in the Type 1 universe (the historical sorry-bodied residual instances are deleted, arc-10 audit fix); escape hatches: 'declare {lean} skip_instances type t1' plus hand-written Lean instances where demanded, or 'declare lean target_rep type t1' mapping it to a hand-written Lean type *)
+(* EXPECT: cannot derive BEq/Ord instances for type 't1': heterogeneous type-parameter counts put its mutual block in the Type 1 universe *)
 open import Pervasives
 (* NEGATIVE probe (arc-10 audit fix, auditor A F1): heterogeneous
    type-parameter counts put this mutual block in Lean's Type 1

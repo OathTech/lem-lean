@@ -1,10 +1,8 @@
 import LemLib
 /-!
 # LemLibPmapLaws — lookup-after-insert laws for the `Pmap` port
-(tails-and-pmap-laws slice, 2026-09-05; the refined-cerberus request
-`2026-09-03_request-lem-lean-pmap-laws-and-fuel-scheme.md` §1)
 
-`Pmap` is the verbatim port of lem's `ocaml-lib/pmap.ml` AVL tree
+`Pmap` is the Lean translation of lem's `ocaml-lib/pmap.ml` AVL tree
 (`LemLib.lean`, "Finite maps"). A consumer reasoning about a generated
 environment (`Fmap sym value` = `Fmap.mk cmp (m : Pmap …)`) needs, for a
 comparator that is a strict total order, that a lookup after an insert
@@ -457,18 +455,18 @@ theorem Pmap.cmpLaws_defaultCompare_nat : Pmap.CmpLaws (defaultCompare : Nat →
   · intro a b c hab
     rw [eq_of_defaultCompare_nat hab]
 
-/-! ## The generic bridge: any lawful `Ord` (audit response F2)
+/-! ## The generic bridge: any lawful `Ord`
 
 `defaultCompare [Ord α] x y` is `compare x y` read into `LemOrdering`
-(`LemLib.lean:138`), so `CmpLaws (defaultCompare)` follows from Lean core's
+(`LemLib.lean`), so `CmpLaws (defaultCompare)` follows from Lean core's
 `Std.TransOrd α` — `Std.TransCmp (compare : α → α → Ordering)`, the class
 that packages exactly the strict-weak-order laws of a comparator:
 `OrientedCmp.eq_swap` (gives `flip`, and reflexivity through the
 `OrientedCmp → ReflCmp` instance), `TransCmp.lt_trans`, and
 `TransCmp.congr_left` (comparator-equal keys compare alike — our
 `eq_congr`). `Std.TransOrd` is in Lean core (`Init/Data/Order/Ord.lean`)
-in both toolchains this library is built with (4.28.0 here, 4.32.2 by the
-cerberus consumer) with instances for `Nat`, `Int`, `String`, `Char`,
+in the toolchain this library is built with (4.32.2, `lean-toolchain`)
+with instances for `Nat`, `Int`, `String`, `Char`,
 `Bool`, the fixed-width integers, `Fin n`, `Option`, and lexicographic
 products — so `Nat`/`Int`/`String` keys are covered by one theorem and
 `cmpLaws_defaultCompare_nat` becomes an independent hand witness. A
@@ -527,7 +525,7 @@ example : Pmap.find? cNat 9 (Pmap.add cNat 3 "three" m0) = some "nine" := rfl
 example : Pmap.toList m0 = [(1, "one"), (2, "two"), (5, "five"), (9, "nine")] := by decide
 example : Pmap.WF cNat m0 := by decide
 example : fmapLookupBy cNat 4 (fmapAddBy cNat 4 "four" (fmapAddBy cNat 1 "one" fmapEmpty)) = some "four" := by decide
-/-- `Int` and `String` keys through the bridge's comparator (audit F2). -/
+/-- `Int` and `String` keys through the bridge's comparator. -/
 def cInt : Int → Int → LemOrdering := defaultCompare
 def cStr : String → String → LemOrdering := defaultCompare
 def mI : Pmap Int Nat := Pmap.add cInt (-3) 1 (Pmap.add cInt 7 2 (Pmap.add cInt 0 3 .Empty))

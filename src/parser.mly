@@ -1070,11 +1070,10 @@ declaration :
   | Declare targets_opt Fuel Val id Eq BacktickString
     { Decl_fuel_decl($1, $2, $3, $4, $5, fst $6, $7) }
   | Declare targets_opt Fuel Val id Eq Num
-    { (* The numeric per-declaration fuel-BUDGET form was DELETED by the
-         fuel-parameter arc (2026-09-04): a fuel literal minted per
-         declaration is a magic value. The production is kept only so the
-         form is refused with its reason instead of a bare syntax error. *)
-      raise (Parse_error_locn(loc (), "the numeric fuel-budget form 'declare {lean} fuel val f = N' was removed (fuel-parameter arc, 2026-09-04): a per-declaration fuel literal is a magic value -- [USER 2026-09-03] \"any and all magic values that are hardcoded and can't be quantified over are definitionally bugs\"; fuel is a parameter of the generated code (the [LemFuel] instance), chosen by the caller at the entry point. Keep only the sentinel form: declare {lean} fuel val f = `sentinel`")) }
+    { (* A numeric per-declaration fuel BUDGET is a magic value (DESIGN,
+         "No magic values"). The production exists only so the form is
+         refused with its reason instead of a bare syntax error. *)
+      raise (Parse_error_locn(loc (), "the numeric fuel-budget form 'declare {lean} fuel val f = N' is not accepted: a per-declaration fuel literal is a magic value (doc/lean-backend/DESIGN.md, \"No magic values\"); fuel is a parameter of the generated code (the [LemFuel] instance), chosen by the caller at the entry point. Use the sentinel form: declare {lean} fuel val f = `sentinel`")) }
   | Declare targets_opt GroundRep Val id Eq BacktickString
     { Decl_ground_rep_decl($1, $2, $3, $4, $5, fst $6, $7) }
   | Declare targets_opt ReaderSeed Val id
@@ -1090,8 +1089,8 @@ declaration :
   | Declare targets_opt FuelMeasure Val id Eq BacktickString
     { Decl_fuel_measure_decl($1, $2, $3, $4, $5, fst $6, $7, None) }
   | Declare targets_opt FuelMeasure Val id Eq BacktickString Assuming BacktickString
-    { (* The hypothesis-carrying form (measure-hypothesis slice, 2026-09-05):
-         the backticked Prop over the function's parameters becomes the
+    { (* The hypothesis-carrying form: the backticked Prop over the
+         function's parameters becomes the
          FIRST hypothesis binder of the generated sufficiency obligation
          (`lemHyp`); the wrapper is unchanged (fuel-free). *)
       Decl_fuel_measure_decl($1, $2, $3, $4, $5, fst $6, $7, Some ($8, $9)) }
@@ -1102,9 +1101,9 @@ declaration :
     { (* refused with its reason: `assuming` belongs to fuel_measure *)
       raise (Parse_error_locn(loc (), "'assuming' is not part of the fuel sentinel declare: a hypothesis qualifies a fuel MEASURE's sufficiency obligation -- keep declare {lean} fuel val f = `sentinel` and write declare {lean} fuel_measure val f = `<measure>` assuming `<H>`")) }
   | Declare targets_opt FuelMeasure Val id Eq Num
-    { (* A numeral is not a data measure (fuel-measure slice, 2026-09-04):
-         the production exists only to refuse the form with its reason. *)
-      raise (Parse_error_locn(loc (), "a numeral is not a fuel measure: 'declare {lean} fuel_measure val f = N' would hardcode the fuel (a magic value -- [USER 2026-09-03] \"any and all magic values that are hardcoded and can't be quantified over are definitionally bugs\"); a fuel measure is a Lean expression over the function's parameters, e.g. declare {lean} fuel_measure val f = `sizeOf x`")) }
+    { (* A numeral is not a data measure: the production exists only to
+         refuse the form with its reason. *)
+      raise (Parse_error_locn(loc (), "a numeral is not a fuel measure: 'declare {lean} fuel_measure val f = N' would hardcode the fuel, a magic value (doc/lean-backend/DESIGN.md, \"No magic values\"); a fuel measure is a Lean expression over the function's parameters, e.g. declare {lean} fuel_measure val f = `List.length xs + 1`")) }
 
 lemma_typ:
   | Lemma

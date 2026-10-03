@@ -1,12 +1,12 @@
 import LemLib
 /-!
 # LemLibTheorems — kernel-checked equalities for the tail-recursive
-library rewrites (parity-fix slice 2026-09-03, F7)
+library rewrites
 
 Agreement between Lean artifacts is a theorem, not a test. Each
 `lemList*`/`lemString*`/`lemInsertBy` function in `LemLib.lean` replaces
 a definition that overflowed the native stack on 300 000-element inputs
-(the compiled sweep in the parity-fix record); this file restates the
+(the compiled sweep `tests/comprehensive/parity/probes/p_list_deep.lem`); this file restates the
 REPLACED definition verbatim as a `spec` (the core function itself for
 `List.zip`/`List.unzip`/`List.foldr`; the generated lem text for the
 library definitions) and proves the rewrite equal to it, by canonical
@@ -245,7 +245,7 @@ theorem lemShowListAux_eq (showX : α → String) (xs : List α) :
       lemStringConcat_eq, concatSpec_map]
 
 /- ---- Pset.join / Pmap.join: height-indexed structural recursion vs the
-        former well-founded definition (fuel-parameter arc, 2026-09-04) ----
+        former well-founded definition ----
    `joinSpec` is the pre-arc text verbatim (WF on `sizeOf l + sizeOf r`).
    The two agree on every pair of heights-consistent trees (`heightsOk`):
    the index `height l + height r + 1` then exceeds the recursion depth,
@@ -253,8 +253,8 @@ theorem lemShowListAux_eq (showX : α → String) (xs : List α) :
    height is strictly smaller. Without `heightsOk` the stored heights may
    lie and the indexed version reaches its (loud) exhaustion arm where the
    WF version keeps going — so the hypothesis is exactly the invariant
-   every constructor path preserves (the consumer's Pmap-laws slice will
-   prove that preservation against these same definitions). -/
+   every constructor path preserves (a consumer's Pmap laws can prove
+   that preservation against these same definitions). -/
 namespace PsetJoin
 open Pset
 variable {α : Type}

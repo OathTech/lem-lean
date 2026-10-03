@@ -79,6 +79,7 @@ lean_lib LemComprehensiveTest where
     `Test_let_bindings, `Test_let_bindings_auxiliary,
     `Test_misc, `Test_misc_auxiliary,
     `Test_modules, `Test_modules_auxiliary,
+    `Test_multiclause, `Test_multiclause_auxiliary,  -- multi-clause groups as Lean equations (TODO 39 pin)
     `Test_mutual_types, `Test_mutual_types_auxiliary,
     `Test_mutual_record_order, `Test_mutual_record_order_auxiliary,  -- mutual record literals in declaration order (linksem B7)
     `Test_mword, `Test_mword_auxiliary,

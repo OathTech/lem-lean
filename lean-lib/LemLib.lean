@@ -60,35 +60,27 @@ comparator. Functions without `By` use Lean's `BEq` or `Ord` type classes.
 
 /- Lem standard library support for Lean 4 -/
 
-/- HISTORY (arc-8 S3, 2026-08-20): `axiom DAEMON : ∀ {α : Type}, α`
-   (with DAEMON1 and their @[implemented_by unsafeCast] impls) and the
-   legacy `failwith` (whose value WAS DAEMON) lived here until arc-8.
-   DAEMON as declared was a logically INCONSISTENT axiom
-   (`(DAEMON : Empty)` proves `False`); the backend now derives real
-   bounded Inhabited instances (arc-8 S1) and emits failwithI with
-   `[Inhabited tv]` signature threading (arc-8 S2), so nothing generated
-   references them. DO NOT REINTRODUCE any axiom-valued or unsafeCast
-   inhabitant: consumers enforce absence in-build (cerberus-lean
-   `scripts/check_theorem_axioms.sh`: a zero-axiom census over its
-   hand-written and generated Lean trees plus `#print axioms` probes
-   on exemplar cones, where DAEMON and sorryAx are unconditionally
-   fatal). -/
+/- NO AXIOM AND NO UNSAFE INHABITANT MAY BE INTRODUCED HERE. Two were
+   removed and must not come back:
+   - an axiom-valued universal inhabitant (`axiom DAEMON : ∀ {α : Type}, α`,
+     the value of a legacy `failwith`): logically inconsistent —
+     `(DAEMON : Empty)` proves `False`. The backend derives real bounded
+     `Inhabited` instances instead and emits `failwithI` (below) with
+     `[Inhabited tv]` binders threaded onto the enclosing signatures;
+   - an effect-erasure axiom (`runEffectful : (Unit → BaseIO α) → α`, the
+     trust boundary of `declare {lean} effectful` target reps): an
+     unprovable crossing in every downstream proof cone. Effectful counters
+     are threaded as explicit state by the supply lifting (`declare {lean}
+     supply val`, `LemLib.supplySplit` below — deterministic,
+     kernel-transparent, axiom-free), and the backend refuses that
+     declare (deletion record:
+     doc/lean-backend/2026-09-01_L2-deletion-record.md).
+   Consumers enforce the absence in-build (cerberus-lean
+   `scripts/check_theorem_axioms.sh`: a zero-axiom census over the
+   hand-written and generated Lean trees plus `#print axioms` probes on
+   exemplar cones). -/
 
-/- HISTORY (effect-retirement arc L2, 2026-09-01): the axiom
-   `runEffectful {α : Type} : (Unit → BaseIO α) → α` (with its unsafe
-   `runEffectful_impl`, `implemented_by`, and the load-bearing
-   `never_extract`/`noinline` attribute pair) lived here until this arc.
-   It was the library's ONE axiom — the declared effect-erasure trust
-   boundary for `declare {lean} effectful` target reps. The mechanism is
-   RETIRED: effectful counters are now threaded as explicit state by the
-   supply lifting (`declare {lean} supply val`, `LemLib.supplySplit`
-   below — deterministic, kernel-transparent, axiom-free), and the Lean
-   backend fails closed on any `{lean} effectful` declare. DO NOT
-   REINTRODUCE an axiom or unsafe effect-projection here: consumers
-   gate on a zero-axiom LemLib census (charter: cerberus-lean
-   lean_frontend/docs/2026-08-31_effect-retirement-design.md §7.1/§7.2). -/
-
-/- THE AMBIENT FUEL (fuel-parameter arc, 2026-09-04). `declare {lean}
+/- THE AMBIENT FUEL. `declare {lean}
    fuel val f = `sentinel`` makes `f` a total worker recursing
    structurally on its own counter (`f_lemFuel (lemFuel : Nat) …`); the
    counter STARTS at the ambient fuel, and the ambient fuel is a
@@ -103,11 +95,10 @@ comparator. Functions without `By` use Lean's `BEq` or `Ord` type classes.
    execution parameter that 'doesn't matter' — any fuel value can be
    chosen […] All similar such magic values should be removed and replaced
    by quantified parameters"; a global instance would silently give every
-   fuel'd function a default, which is exactly the forbidden magic value
-   (tests/comprehensive/check_no_fuel_numerals.sh gates its absence).
-   HISTORY: `def lemDefaultFuel : Nat := 1000000` lived here until this arc
-   as the wrappers' budget (with a per-declaration numeric override in the
-   backend); both were deleted by the ruling above. -/
+   fuel'd function a default, which is exactly the forbidden magic value;
+   so would a library default fuel constant, which this file once had
+   (tests/comprehensive/check_no_fuel_numerals.sh gates the absence of
+   both). -/
 class LemFuel where
   fuel : Nat
 
@@ -132,7 +123,7 @@ inductive LemOrdering where
   | GT : LemOrdering
   deriving Repr, BEq, Inhabited, DecidableEq
 
-/- Lem's Bool conditional (linksem 2026-09-28, B13). Generated code writes
+/- Lem's Bool conditional. Generated code writes
    `lem_if c then t else e` for a Lem `if` (whose condition is a `bool`).
    It expands to exactly the kernel term Lean elaborates for a Bool `if`
    (`ite (c = true)` with the `instDecidableEqBool` instance, pinned in
@@ -156,13 +147,12 @@ def isGreater (o : LemOrdering) : Bool := o == .GT
 def isGreaterEqual (o : LemOrdering) : Bool := o != .LT
 
 /- Inhabited for Sum (not in Lean core; needed by ground-typed failwithI
-   sites at sum types, arc-2 S5). Left-biased, right as fallback. -/
+   sites at sum types). Left-biased, right as fallback. -/
 instance [Inhabited α] : Inhabited (α ⊕ β) := ⟨.inl default⟩
 instance (priority := low) [Inhabited β] : Inhabited (α ⊕ β) := ⟨.inr default⟩
 
-/- BEq/Ord for Sum (arc-10 S2 R1; neither is in Lean core). Unblocks
-   `deriving BEq, Ord` on generated types with either-typed constructor
-   fields (register R1, arc-8 decision log).
+/- BEq/Ord for Sum (neither is in Lean core). Unblocks `deriving BEq,
+   Ord` on generated types with either-typed constructor fields.
    OCaml-polymorphic-comparison parity: lem `either 'a 'b = Left of 'a
    | Right of 'b` (library/either.lem:16) renders on the OCaml backend
    as `Either.either` (either.lem:20), i.e. OCaml's
@@ -188,7 +178,7 @@ instance [Ord α] [Ord β] : Ord (α ⊕ β) where
 /- Ord for Unit (not in Lean stdlib, needed by generated code) -/
 instance : Ord Unit where compare _ _ := .eq
 
-/- Ord for LemOrdering (linksem 2026-09-28, B2): Lem programs build sets of
+/- Ord for LemOrdering: Lem programs build sets of
    comparison results (`Set.member (compare a b) {LT; EQ}`), which needs
    `SetType ordering`, derived from `Ord`. The order is the OCaml target's:
    `ordering` is `int` there with LT = -1, EQ = 0, GT = 1, so LT < EQ < GT. -/
@@ -217,7 +207,7 @@ def defaultLessEq [Ord α] (x y : α) : Bool := isLessEqual (defaultCompare x y)
 def defaultGreater [Ord α] (x y : α) : Bool := isGreater (defaultCompare x y)
 def defaultGreaterEq [Ord α] (x y : α) : Bool := isGreaterEqual (defaultCompare x y)
 
-/- failwithI: failure at a KNOWN-INHABITED type (arc-2 S5). The Lean
+/- failwithI: failure at a KNOWN-INHABITED type. The Lean
    backend emits this instead of failwith at call sites whose result type
    is syntactically GROUND (no type variables), where instance resolution
    cannot require constraint propagation. Properties, each load-bearing:
@@ -225,8 +215,8 @@ def defaultGreaterEq [Ord α] (x y : α) : Bool := isGreaterEqual (defaultCompar
      value (strictly stronger claim hygiene than a `:= default` body);
    - axiom-free: the `:= default` initializer only witnesses
      inhabitation; opaque does not expose it definitionally;
-   - computable at runtime via @[implemented_by]: panics with the message,
-     byte-identical behavior to the retired legacy failwith (arc-8 S3). -/
+   - computable at runtime via @[implemented_by]: panics with the
+     message. -/
 /- `never_extract` on the IMPLEMENTATION too: the compiler substitutes the
    `implemented_by` target before closed-term extraction, so an attribute
    on the opaque alone does not protect `failwithIImpl "msg"` at a closed
@@ -234,18 +224,16 @@ def defaultGreaterEq [Ord α] (x y : α) : Bool := isGreaterEqual (defaultCompar
    LemLib` alone aborted under LEAN_ABORT_ON_PANIC=1 until this). -/
 @[never_extract] private unsafe def failwithIImpl {α : Type} [Inhabited α] (msg : String) : α :=
   panic! msg
-/- `never_extract` (parity-fix slice 2026-09-03): a closed application
-   `failwithI "msg"` at a closed type is otherwise lifted by the
-   compiler's closed-term extraction into a module-initialisation
-   constant, so the panic fired at INIT of every importing binary under
-   LEAN_ABORT_ON_PANIC=1 (the L0 record's "abort fires at module init"
-   observation) instead of at the failing program point — which is where
-   the OCaml reference raises. -/
+/- `never_extract`: a closed application `failwithI "msg"` at a closed
+   type is otherwise lifted by the compiler's closed-term extraction into
+   a module-initialisation constant, so the panic fired at INIT of every
+   importing binary under LEAN_ABORT_ON_PANIC=1 instead of at the failing
+   program point — which is where the OCaml reference raises. -/
 @[implemented_by failwithIImpl, never_extract]
 opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
 
-/- Fail-stop for executables (linksem 2026-09-29, audit item 2; D1(b)
-   [USER 2026-09-30] "D1: agree"). A reached `failwithI` is a Lean `panic!`:
+/- Fail-stop for executables ([USER 2026-09-30] "D1: agree"). A reached
+   `failwithI` is a Lean `panic!`:
    unless the runtime aborts, it prints the message and CONTINUES with the
    `Inhabited` default ("library-call semantics"), so a program whose model
    fails could exit 0 with plausible-looking output where the OCaml target
@@ -253,10 +241,9 @@ opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
    `lemRequireAbortOnPanic` first thing in `main`: it REFUSES to run (an
    attributed message on stderr, exit 2) unless `LEAN_ABORT_ON_PANIC` is
    exactly `1`, so every reached failure is a fail-stop. No extern and no
-   unsafe code: it replaces the earlier `lean_internal_set_exit_on_panic`
-   extern (`lemSetExitOnPanic`/`lemFailStop`), removed by that ruling. The
-   pattern is Cerberus's driver refusal (lean_frontend/Main.lean,
-   zero-discrepancy Z2-FL-03), which measured that the runtime aborts when
+   unsafe code (an extern that set the runtime's exit-on-panic flag was
+   removed by that ruling). The pattern is Cerberus's driver refusal
+   (lean_frontend/Main.lean), which measured that the runtime aborts when
    the variable is merely PRESENT ("1", "0" and "" all abort); this check is
    stricter (the value must be `1`). -/
 def lemRequireAbortOnPanic : IO Unit := do
@@ -270,7 +257,7 @@ def lemRequireAbortOnPanic : IO Unit := do
       "\", not 1: the Lean runtime aborts on a panic whenever the variable is set, but this check requires exactly 1 so the fail-stop contract has one spelling; run with LEAN_ABORT_ON_PANIC=1")
     IO.Process.exit 2
 
-/- Sequencing (linksem B15): Lem's `let _ = e1 in e2` evaluates e1 for its
+/- Sequencing: Lem's `let _ = e1 in e2` evaluates e1 for its
    effect (a diagnostic, or a failure that must stop the program, as the
    OCaml exception does). Lean's compiler drops unused pure values and treats
    every Unit value as `()`, so the backend emits
@@ -279,12 +266,12 @@ def lemRequireAbortOnPanic : IO Unit := do
    reference: a `BaseIO` effect the compiler must keep. (A pure "use" is not
    enough: an `if ptrAddrUnsafe x == 1 then b () else b ()` was simplified
    away, and arity reduction then dropped `a` altogether.)
-   BOUNDARY (D1(a) [USER 2026-09-30] "D1: agree"): `lemSeqImpl` is on the
+   BOUNDARY ([USER 2026-09-30] "D1: agree"): `lemSeqImpl` is on the
    native-seam boundary list as TEMPORARY. Kernel-vs-runtime gap: `lemSeq`
    is a transparent def, logically `b ()`; at run time it also forces `a`.
-   It is an exception, by that ruling, to the L2 "DO NOT REINTRODUCE an
-   unsafe effect-projection" note above. Named mover: the failure-monad
-   translation (lem-lean doc/lean-backend/TODO.md), which makes strictness
+   It is an exception, by that ruling, to the no-unsafe-effect-projection
+   note at the top of this file. Named mover: the failure-monad
+   translation (doc/lean-backend/TODO.md item 24), which makes strictness
    part of the semantics and deletes this seam. -/
 @[never_extract, noinline] private unsafe def lemSeqImpl {α β : Type} (a : Unit → α) (b : Unit → β) : β :=
   match unsafeBaseIO (do
@@ -294,23 +281,22 @@ def lemRequireAbortOnPanic : IO Unit := do
   | v => v
 @[implemented_by lemSeqImpl] def lemSeq {α β : Type} (_ : Unit → α) (b : Unit → β) : β := b ()
 
-/- Comparing function values (linksem audit A1). OCaml's polymorphic compare
+/- Comparing function values. OCaml's polymorphic compare
    and structural equality raise `Invalid_argument "compare: functional
    value"` when they REACH a closure, and only then (`GOT [] = GOT []`
    is fine). Backend-derived structural comparisons of types with
    function-typed fields call these at the function-typed positions, so a
    comparison fails whenever it reaches a closure: exactly OCaml's `=`, but
    NOT OCaml's `compare`, which returns 0 for the same closure object
-   (physical equality). That is the open discrepancy A1-R
-   (doc/lean-backend/2026-09-28_linksem-findings.md, probe
-   p_fn_compare_same_closure). -/
+   (physical equality). That is an open discrepancy awaiting a ruling
+   (TODO item 32; parity probe p_fn_compare_same_closure). -/
 @[never_extract] def lemFunctionalCompare {α β : Type} (_ _ : α → β) : Ordering :=
   failwithI "compare: functional value"
 @[never_extract] def lemFunctionalBeq {α β : Type} (_ _ : α → β) : Bool :=
   failwithI "compare: functional value"
 
 /- fuelExhaustedWith: out-of-fuel sentinel for fuel'd defs whose return
-   type is pure (no error channel) and possibly polymorphic (arc-3 sweep).
+   type is pure (no error channel) and possibly polymorphic.
    The witness — any in-scope value of the return type, typically one of
    the worker's own arguments — discharges inhabitation LOCALLY: no
    [Inhabited] constraint propagates into generated signatures, and no
@@ -323,21 +309,21 @@ def lemRequireAbortOnPanic : IO Unit := do
 @[implemented_by fuelExhaustedWithImpl, never_extract]
 opaque fuelExhaustedWith {α : Type} (msg : String) (witness : α) : α := witness
 
-/- Vector slice — lem `vector` slicing (be:S13, conventions documented):
+/- Vector slice — lem `vector` slicing:
    * WIDTH-FROM-RETURN-TYPE: the result length is the implicit `m`
      inferred from the USE SITE's expected type — the same convention as
      mwordExtract/mwordConcat below ("hi is redundant", Isabelle
      Word.slice); the `_stop` argument is therefore IGNORED by design
      (redundant with `m`), and is named `_stop` to say so.
-   * OUT-OF-RANGE FAILS LOUDLY (parity-fix slice 2026-09-03, census V1):
+   * OUT-OF-RANGE FAILS LOUDLY:
      the OCaml rep `vector_slice n1 n2 (Vector a) = Vector (Array.sub a n1 n2)`
      (ocaml-lib/vector.ml:33) raises Invalid_argument when the slice is
      not within the array; the previous pad-with-default arm SUCCEEDED
      there. lem's typechecker relates m/start/stop, so the arm is
      unreachable from type-correct generated code on both targets.
    * Injected into the core `Vector` namespace so generated projections
-     `v.slice` resolve (be:S13 residual: a LemLib-local name would need
-     backend qualification — registered, not done). -/
+     `v.slice` resolve (a LemLib-local name would need backend
+     qualification). -/
 namespace Vector
 def slice [Inhabited α] {n m : Nat} (v : Vector α n) (start _stop : Nat) : Vector α m :=
   if start + m > n then failwithI "Invalid_argument \"Array.sub\""
@@ -347,13 +333,13 @@ end Vector
 /- Message-less variant for 'declare {lean} fuel val' sentinels: the lem
    backtick lexer excludes double quotes, so declares cannot carry a
    message string. Unfolds to the opaque core.
-   `never_extract` (public-readiness S13, 2026-09-25): without it the
+   `never_extract`: without it the
    compiler lifts a CLOSED application `fuelExhausted w` to a module-init
    constant and evaluates the sentinel eagerly (silently, panic messages
    are suppressed during initialisation), so a sufficient-fuel run could
    abort on the sentinel it never reached. Regression: the strict native
    parity probe `tests/comprehensive/parity` `p_lem_size` under
-   LEAN_ABORT_ON_PANIC=1 (doc/lean-backend/2026-09-25_public-readiness-followup.md). -/
+   LEAN_ABORT_ON_PANIC=1. -/
 @[never_extract] def fuelExhausted {α : Type} (witness : α) : α :=
   fuelExhaustedWith "lem: fuel exhausted" witness
 
@@ -427,19 +413,19 @@ def sort_by_ordering (cmp : α → α → LemOrdering) (l : List α) : List α :
 /- ============================================================================
    Sets and finite maps: Lean translations of Lem's OCaml runtime
    (ocaml-lib/pset.ml, modified by Scott Owens 2010-10-28;
-   ocaml-lib/pmap.ml, modified by Susmit Sarkar 2010-11-30),
-   parity-fix slice 2026-09-03. Source notices are at the top of this file.
+   ocaml-lib/pmap.ml, modified by Susmit Sarkar 2010-11-30).
+   Source notices are at the top of this file.
    ============================================================================
 
    [USER 2026-09-03] ruling: the OCaml target is the reference semantics
    of a lem program and there are to be ZERO behavioural discrepancies.
-   The previous Lean representations (a comparator-keyed insertion-order
+   An earlier Lean representation (a comparator-keyed insertion-order
    list for sets; a `Std.TreeMap`-indexed, insertion-sequenced `Fmap`)
-   reproduced the RETIRED Lean assoc-list observables, not the OCaml
-   ones: iteration/fold/toList order (OCaml: ascending by comparator),
-   Pmap.add replacing the key AND value of a comparator-equal binding
-   (F3), Pmap.equal comparing keys with the map's comparator (F3),
-   Set.choose_and_split / set_case / union representatives, and every
+   did not reproduce the OCaml observables: iteration/fold/toList order
+   (OCaml: ascending by comparator), Pmap.add replacing the key AND value
+   of a comparator-equal binding, Pmap.equal comparing keys with the
+   map's comparator, Set.choose_and_split / set_case / union
+   representatives, and every
    panic-order nuance of for_all/exists. Rather than approximate them
    one by one, the two AVL modules follow the source algorithms. Tree
    shape affects observables: which representative of comparator-equal
@@ -469,7 +455,7 @@ def sort_by_ordering (cmp : α → α → LemOrdering) (l : List α) : List α :
    can reason about the semantics"): nothing is chosen, the kernel
    unfolds it (unlike well-founded recursion, which blocks closed-term
    `rfl`/`decide` — `join` was moved off WF recursion for exactly that
-   reason, fuel-parameter arc 2026-09-04), and the exhaustion arm —
+   reason), and the exhaustion arm —
    unreachable on well-formed input — is the loud `fuelExhaustedWith`
    sentinel, never a silent truncation. The one CALLER-FUELLED primitive
    is `lfpGo` (option (a): its caller `tc` supplies the data measure).
@@ -537,7 +523,7 @@ def add (cmp : α → α → LemOrdering) (x : α) : Pset α → Pset α
     the part of the AVL invariant the height-indexed recursions below
     rely on for their index to be exact. Computable (`Bool`), so a proof
     can `decide` it on a closed tree; the well-formedness predicate the
-    consumer's Pmap laws will build on (refined-cerberus request §1). -/
+    Pmap laws (LemLibPmapLaws) build on. -/
 def heightsOk : Pset α → Bool
   | Empty => true
   | Node l _ r h =>
@@ -548,10 +534,10 @@ def heightsOk : Pset α → Bool
 /-- pset.ml:86 `join` — STRUCTURAL recursion on the DATA MEASURE
     `height l + height r + 1` (the recursion descends into a child of the
     taller side, whose stored height is smaller when heights are
-    consistent). Until the fuel-parameter arc this was well-founded
-    recursion on `sizeOf l + sizeOf r`, which the kernel cannot unfold —
-    every closed-term `rfl`/`decide` through `union`/`remove`/`fmapUnionBy`
-    stopped here (the consumer measured 17 broken proofs, request §2). The
+    consistent). Well-founded recursion on `sizeOf l + sizeOf r`, which
+    this was, is what the kernel cannot unfold — every closed-term
+    `rfl`/`decide` through `union`/`remove`/`fmapUnionBy` stopped here (a
+    consumer measured 17 broken proofs). The
     index is not a chosen value ([USER 2026-09-03] third form: "nothing is
     chosen, nothing bounds the semantics, a proof can unfold it"); its
     exhaustion arm is unreachable on heights-consistent trees and LOUD
@@ -852,11 +838,11 @@ def lfpGo (cmp : α → α → LemOrdering) (f : Pset α → Pset α) : Nat → 
     proof can unfold it), the same form as the height-indexed set/map
     recursions above. On an ill-behaved comparator the OCaml loops; the
     port's `lfpGo` exhausts LOUDLY instead (the accepted direction).
-    Decision record: doc/lean-backend/2026-09-04_fuel-parameter-record.md
-    (the alternative — a caller-fuelled `tc` via `{lean} fuel_consumer` on
+    The alternative — a caller-fuelled `tc` via `{lean} fuel_consumer` on
     `Relation.transitiveClosureByCmp` — was built and withdrawn: it puts a
     `[LemFuel]` binder on every relation function for no semantic reason
-    and edits the library source). -/
+    and edits the library source. Whether this bound counts as a data
+    measure is TODO item 41. -/
 def tc (cmp : (α × α) → (α × α) → LemOrdering) (r : Pset (α × α)) : Pset (α × α) :=
   let oneStep (r : Pset (α × α)) : Pset (α × α) :=
     fold (fun (x, y) xs =>
@@ -933,8 +919,8 @@ def lemLeastFixedPoint (cmp : α → α → LemOrdering) (bound : Nat)
     else lemLeastFixedPoint cmp bound f (Pset.union cmp fx x)
 
 /-- Structural instances for `deriving BEq, Ord` on generated types that
-    carry a set field: the ascending element spines. NOTE (divergence
-    census X1, EXCEPTION-CASE candidate): OCaml's polymorphic compare
+    carry a set field: the ascending element spines. NOTE (a ruled
+    OCaml-target deviation, DESIGN's deviation list): OCaml's polymorphic compare
     RAISES `Invalid_argument "compare: functional value"` on a Pset
     record (it carries its comparator closure) unless the closures are
     physically identical; lem's own set equality (`setEqualBy`) is the
@@ -945,7 +931,7 @@ instance [Ord α] : Ord (Pset α) where
   compare s1 s2 := compare (Pset.elements s1) (Pset.elements s2)
 
 /- ============================================================================
-   Finite maps: verbatim port of ocaml-lib/pmap.ml
+   Finite maps: Lean translation of ocaml-lib/pmap.ml
    ============================================================================ -/
 
 /-- pmap.ml:16 `type ('key,'a) rep = Empty | Node of rep * 'key * 'a * rep * int` -/
@@ -1281,7 +1267,7 @@ def fmapToSetBy (cmp : (α × β) → (α × β) → LemOrdering) (m : Fmap α �
 def fmapAll (f : α → β → Bool) (m : Fmap α β) : Bool := Pmap.forAll f m.rep
 
 /-- pmap.ml:289 `union a b = merge ... a b` with a's comparator -/
-def fmapUnionBy (cmp : α → α → LemOrdering) (m1 m2 : Fmap α β) : Fmap α β :=
+def fmapUnionBy (_cmp : α → α → LemOrdering) (m1 m2 : Fmap α β) : Fmap α β :=
   match m1, m2 with
   | .empty, .empty => .empty
   | .mk c a, b => .mk c (Pmap.union c a b.rep)
@@ -1384,9 +1370,9 @@ private partial def natSqrtAux (n guess : Nat) : Nat :=
   if next >= guess then guess else natSqrtAux n next
 
 /-- lem integerSqrt = Nat_big_num.sqrt = Z.sqrt: `Invalid_argument "Z.sqrt:
-    square root of a negative number"` on a negative argument (the previous
-    Lean rep returned the root of the absolute value — divergence census
-    N5; parity probe f_sqrt_neg). -/
+    square root of a negative number"` on a negative argument (an earlier
+    Lean rep returned the root of the absolute value; parity probe
+    f_sqrt_neg). -/
 def integerSqrt (n : Int) : Int :=
   if n < 0 then failwithI "Z.sqrt: square root of a negative number"
   else
@@ -1411,8 +1397,7 @@ def intAbs (n : Int) : Int := Int.ofNat n.natAbs
 /- ============================================================ -/
 /- Division and remainder — the OCaml reference semantics          -/
 /- ============================================================ -/
-/- Parity-fix slice 2026-09-03 (F1 + the division-by-zero class of the
-   divergence census). The OCaml target is the reference semantics of a
+/- The OCaml target is the reference semantics of a
    lem program; every lem division/remainder rep below mirrors its OCaml
    rep byte-for-byte, including FAILURE: OCaml raises Division_by_zero
    (native `/`, `mod`, Int32/Int64.div/rem, zarith), so the Lean side
@@ -1433,8 +1418,8 @@ def intAbs (n : Int) : Int := Int.ofNat n.natAbs
      Int32.div/Int32.rem (truncating, wrapping at min_int / -1), which
      Lean's Int32.div (BitVec.sdiv) / Int32.mod (BitVec.srem) match.
    * lem `nat`/`natural`/`integer`: OCaml `/`,`mod` on non-negative ints
-     and zarith's Nat_big_num.div/modulus (Euclidean = Int.ediv/Int.emod,
-     the M2-verified mapping) — unchanged values, plus the zero guard.
+     and zarith's Nat_big_num.div/modulus (Euclidean = Int.ediv/Int.emod)
+     — unchanged values, plus the zero guard.
    * integerDiv_t / integerRem_t / integerRem_f (num_extra.lem):
      Z.div / Z.rem / mod_big_int — truncating quotient, dividend-signed
      remainder, non-negative remainder; zero raises. -/
@@ -1477,10 +1462,9 @@ def lemInt64Mod (i n : Int64) : Int64 :=
 /- ============================================================ -/
 /- Fixed-width integer types                                   -/
 /- ============================================================ -/
-/- Parity-fix slice 2026-09-03 (divergence census N3): lem `int32`/`int64`
-   are Lean's `Int32`/`Int64` — two's-complement machine integers whose
-   arithmetic WRAPS exactly like OCaml's Int32/Int64 (the previous `Int`
-   newtypes had no overflow at all). Conversions mirror the OCaml reps of
+/- lem `int32`/`int64` are Lean's `Int32`/`Int64` — two's-complement
+   machine integers whose arithmetic WRAPS exactly like OCaml's
+   Int32/Int64. Conversions mirror the OCaml reps of
    library/num.lem one by one:
    * Int32.of_int / Int64.of_int (int32FromInt, int32FromNat, ...): the
      argument is taken modulo 2^32 / 2^64 — Int32.ofInt / Int64.ofInt;
@@ -1490,8 +1474,7 @@ def lemInt64Mod (i n : Int64) : Int64 :=
      the prover-side reps are `word_of_int` (Isabelle) / `n2w` (HOL),
      library/num.lem:831-832, :1040-1041, :2378-2470 — so the Lean side
      wraps (Int32.ofInt / Int32.ofNat, Int64 likewise). The raise is an
-     OCaml-execution artifact of the X3 kind, not mirrored ([USER
-     2026-09-04] adopting the record's D4 recommendation:
+     OCaml-execution artifact, not mirrored ([USER 2026-09-04];
      doc/lean-backend/2026-09-03_exception-case-rulings.md, D4 addendum;
      parity row f_int32_overflow is a registered OCaml-target deviation);
    * Int64.to_int32 (int32FromInt64): the low 32 bits — Int64.toInt32
@@ -1512,7 +1495,7 @@ def lemInt32Gtb (a b : Int32) : Bool := decide (b < a)
 def lemInt32Gteb (a b : Int32) : Bool := decide (b <= a)
 def lemInt32OfNat (n : Nat) : Int32 := Int32.ofNat n
 def lemInt32OfInt (i : Int) : Int32 := Int32.ofInt i
-/- int32FromNumeral: lem's `n2w`/`word_of_int` — modular (D4, above). -/
+/- int32FromNumeral: lem's `n2w`/`word_of_int` — modular (see above). -/
 def lemInt32FromNumeral (n : Nat) : Int32 := Int32.ofNat n
 def lemInt32ToInt (n : Int32) : Int := n.toInt
 def lemInt32FromInt64 (n : Int64) : Int32 := n.toInt32
@@ -1523,7 +1506,7 @@ def lemInt64Gtb (a b : Int64) : Bool := decide (b < a)
 def lemInt64Gteb (a b : Int64) : Bool := decide (b <= a)
 def lemInt64OfNat (n : Nat) : Int64 := Int64.ofNat n
 def lemInt64OfInt (i : Int) : Int64 := Int64.ofInt i
-/- int64FromNumeral: lem's `n2w`/`word_of_int` — modular (D4, above). -/
+/- int64FromNumeral: lem's `n2w`/`word_of_int` — modular (see above). -/
 def lemInt64FromNumeral (n : Nat) : Int64 := Int64.ofNat n
 def lemInt64ToInt (n : Int64) : Int := n.toInt
 def lemInt64FromInt32 (n : Int32) : Int64 := n.toInt64
@@ -1552,8 +1535,8 @@ def int64Asr (x : Int64) (n : Nat) : Int64 := x >>> Int64.ofNat n
 /- ============================================================ -/
 
 /-- zarith `Z.of_string` (lem Num_extra.integerOfString = Nat_big_num.of_string),
-    grammar as MEASURED against the OCaml reference (parity-fix slice
-    2026-09-03, census N6; probe p_num_parse): an optional single sign
+    grammar as MEASURED against the OCaml reference (parity probe
+    p_num_parse): an optional single sign
     (`+`/`-`), an optional base prefix `0x`/`0X` (16), `0o`/`0O` (8),
     `0b`/`0B` (2), then digits of that base in which `_` may appear after
     the first digit ("1_000", "1__0", "1_" accepted; "_1", "0x_1" not);
@@ -1622,7 +1605,7 @@ abbrev float32 := LemFloat32
 @[never_extract] def realFromInt (_ : Int) : LemReal := panic! "real: not supported in Lean backend"
 @[never_extract] def realFromFrac (_ _ : Int) : LemReal := panic! "real: not supported in Lean backend"
 /-- lem Debug.print_string / print_endline: the OCaml reference prints to
-    stdout; pure Lean code cannot (divergence census X2). -/
+    stdout; pure Lean code cannot. -/
 @[never_extract] def debugPrintString (_s : String) : Unit :=
   panic! "Debug.print_string: unsupported on the Lean target"
 @[never_extract] def debugPrintEndline (_s : String) : Unit :=
@@ -1631,14 +1614,13 @@ end LemUnsupported
 
 /- lem `natFromNatural` / `intFromInteger`: the IDENTITY on Lean's unbounded
    Nat/Int. lem's semantics for `nat`/`int` is the prover-side, unbounded
-   one (library/num.lem:104-111; exception-case rulings X3, 2026-09-03);
-   the OCaml target's `Nat_big_num.to_int` raising `Failure
+   one (library/num.lem:104-111; [USER 2026-09-03] exception-case rulings,
+   X3); the OCaml target's `Nat_big_num.to_int` raising `Failure
    "int_of_big_int"` outside [-2^62, 2^62-1] is an OCaml-execution limit,
-   not lem's meaning. HISTORY: the parity-fix slice (3c88f0d) made these
-   two conversions fail loudly at the OCaml bound; [USER 2026-09-03]
-   "ocaml limits that are hardcoded thanks to ocaml-level execution issues
-   are also forbidden, the real thing is the logical semantics" — removed
-   (fuel-parameter arc, 2026-09-04). The parity runner's `f_int_of_big_num`
+   not lem's meaning — [USER 2026-09-03] "ocaml limits that are hardcoded
+   thanks to ocaml-level execution issues are also forbidden, the real
+   thing is the logical semantics" (an earlier rep failed loudly at the
+   OCaml bound). The parity runner's `f_int_of_big_num`
    row is a registered OCaml-target deviation (parity/expected_failures.txt).
    natFromNumeral / intFromNumeral keep their literal-passthrough reps. -/
 def lemIntFromInteger (i : Int) : Int := i
@@ -1677,9 +1659,9 @@ def bitSeqBinopAux (binop : Bool → Bool → Bool) (s1 : Bool) (bl1 : List Bool
   | b1 :: bl1', b2 :: bl2' => (binop b1 b2) :: bitSeqBinopAux binop s1 bl1' s2 bl2'
 termination_by bl1.length + bl2.length
 
-/- Nat bitwise operations (used by transform.lem compatibility layer).
-   Named lemNat* (library-parity-coverage 2026-09-30, finding LP3
-   [AGENT]): as `natLand`/`natLor`/`natLxor`/`natLsl`/`natAsr` they
+/- Nat bitwise operations (the reps of word.lem's nat bitwise functions
+   and of transform.lem's). Named lemNat*: as
+   `natLand`/`natLor`/`natLxor`/`natLsl`/`natAsr` they
    collided with the generated `Lem_Word.natLand`/... — every direct call
    of Word's nat bitwise functions from a lem program was an "Ambiguous
    term" Lean build error. Regression: parity probe p_lib_word_int_nat. -/
@@ -1692,10 +1674,9 @@ def lemNatLsr (a b : Nat) : Nat := a >>> b
 def lemNatAsr (a b : Nat) : Nat := a >>> b  -- same as lsr for Nat (unsigned)
 
 /- Int bitwise operations: UNBOUNDED two's complement, the Lean reps of
-   word.lem's intLand/intLor/intLxor/intLsl/intAsr (library-parity-coverage
-   2026-09-30, finding LP4 [AGENT]; ACCEPTED as a ruled OCaml-target
-   deviation: [USER 2026-09-30] "Yes, agree on 1-3. Go ahead", under the
-   2026-09-03 X3 ruling; probe p_word_bitwise_wide, class ruled). The OCaml
+   word.lem's intLand/intLor/intLxor/intLsl/intAsr (a ruled OCaml-target
+   deviation: [USER 2026-09-30] "Yes, agree on 1-3. Go ahead"; probe
+   p_word_bitwise_wide, class ruled). The OCaml
    reference is native 63-bit `land`/`lor`/`lxor`/`lsl`/`asr`; these agree
    with it on its whole domain and DIFFER where OCaml wraps (the accepted
    deviation). Lem's
@@ -1724,8 +1705,8 @@ def lemIntAsr (a : Int) (n : Nat) : Int := a >>> n  -- Int.shiftRight: floor div
 /- ============================================================ -/
 /- Deep lists: explicitly tail-recursive library functions       -/
 /- ============================================================ -/
-/- Parity-fix slice 2026-09-03 (F7; [USER] exception class (b): Lean must
-   not fail where the OCaml reference succeeds). The compiled Lean binary
+/- [USER 2026-09-03] exception class (b): Lean must not fail where the
+   OCaml reference succeeds. The compiled Lean binary
    has a fixed native stack; OCaml 5 grows its stack. A 300 000-element
    sweep over the library (tests/comprehensive/parity/probes/p_list_deep.lem,
    record) aborted with "Stack overflow detected" on: core `List.zip`
@@ -1840,14 +1821,13 @@ def lemStringFromNatHelper (n : Nat) (acc : List Char) : List Char :=
 termination_by n
 decreasing_by exact Nat.div_lt_self (by omega) (by omega)
 
-/- String_extra.chr (library-parity-coverage 2026-09-30, finding LP8
-   [AGENT]): a lem `char` is a byte (OCaml `char`; HOL CHR and Isabelle
+/- String_extra.chr: a lem `char` is a byte (OCaml `char`; HOL CHR and Isabelle
    char_of are 8-bit). The OCaml reference `Char.chr` raises
    `Invalid_argument "Char.chr"` outside 0..255; the previous rep
    `Char.ofNat` returned the Unicode scalar (chr 256 = 'Ā', ord of it 256)
    and succeeded where the reference fails. Fail loudly instead.
    (0..255 → Char.ofNat as before; bytes 128..255 as Unicode scalars are
-   the F2 strings-are-bytes arc, not this fix.) Regression: failure probe
+   the strings-as-bytes design, TODO item 31, not this fix.) Regression: failure probe
    f_lib_chr_range. -/
 def lemChr (n : Nat) : Char :=
   if n < 256 then Char.ofNat n else failwithI "Invalid_argument(\"Char.chr\")"
@@ -1901,7 +1881,7 @@ def mwordTimes {n : Nat} (a b : BitVec n) : BitVec n := a * b
 /- Division by zero: the OCaml reps (ocaml-lib/lem.ml:240-241 `word_udiv`
    / `word_mod` = Nat_big_num.div / modulus; `signedDivide` is a lem
    definition over them) raise Division_by_zero; BitVec.udiv/umod/sdiv
-   totalise to 0 — fail loudly instead (divergence census D1). -/
+   totalise to 0 — fail loudly instead. -/
 def mwordUnsignedDivide {n : Nat} (a b : BitVec n) : BitVec n :=
   if b == 0 then failwithI "Division_by_zero" else BitVec.udiv a b
 def mwordSignedDivide {n : Nat} (a b : BitVec n) : BitVec n :=
@@ -1921,8 +1901,7 @@ def mwordConcat {n m result : Nat} (a : BitVec n) (b : BitVec m) : BitVec result
   (a ++ b).setWidth result
 def mwordExtract {n result : Nat} (lo hi : Nat) (w : BitVec n) : BitVec result :=
   -- Lem passes (lo, hi, word): bits lo..hi, zero-extended/truncated to the
-  -- result width (library-parity-coverage 2026-09-30, finding LP7
-  -- [AGENT]). The OCaml reference (lem.ml word_extract: hi-lo+1 bits from
+  -- result width. The OCaml reference (lem.ml word_extract: hi-lo+1 bits from
   -- lo) and HOL (words$word_extract hi lo, then w2w) both mask by hi; the
   -- previous rep ignored hi as Isabelle's Word.slice does, and returned
   -- bits beyond hi whenever the result type is wider than hi-lo+1
@@ -1946,8 +1925,7 @@ def mwordLength {n : Nat} (_ : BitVec n) : Nat := n
 def mwordToHex {n : Nat} (w : BitVec n) : String := BitVec.toHex w
 
 /- Bitlist conversion -/
-/- Bit lists are MOST-significant bit first (library-parity-coverage
-   2026-09-30, finding LP6 [AGENT]): lem's own asserts
+/- Bit lists are MOST-significant bit first: lem's own asserts
    (machine_word.lem wordFromBitlist_test / bitlistFromWord_test:
    `wordFromBitlist [false;false;true;false] : mword ty4 = 2`), the OCaml
    reference (lem.ml wordFromBitlist/bitlistFromWord), Isabelle of_bl/to_bl

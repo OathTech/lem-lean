@@ -11,22 +11,21 @@ lean_lib LemLib where
 
 /-- Pset/Pmap representation invariants over bounded-exhaustive operation
     sequences + kernel-checked examples of the OCaml observables the ports
-    reproduce (parity-fix slice 2026-09-03). Building it IS running it. -/
+    reproduce. Building it IS running it. -/
 @[default_target]
 lean_lib LemLibTest where
   srcDir := "."
   globs := #[.one `LemLibTest]
 
 /-- Kernel-checked equalities between the tail-recursive list/string
-    rewrites and the definitions they replaced (parity-fix F7). -/
+    rewrites and the definitions they replaced. -/
 @[default_target]
 lean_lib LemLibTheorems where
   srcDir := "."
   globs := #[.one `LemLibTheorems]
 
 /-- Lookup-after-insert laws for the `Pmap`/`Fmap` port under a
-    strict-weak-order comparator (tails-and-pmap-laws slice 2026-09-05; the
-    refined-cerberus request §1): `WF`, `WF_add`, `find?_add_same`,
+    strict-weak-order comparator: `WF`, `WF_add`, `find?_add_same`,
     `find?_add_other`, the `Fmap` corollaries; kernel-only, `#print axioms`. -/
 @[default_target]
 lean_lib LemLibPmapLaws where

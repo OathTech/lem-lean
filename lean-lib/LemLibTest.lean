@@ -3,14 +3,8 @@ import Lean
 /-!
 # LemLibTest — property tests for the `Pset`/`Pmap` ports
 
-HISTORY: until the parity-fix slice (2026-09-03) this file carried the
-arc-6 S3 Fmap representation-change obligations — the retired assoc-list
-`Fmap` as a reference implementation, kernel-checked lookup-equivalence
-theorems between it and the `Std.TreeMap`-indexed `Fmap`, and
-bounded-exhaustive property tests — plus the arc-14 set-coherence
-guards over the sorted-list set. Both representations are GONE: under
-the [USER 2026-09-03] zero-discrepancy ruling the set and map
-representations are verbatim ports of lem's OCaml runtime AVL trees
+Under the [USER 2026-09-03] zero-discrepancy ruling the set and map
+representations are Lean translations of lem's OCaml runtime AVL trees
 (ocaml-lib/pset.ml, pmap.ml; see the LemLib.lean section header), whose
 specification is the OCaml code itself. The load-bearing evidence is
 therefore the TWO-TARGET parity suite (tests/comprehensive/parity/,
@@ -137,7 +131,7 @@ def mapInvariantsHold (m : Pmap K2 Nat) : Bool :=
 /-! ## Kernel-checked examples of the OCaml observables the port reproduces -/
 
 /-- Pmap.add REPLACES a comparator-equal binding — new key and new value
-    (F3; pmap.ml:67-73): the noodle probe p_map_beq shape. -/
+    (pmap.ml:67-73; the parity probe p_map_beq shape). -/
 example : Pmap.bindings (Pmap.add cK2 ⟨1, 0⟩ 1 (Pmap.add cK2 ⟨1, 1⟩ 2 .Empty)) = [(⟨1, 0⟩, 1)] := by decide
 
 /-- Pset.add keeps the FIRST comparator-equal element (pset.ml:76-80). -/
@@ -152,7 +146,7 @@ example : Pmap.bindings ((Pmap.add cNat 3 "c" (Pmap.add cNat 1 "a" (Pmap.add cNa
 example : Pset.fold (fun x acc => x :: acc) (Pset.fromList cNat [2, 3, 1]) [] = [3, 2, 1] := by decide
 
 /-- Pmap.equal compares keys with the map's comparator and IGNORES lem's
-    key equality (pmap.ml:253-261, 296): the F3 `m1 = m2` row. -/
+    key equality (pmap.ml:253-261, 296). -/
 example : fmapEqualBy (fun (a b : K2) => a == b) (fun a b => a == b)
     (fmapAddBy cK2 ⟨1, 0⟩ 1 fmapEmpty) (fmapAddBy cK2 ⟨1, 1⟩ 1 fmapEmpty) = true := by decide
 
@@ -160,7 +154,7 @@ example : fmapEqualBy (fun (a b : K2) => a == b) (fun a b => a == b)
 example : Pset.setCase (Pset.fromList cNat [5]) "e" (fun _ => "s") "m" = "s" := by decide
 example : Pset.setCase (Pset.fromList cNat [5, 6]) "e" (fun _ => "s") "m" = "m" := by decide
 
-/-! ## Kernel computability through `join` (fuel-parameter arc, 2026-09-04)
+/-! ## Kernel computability through `join`
     `Pset.join`/`Pmap.join` are height-indexed structural recursions (they
     were well-founded, which the kernel cannot unfold — the consumer
     measured 17 closed-term `rfl` proofs blocked at `join`). Every closed
@@ -189,7 +183,7 @@ example : fmapElements (fmapDeleteBy cNat 3 (fmapAddBy cNat 1 10 (fmapAddBy cNat
 example : (setEmpty : Pset Nat) = Pset.Empty := rfl
 example : (fmapEmpty : Fmap Nat Nat) = Fmap.empty := rfl
 
-/-- `Ord LemOrdering` is the OCaml int order LT(-1) < EQ(0) < GT(1) (B2), and
+/-- `Ord LemOrdering` is the OCaml int order LT(-1) < EQ(0) < GT(1), and
     a set of orderings built from it behaves as a set. -/
 example : compare LemOrdering.LT LemOrdering.EQ = .lt := by decide
 example : compare LemOrdering.GT LemOrdering.EQ = .gt := by decide
@@ -199,7 +193,7 @@ example : Pset.elements (Pset.fromList (fun a b => defaultCompare a b)
 example : Pset.mem (fun a b => defaultCompare a b) LemOrdering.EQ
     (Pset.fromList (fun a b => defaultCompare a b) [LemOrdering.LT, .EQ]) = true := by decide
 
-/-- `lem_if` (B13) elaborates to the SAME kernel term as Lean's `if` on a
+/-- `lem_if` elaborates to the SAME kernel term as Lean's `if` on a
     Bool, nested and in both branches; so proofs about generated code see no
     difference. Checked on the elaborated definitions, not just by `rfl`. -/
 def lemIfRef (b : Bool) (n : Nat) : Nat := if b then n + 1 else if !b then 7 else n
@@ -212,9 +206,9 @@ open Lean Elab Command in
 example : lemIfNew true 3 = 4 := rfl
 example : lemIfNew false 3 = 7 := rfl
 
-/-- LP4 (library-parity-coverage 2026-09-30; ACCEPTED, ruled OCaml-target deviation, [USER 2026-09-30]): the unbounded Int bitwise reps
-    agree with two's complement (the OCaml `land`/`lor`/`lxor` values), in
-    every sign combination; LP6: bit lists are MSB-first; LP7:
+/-- A ruled OCaml-target deviation ([USER 2026-09-30]): the unbounded Int
+    bitwise reps agree with two's complement (the OCaml `land`/`lor`/`lxor`
+    values), in every sign combination; bit lists are MSB-first;
     word_extract masks by hi. -/
 example : lemIntLand (-6) 3 = 2 ∧ lemIntLand 6 (-3) = 4 ∧ lemIntLand (-6) (-3) = -8 ∧ lemIntLand 12 10 = 8 := by decide
 example : lemIntLor (-6) 3 = -5 ∧ lemIntLor 6 (-3) = -1 ∧ lemIntLor (-6) (-3) = -1 ∧ lemIntLor 12 10 = 14 := by decide

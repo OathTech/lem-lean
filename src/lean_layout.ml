@@ -1,8 +1,7 @@
 (**************************************************************************)
 (*                        Lem                                             *)
 (*                                                                        *)
-(*  Lean backend: layout of the generated text (output-niceness S3-A,     *)
-(*  2026-10-03).                                                          *)
+(*  Lean backend: layout of the generated text.                          *)
 (*                                                                        *)
 (*  The Lem sources are copyright 2010-2025 by the Lem authors; see the   *)
 (*  licence header of lean_backend.ml.                                    *)
@@ -21,7 +20,7 @@
    declaration census of both consumers is the exit test.
 
    Lean's layout is column-sensitive. The shapes emitted here were checked
-   on Lean 4.32.2 (arc record §11); the rules relied on are:
+   on Lean 4.32.2; the rules relied on are:
    - the alternatives of one `match` must all start at a column ≥ the first
      alternative's column, and an alternative's right-hand side must start
      at a column ≥ its `|` — so every alternative starts its own line at the
@@ -115,8 +114,8 @@ let rec be w k (stack : (int * mode * doc) list) : sdoc Seq.t = fun () ->
              recomputed by each consumer, and each recomputation re-decided
              every Break-mode group that followed on the line: exponential
              in the number of sibling groups on a line that overflows the
-             width (backend-hardening record, 2026-10-03: a 47-wide
-             constructor pattern took over two minutes, 45 took none). *)
+             width (a 47-wide constructor pattern took over two minutes,
+             45 took none). *)
           let flat = Seq.memoize (be w k ((i, Flat_m, a) :: z)) in
           if fits (w - k) flat then flat ()
           else be w k ((i, Break_m, a) :: z) ())
@@ -804,7 +803,7 @@ let parse_unit (toks : tok array) : doc =
    so that the unit is the text that built before the pass:
    - a multi-line comment followed by another token on its line (the
      backend no longer folds the comments inside expressions) is folded
-     onto one line, as it was before S3-A;
+     onto one line, as it was before this pass existed;
    - a line at column 0 that starts with a comment followed by code is the
      backend's marker for "this comment followed a line break in the
      source" (`inline_comments`); it is joined to the line before it, as

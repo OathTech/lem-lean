@@ -61,8 +61,9 @@
 (*  Backend_common infrastructure for identifier resolution and target    *)
 (*  representation handling.                                               *)
 (*                                                                        *)
-(*  Key design decisions:                                                  *)
-(*  - Block formatting is disabled (Lean 4 is whitespace-sensitive)       *)
+(*  Key design decisions (the reasons are in doc/lean-backend/DESIGN.md): *)
+(*  - The text is laid out by the backend's own passes (normalize_layout, *)
+(*    Lean_layout.reflow); Lem's block formatting is not used             *)
 (*  - UTF-8 output uses Meta_utf8 to avoid double-encoding (×, →, etc.)  *)
 (*  - Constructors are exported via 'export TypeName (Ctor1 Ctor2 ...)'   *)
 (*    after each inductive definition                                     *)
@@ -71,17 +72,17 @@
 (*    types (parameters become indices with Type 1 universe)              *)
 (*  - Target-specific class methods ({hol}, {coq}, etc.) are filtered     *)
 (*    from both class and instance definitions                            *)
-(*  - BEq is derived for types without function-typed constructor args    *)
-(*  - Inhabited instances are DERIVED per constructor (bounded with      *)
-(*    [Inhabited tv] where a type parameter is consumed); no DAEMON      *)
-(*    fallback — underivable types get NO instance (fail-closed,         *)
-(*    arc-8 S1)                                                          *)
-(*  - EVERY failure site (failwith-mapped constants, L_undefined         *)
-(*    literals) emits axiom-free failwithI (mirroring OCaml's raise;     *)
-(*    audit fix, arc-8); tyvar-typed sites                               *)
-(*    thread [Inhabited tv] binders onto the enclosing def's signature   *)
-(*    (monotone over the call graph); legacy failwith and the            *)
-(*    sorry-emission paths are gone (fail-closed, arc-8 S2)              *)
+(*  - BEq/Ord are derived structurally, with OCaml's comparison order;    *)
+(*    a function-typed field compares down to the closure, which fails    *)
+(*    loudly, as OCaml's compare does                                     *)
+(*  - Inhabited instances are DERIVED per constructor (bounded with       *)
+(*    [Inhabited tv] where a type parameter is consumed); underivable     *)
+(*    types get NO instance (fail-closed)                                 *)
+(*  - EVERY failure site (failwith-mapped constants, L_undefined          *)
+(*    literals) emits axiom-free failwithI (mirroring OCaml's raise);     *)
+(*    tyvar-typed sites thread [Inhabited tv] binders onto the enclosing  *)
+(*    def's signature (monotone over the call graph); no path emits a     *)
+(*    `sorry`                                                             *)
 (*                                                                        *)
 (**************************************************************************)
 
@@ -104,7 +105,7 @@ let print_and_fail l s =
    individually as \xHH would DECODE-SHIFT the text (Lean's \xHH is a
    Unicode scalar, not a byte). Control bytes below 0x20, which Lean
    literals cannot carry raw reliably, are hex-escaped. Paired with
-   lean_char_escape below (M3, 2026-08-31 backend quality review). *)
+   lean_char_escape below. *)
 let lean_string_escape s =
   let buf = Buffer.create (String.length s) in
   String.iter (fun c -> match c with
@@ -119,7 +120,7 @@ let lean_string_escape s =
   Buffer.contents buf
 ;;
 
-(* Char-literal escaping for Lean output (M3): OCaml's Char.escaped
+(* Char-literal escaping for Lean output: OCaml's Char.escaped
    emits DECIMAL escapes ('\200'), which are invalid Lean. Mirror
    Char.escaped for the cases it got right (ASCII printables +
    named controls) and emit Lean hex escapes for the rest. A lem char
@@ -150,8 +151,8 @@ let lean_syntax_keywords = [
   "break"; "continue"; "try"; "finally"; "unless"; "suffices";
   "nomatch"; "nofun"; "coinductive"; "axiom"; "opaque"; "universe";
   "scoped"; "local"; "public"; "nonrec"; "omit";
-  (* parity-fix F8 (2026-09-03): tokens the previous table missed — each
-     was a probe-verified Lean parse error when emitted bare *)
+  (* tokens that are a Lean parse error when emitted bare (each
+     probe-verified) *)
   "from"; "termination_by"; "decreasing_by"; "elab"; "macro_rules"; "elab_rules";
   "initialize"; "builtin_initialize"; "declare_syntax_cat"; "register_option";
   "include"; "exposed";
@@ -159,11 +160,11 @@ let lean_syntax_keywords = [
   "none"; "some"; "true"; "false"; "default";
   "this"; "rfl"; "calc"; "decide"; "sorry";
   "pure"; "get"; "set"; "throw"; "panic"; "admit"; "trivial";
-  "lem_if";  (* LemLib's Bool-conditional token (B13) *)
+  "lem_if";  (* LemLib's Bool-conditional token *)
   (* Lean 4.32.2 additions (toolchain move, scripts/lean_keyword_probe.sh) *)
   "builtin_cbv_simproc"; "builtin_cbv_simproc_decl"; "cbv_eval"; "cbv_simproc"; "cbv_simproc_decl"; "deprecated_module"; "deprecated_syntax"; "idbg"; "inferInstanceAs"; "register_sym_dsimp"; "register_sym_simp"; "unlock_limits";
-  (* linksem 2026-09-28 (B5): every identifier-shaped core-grammar token
-     that fails as a binder on the pinned toolchain (linksem hit `matches`);
+  (* every identifier-shaped core-grammar token that fails as a binder on
+     the pinned toolchain (linksem's `matches` was one);
      derived and checked by scripts/lean_keyword_probe.sh, which fails if
      this list or library/lean_constants misses one. *)
   "add_decl_doc"; "assert_not_exists"; "assert_not_imported"; "bif";
@@ -190,7 +191,7 @@ let lean_syntax_keywords = [
   "with_weak_namespace"
 ]
 
-(* Supply transform (parity-fix F5/F6, 2026-09-03): a threaded VALUE is
+(* Supply transform: a threaded VALUE is
    either a synthesized variable (a draw result, a threaded call's or
    control form's joined value) or a pure/compound rendering. Keeping the
    variable NAME lets the application renderer receive real `Var`
@@ -198,13 +199,13 @@ let lean_syntax_keywords = [
    memo (identifier-form target reps rebuild the argument nodes). *)
 type lean_sval = SVar of string | SPure of Output.t
 let lean_sv_out = function SVar n -> Output.meta_utf8 n | SPure o -> o
-(* Arc-8 S1 (derived Inhabited instances, replacing the DAEMON fallback):
-   process-global census of the Inhabited instances this backend has
+(* Derived Inhabited instances: the process-global census of the
+   Inhabited instances this backend has
    emitted, keyed by type Path (modules are processed in dependency order
    within one lem invocation, so earlier types' instances are visible to
    later derivations — "cross-type dependencies resolve through the
    emitted instances themselves", design note
-   lem-lean doc/notes/2026-08-20_arc8-inhabited-threading-design.md rule 4).
+   doc/notes/2026-08-20_arc8-inhabited-threading-design.md rule 4).
    Each emitted instance is recorded as the list of type-parameter
    POSITIONS that carry an [Inhabited _] bound; [] = unconditional.
    Inh_none records a type whose derivation FAILED: fail-closed, NO
@@ -214,7 +215,7 @@ let lean_sv_out = function SVar n -> Output.meta_utf8 n | SPure o -> o
 type inh_status =
   | Inh_instances of int list list
   | Inh_none
-(* Arc-8 S1: per-type tier-2 derivation PLAN, computed by
+(* The per-type tier-2 Inhabited derivation PLAN, computed by
    lean_inhabited_prepass (in declaration order) and only RENDERED at
    emission time. Needed because the main emission walks definitions
    with fold_right — side effects run last-to-first (see the
@@ -228,7 +229,7 @@ type inh_plan =
   | Plan_record of string list  (* all fields derivable; bound set *)
   | Plan_none                   (* fail-closed: NO instance, no fallback *)
 
-(* ===== Arc-14 S2 B1: the backend analysis-state module (be:G3) =====
+(* ===== The backend analysis-state module =====
 
    EVERY module-level mutable cell OF LEAN_BACKEND.ML lives HERE — one
    declaration site, a stated lifetime class and invariant per field.
@@ -236,9 +237,7 @@ type inh_plan =
    documented at their homes: Backend_common.on_cr_simple_applied — the
    per-file callback this backend registers at lean_defs entry — and
    process_file.ml's pre-call module-name write into St.current_module_name;
-   both are the registered be:S15 interface residual.)
-   (Previously: ~22 refs scattered across 1,100 lines — the "hidden
-   global state machine" of the arc-14 backend audit.)
+   threading both through the Backend.Make signature is TODO item 6.)
 
    LIFETIME CLASSES:
      [file]        reset at every lean_defs entry (St.reset_per_file);
@@ -254,13 +253,11 @@ type inh_plan =
                    neutral value between definitions.
 
    REENTRANCY: emission is still effectful (the upstream-inherited
-   fold_right skeleton — the effect-free-emission rewrite is the parked
-   be:G3/S5 residual, priced L in the arc-14 disposition table), but
-   the whole mutable surface is now resettable in one call:
-   St.reset_invocation () gives a fresh backend within one process,
-   where previously a second invocation inherited unspecified state. *)
-(* Derived-size census entry (D2-enablers slice, 2026-09-04; mechanism
-   comment at lean_size_shape below). *)
+   fold_right skeleton), but the whole mutable surface is resettable in
+   one call: St.reset_invocation () gives a fresh backend within one
+   process. *)
+(* Derived-size census entry (mechanism comment at lean_size_shape
+   below). *)
 type size_status =
   | Size_fn of string     (* derived: the Lean name of the type (module-qualified for lem submodules) *)
   | Size_none of string   (* not derived: the reason, for the refusal message *)
@@ -287,8 +284,8 @@ module St = struct
      module opens are deferred to the enclosing top-level scope). *)
   let deferred_opens : string list ref = ref []
   (* [file] Set by process_file.ml before each lean_defs call — used for
-     namespace wrapping. (The S15 interface-hygiene residual: this is a
-     pre-call side channel no other backend needs.) *)
+     namespace wrapping (a pre-call side channel no other backend needs;
+     TODO item 6). *)
   let current_module_name : string ref = ref ""
   (* [invocation] The Inhabited-instance census (see the inh_status
      comment above). *)
@@ -315,7 +312,7 @@ module St = struct
   (* [render] Set while rendering a lifted def so the three def-assembly
      sites emit the reader binder. *)
   let reader_binder : bool ref = ref false
-  (* [render] Arc-8 S2: [Inhabited tv] instance-implicit binders for the
+  (* [render] The [Inhabited tv] instance-implicit binders for the
      def group being rendered (tyvar names in parameter-declaration
      order, from the threading census failwith_threaded below). *)
   let inhabited_binder : string list ref = ref []
@@ -326,10 +323,10 @@ module St = struct
   let fuel_emit : string option ref = ref None
   (* [render] All fuel'd defs of the block being rendered (one entry for
      a plain fuel'd def; every member for a fuel'd mutual block —
-     all-or-none, arc 3 B2). Self- and cross-member calls rewrite to
+     all-or-none). Self- and cross-member calls rewrite to
      '(worker lemFuel)'. *)
   let fuel_workers : (Types.const_descr_ref * string) list ref = ref []
-  (* [invocation] Fuel lifting (fuel-parameter arc, 2026-09-04): the set of
+  (* [invocation] Fuel lifting: the set of
      defs that (transitively) reach a fuel'd constant or a
      `declare {lean} fuel_consumer val` — every one takes the ambient fuel
      as an instance-implicit `[LemFuel]` binder. Grown to a fixpoint by
@@ -340,16 +337,16 @@ module St = struct
      worker/wrapper), so the def-assembly sites emit `[LemFuel]` and
      references to fuel-lifted constants are in scope (fuel_scope_check). *)
   let fuel_binder : bool ref = ref false
-  (* [file] Fuel-measure obligations (declare {lean} fuel_measure val;
-     fuel-measure slice, 2026-09-04): the generated `f_measure_sufficient`
+  (* [file] Fuel-measure obligations (declare {lean} fuel_measure val):
+     the generated `f_measure_sufficient`
      theorem statements of this module's measured functions, collected
      while the main body renders (defs folds last-to-first, so in reverse
      declaration order) and emitted into the module's `_auxiliary.lean`
      — lem's own home for prover-side obligations — behind an import of
      the hand-written proofs module `<Module>_lemMeasureProofs`. *)
   let measure_obligations : Output.t list ref = ref []
-  (* [file] Point-free `function` tails (tails-and-pmap-laws slice,
-     2026-09-05; mechanism comment at lean_hoist_tail_binders): for every
+  (* [file] Point-free `function` tails (mechanism comment at
+     lean_hoist_tail_binders): for every
      measured or structural definition whose trailing `function` (or
      `fun`) binders were hoisted into its head, the hoisted binder names
      in order. Read while the fuel'd worker and its `_zero` lemma render:
@@ -359,8 +356,8 @@ module St = struct
   (* [render] The hoisted binders of the fuel'd definition being rendered
      (from tail_hoisted; [] for every other definition). *)
   let tail_sentinel_args : string list ref = ref []
-  (* [invocation] Derived-size census (D2-enablers slice, 2026-09-04;
-     mechanism comment at lean_size_shape): every generated type path of
+  (* [invocation] Derived-size census (mechanism comment at
+     lean_size_shape): every generated type path of
      the invocation -> whether the backend emits `t.lemSize` for it (with
      the Lean name a measure's `lemSize x` resolves to) or why not. Filled
      by lean_size_prepass over every typechecked module; read by the
@@ -371,8 +368,7 @@ module St = struct
      (injected reader binder name -> the seed def's own parameter name)
      that OVERRIDES the injected reader parameter name at every
      injection site within (lexically-scoped seeding, not dynamic
-     rebinding). N-ary rule (doc/lean-backend/2026-09-19_nary-reader-
-     seed-record.md): with N declared readers a seed def's first N
+     rebinding). With N declared readers a seed def's first N
      parameters are the seeds, positionally in the GLOBAL SORTED reader
      order — the one order lean_reader_get_params fixes for every
      lifted binder and consumer stub. None = not inside a seed def. *)
@@ -413,14 +409,14 @@ module St = struct
   (* [render] True while rendering a definition emitted only as a BLOCK
      COMMENT (a def whose Lean target uses an inline/target_rep — the
      `Comment` def form). Fail-closed generation-time errors (e.g. the
-     arc-10 set-comprehension rejection) must not fire for such dead
-     text; they emit the historical inert placeholder instead. *)
+     set-comprehension rejection) must not fire for such dead text; they
+     emit an inert placeholder instead. *)
   let rendering_comment = ref false
-  (* [invocation] B3: unique suffixes for the `_lemIfTailN` continuations
+  (* [invocation] Unique suffixes for the `_lemIfTailN` continuations
      (let-bound inside one expression, so uniqueness is only needed within
      it; the counter is never reused within an invocation). *)
   let if_tail_counter = ref 0
-  (* [file] B4: the type paths of the type_def group being emitted. *)
+  (* [file] The type paths of the type_def group being emitted. *)
   let current_type_block : Path.t list ref = ref []
   (* [render] Type-variable renames for the value definition being
      rendered (lean_tyvar_renames_for; mechanism comment there): Lem
@@ -461,7 +457,7 @@ module St = struct
     emitted_comments := [];
     current_type_block := []
 
-  (* Full reset — the reentrancy hook (be:G3): a second lem invocation in
+  (* Full reset — the reentrancy hook: a second lem invocation in
      one process starts from a fresh backend. Not called on the normal
      one-invocation path. *)
   let reset_invocation () =
@@ -504,7 +500,7 @@ end
 
 (* Location of a clause group's first clause's body — plumbed into the
    fail-closed guards below so refusals name WHERE, not just what
-   (arc-14 S2 B6, be:S6; Reporting_basic threads it into the message). *)
+   (Reporting_basic threads it into the message). *)
 let locn_of_clause_group g =
   match g with
   | (_, _, _, _, _, e) :: _ -> Typed_ast.exp_to_locn e
@@ -554,7 +550,7 @@ let lean_reader_param_name env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
   String.concat "" ["_lemReader_"; Name.to_string (Path.get_name cd.const_binding)]
 
-(* reader_consumer (declare {lean} reader_consumer val f, charter §4.2):
+(* reader_consumer (declare {lean} reader_consumer val f):
    a target_rep'd val declared a READER CONSUMER — its generated call
    sites pass ALL reader parameters as extra leading arguments (global
    sorted order, before f's own arguments), its callers get lifted by
@@ -567,23 +563,25 @@ let lean_reader_is_consumer env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
   Targetset.mem Target_lean cd.reader_consumer
 
-(* Effectful retirement (effect-retirement arc L2, 2026-09-01): the
-   `declare {lean} effectful val` mechanism — the call-site
-   effect-projection wraps + never_extract/noinline def armour — is
-   DELETED from this backend, and LemLib's effect-projection axiom is
-   deleted with it (see the HISTORY note in lean-lib/LemLib.lean). The
-   annotation itself (grammar word, `Decl_effectful`, the
-   `const_descr.effectful` field) is retained for other targets'
-   potential use; its Lean-target handling is this fail-closed
-   refusal. Fires for every {lean}-effectful-marked constant even if
-   unused; idempotent; run at every pre-pass entry. *)
+(* `declare {lean} effectful val` is refused on the Lean target. The
+   mechanism it named — call-site wraps crossing from a `BaseIO`
+   representation back into pure types through a library axiom — was
+   removed because that crossing was an unprovable trust boundary in every
+   downstream proof cone (DESIGN, "Zero axioms; effects as explicit
+   state"; the deletion record is
+   doc/lean-backend/2026-09-01_L2-deletion-record.md). The annotation
+   itself (grammar word, `Decl_effectful`, the `const_descr.effectful`
+   field) is retained for other targets' potential use; its Lean-target
+   handling is this fail-closed refusal. Fires for every
+   {lean}-effectful-marked constant even if unused; idempotent; run at
+   every pre-pass entry. *)
 let lean_effectful_retired_check env =
   List.iter (fun cref ->
       let cd = c_env_lookup Ast.Unknown env.c_env cref in
       if Targetset.mem Target_lean cd.effectful then
         raise (Reporting_basic.err_general true cd.spec_l
           (Printf.sprintf
-            "Lean backend: val %s — 'declare {lean} effectful' is retired on the lean target; use supply lifting instead ('declare {lean} supply val', the deterministic state-passing transform). The library's effect-projection axiom and the call-site wrap were deleted by the effect-retirement arc (charter: cerberus-lean lean_frontend/docs/2026-08-31_effect-retirement-design.md @64dd6efeb, section 7.1)"
+            "Lean backend: val %s — 'declare {lean} effectful' is retired on the lean target; use supply lifting instead ('declare {lean} supply val', the deterministic state-passing transform): an effectful target representation crossed from BaseIO back into pure types through a library axiom, which is gone (doc/lean-backend/DESIGN.md, \"Zero axioms; effects as explicit state\")"
             (Name.to_string (Path.get_name cd.const_binding)))))
     (c_env_all_consts env.c_env)
 
@@ -630,7 +628,7 @@ let lean_reader_consumer_check env =
 
 (* Binder names key on the constant's UNQUALIFIED name: two reader (or
    supply) constants with the same name in different modules would emit
-   the same binder and silently conflate (audit minor-1) — fail closed,
+   the same binder and silently conflate — fail closed,
    naming both. *)
 let lean_param_dup_check env (mechanism : string) (l : (Types.const_descr_ref * string) list) =
   let rec go = function
@@ -666,10 +664,8 @@ let lean_reader_get_params env =
    persists across modules (processed in dependency order). Instance defs
    are never lifted (their methods cannot take extra parameters); an
    instance method that uses a lifted/reader constant fails closed at
-   emission. Nested modules collect at Val_def granularity (the arc-2
-   audit fix; this comment previously still claimed the pre-fix coarse
-   all-defs-together lifting — corrected arc-14 S2 B6, be:N3). *)
-(* ===== Fuel lifting (fuel-parameter arc, 2026-09-04) =====
+   emission. Nested modules collect at Val_def granularity. *)
+(* ===== Fuel lifting =====
 
    Classic mechanism name: an instance-implicit READER of the ambient
    fuel. `declare {lean} fuel val f = `sentinel`` makes `f` a total
@@ -701,8 +697,7 @@ let lean_has_lean_rep env cref =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
   Target.Targetmap.apply_target cd.target_rep (Target.Target_no_ident Target.Target_lean) <> None
 
-(* ===== Fuel measures (declare {lean} fuel_measure val f = `expr`;
-   fuel-measure slice, 2026-09-04) =====
+(* ===== Fuel measures (declare {lean} fuel_measure val f = `expr`) =====
 
    Classic mechanism name: a DATA MEASURE instantiating the fuel — form
    (c) of DESIGN.md's "No magic values" for a fuel'd function. The
@@ -731,9 +726,9 @@ let lean_has_lean_rep env cref =
    build FAILS without it — no measured function ships without its
    theorem.
 
-   The HYPOTHESIS-CARRYING form (measure-hypothesis slice, 2026-09-05;
-   [USER 2026-09-05] "agree, go ahead with option 1" on D-C2-1 of the
-   cerberus C2 record): ``fuel_measure val f = `<measure>` assuming
+   The HYPOTHESIS-CARRYING form ([USER 2026-09-05] "agree, go ahead with
+   option 1"; doc/lean-backend/2026-09-05_measure-hypothesis-record.md):
+   ``fuel_measure val f = `<measure>` assuming
    `<H>` `` where H is a Lean Prop over the same parameters. The WRAPPER
    is unchanged (fuel-free: `def f x := f_lemFuel (<measure>) x`); the
    obligation gains H as the binder named `lemHyp`, placed immediately
@@ -767,7 +762,7 @@ let lean_has_lean_rep env cref =
    identifier in the measure that is not a parameter — a global Lean name
    must be qualified; every dotted COMPONENT of every identifier is tested
    against the forbidden names and `_root_` is refused: FM-root), FM-sizeOf (Lean's automatic `SizeOf` instances are
-   noncomputable — measured in this slice: `List._sizeOf_inst … has no
+   noncomputable — measured: `List._sizeOf_inst … has no
    executable code`; a measure must execute), FM-ambient
    (`LemFuel` in a measure), FM-literal / FM-const (a numeral, or any
    measure mentioning no parameter: not a DATA measure — a magic value),
@@ -835,7 +830,7 @@ let lean_fuel_measure_check env =
    digits, `'`, `.`, `!`, `?`; digits start a numeral; everything else —
    ASCII punctuation and every OTHER Unicode code point (`≤`, `∧`, `∀`,
    `→`, `≠`, `∈`, `¬`, `×`: the operators a Prop is written with) —
-   passes through unchanged. (Before the measure-hypothesis slice every
+   passes through unchanged. (Before the hypothesis form existed every
    non-ASCII byte was an identifier character, which made `2 ≤ b` the
    free variable `≤`; a measure had no need of Unicode operators.) *)
 type lean_measure_token = LM_ident of string | LM_num of string | LM_other of string
@@ -859,8 +854,8 @@ let lean_utf8_decode (m : string) (i : int) : int * int =
    (4.28.0 :100–118, 4.32.2 :108–118, identical): Latin-1 supplement
    letters but × ÷, Latin Extended-A, Greek but λ/Π/Σ, Coptic, polytonic
    Greek, the letterlike block, script/double-struck/fraktur, the
-   subscript ranges and U+2C7C (pre-merge audit F4 added the first two
-   ranges and U+2C7C; without them `ñ` passed through as an operator). *)
+   subscript ranges and U+2C7C (without the first two ranges and U+2C7C,
+   `ñ` passed through as an operator). *)
 let lean_is_letter_like (c : int) : bool =
   (0xc0 <= c && c <= 0xff && c <> 0xd7 && c <> 0xf7)          (* Latin-1 supplement letters but × ÷ *)
   || (0x100 <= c && c <= 0x17f)                               (* Latin Extended-A *)
@@ -909,8 +904,8 @@ let lean_measure_tokens (m : string) : lean_measure_token list =
     end in
   go 0 []
 
-(* Derived-size census lookup (D2-enablers; mechanism comment at
-   lean_size_shape, below). *)
+(* Derived-size census lookup (mechanism comment at lean_size_shape,
+   below). *)
 let size_census_lookup (p : Path.t) : size_status option =
   Option.map snd (List.find_opt (fun (q, _) -> Path.compare p q = 0) !St.size_census)
 
@@ -930,7 +925,7 @@ let lean_render_param_expr (kind : lean_param_expr_kind) (d : Types.type_defs) (
   let mentions = ref 0 in
   let starts_with pre s =
     String.length s >= String.length pre && String.sub s 0 (String.length pre) = pre in
-  (* `lemSize x` (D2-enablers slice; mechanism comment at lean_size_shape):
+  (* `lemSize x` (mechanism comment at lean_size_shape):
      the derived size of the parameter x's type — resolved through the
      size census to `<Type>.lemSize x`; refused when x is not a parameter
      (FM-size-param) or its type has no derived size (FM-size-type, with
@@ -984,7 +979,7 @@ let lean_render_param_expr (kind : lean_param_expr_kind) (d : Types.type_defs) (
         | Some i -> String.sub t 0 i, String.sub t i (String.length t - i)
         | None -> t, "" in
       (* the forbidden names are tested on EVERY dotted component, not the
-         head only, and `_root_` is refused outright — pre-merge audit M1:
+         head only, and `_root_` is refused outright:
          `_root_.LemFuel.fuel + 0 * List.length l` and `_root_.sizeOf l`
          passed the head-only checks (the first compiled to a
          fuel-DEPENDENT wrapper whose obligation is false; the second was
@@ -1061,7 +1056,7 @@ let lean_render_param_expr (kind : lean_param_expr_kind) (d : Types.type_defs) (
     | LPE_measure, [LM_num _] ->
       raise (Reporting_basic.err_general true l
         (Printf.sprintf
-          "Lean backend: the %s of %s is the numeral `%s` (FM-literal: a literal fuel is a magic value — [USER 2026-09-03] \"any and all magic values that are hardcoded and can't be quantified over are definitionally bugs\"; a fuel measure is an expression over the parameters %s, e.g. `List.length xs + 1`)"
+          "Lean backend: the %s of %s is the numeral `%s` (FM-literal: a literal fuel is a magic value, forbidden by design — doc/lean-backend/DESIGN.md, \"No magic values\"; a fuel measure is an expression over the parameters %s, e.g. `List.length xs + 1`)"
           what fname (String.trim measure) (if params = [] then "(none)" else param_names)))
     | LPE_measure, _ ->
       raise (Reporting_basic.err_general true l
@@ -1102,8 +1097,7 @@ let lean_fuel_consumer_check env =
             cname)))
     (c_env_all_consts env.c_env)
 
-(* ===== Structural recursion (declare {lean} structural val;
-   structural-declare slice, 2026-09-04) =====
+(* ===== Structural recursion (declare {lean} structural val) =====
 
    Classic mechanism name: STRUCTURAL RECURSION, checked by Lean's own
    termination checker — the admissible form (c) of DESIGN.md's "No magic
@@ -1122,7 +1116,7 @@ let lean_fuel_consumer_check env =
    the offending call; where it finds one and Lean's checker still
    disagrees, the Lean BUILD fails (`failed to infer structural
    recursion` / `Cannot use parameter …`) — that is the fail-closed
-   backstop, exactly as for `fuel_consumer` (N1). Contrast
+   backstop, exactly as for `fuel_consumer`. Contrast
    `declare {lean} termination_argument f = automatic` (lem's upstream
    vocabulary, honoured by this backend as a plain `def` with NO clause):
    Lean tries structural recursion and then well-founded recursion — a
@@ -1191,7 +1185,7 @@ let lean_fuel_prepass env (ds : def list) =
       else
         let used = (add_def_entities target false empty_used_entities d).used_consts_set in
         (defined, used) :: acc
-    (* D2-enablers (2026-09-04): an inductive relation whose premises
+    (* An inductive relation whose premises
        reach the ambient fuel takes `[LemFuel]` as an inductive PARAMETER
        (Lean allows an instance-implicit binder on an inductive; the
        constructors' premises then resolve the ambient from it) — so the
@@ -1235,7 +1229,7 @@ let lean_reader_prepass env (ds : def list) =
        nested modules. Only Val_defs register their DEFINED constants:
        coarse add_def_entities on a whole Module def would also sweep class
        methods, val-spec-only constants, and indreln relation names into
-       the lifted set (audit finding, 2026-08-18), and caller-side
+       the lifted set, and caller-side
        injection would then poison their uses program-wide. Instances are
        skipped (fail-closed at emission); Class/Val_spec/Indreln/etc.
        cannot be lifted — a reader use inside an indreln rule or lemma is
@@ -1285,8 +1279,8 @@ let lean_reader_prepass env (ds : def list) =
    [let (v, s') := LemLib.supplySplit s] with [supplySplit s = (s, s+1)].
    The transform is DETERMINISTIC state-passing only: it introduces
    let-bindings, tuples, and supplySplit applications — no
-   nondeterminism constructor exists anywhere in its emission
-   (effect-retirement charter obligation O7), and every position it
+   nondeterminism constructor exists anywhere in its emission, and
+   every position it
    cannot thread is a fail-closed generation-time error, never a
    fallback (guards G-λ, G-bare, G-inst, G-rel, G-arity, G-infix in
    the emission code below). *)
@@ -1371,7 +1365,7 @@ let collect_cr_simple_import (is_library : bool) (id_str : string) =
          "LemUnsupported"] in
       (* a module name: an upper-case letter, then letters, digits, `_`
          (a rep such as `(fun (p : Nat × Nat) => (p).1)` has a dot too, and
-         its prefix is no module; audit fixes 2026-10-03) *)
+         its prefix is no module) *)
       let is_module_name m =
         String.length m > 0 && m.[0] >= 'A' && m.[0] <= 'Z'
         && String.for_all (fun c ->
@@ -1397,7 +1391,7 @@ let tnvar_kind = function
 let check_beq_target_rep c_descr =
   match Target.Targetmap.apply_target c_descr.target_rep (Target.Target_no_ident Target.Target_lean) with
   | Some (CR_infix (_, _, _, ident)) ->
-    (* Compare the TRIMMED rendering (arc-14 S2 B6, be:S9): lex_skips
+    (* Compare the TRIMMED rendering: lex_skips
        leak into Ident.to_string (the historical " ==" variant), so the
        raw string is a whitespace artifact any upstream rendering change
        would silently perturb. Trimming keys the semantics on the
@@ -1429,7 +1423,7 @@ let lean_qualified_name name_str =
     | [] -> name_str
     | ns -> String.concat "." (List.rev ns @ [name_str])
 
-(* ===== Arc-8 S1: Inhabited derivation analysis (pre-pass side) =====
+(* ===== Inhabited derivation analysis (pre-pass side) =====
    Pure analysis helpers shared by the pre-pass (which computes the
    census + tier-2 plans in DECLARATION order) and the emission code
    (which only renders). Design note:
@@ -1477,8 +1471,8 @@ let find_safe_ctor_for_mutual mutual_paths ctors =
         not (List.exists (src_t_references_paths mutual_paths) args)
       ) ctors
 
-(* Tier-1/tier-2 split (arc-8 S1). Tier 1 — unchanged from the DAEMON
-   era — covers: non-parameterized types with a safe or safe-indirect
+(* Tier-1/tier-2 split. Tier 1 covers: non-parameterized types with a
+   safe or safe-indirect
    constructor (or record/abbrev/opaque texps), and parameterized
    variants with a nullary constructor. Everything else is tier 2:
    per-constructor bounded derivation. *)
@@ -1494,11 +1488,10 @@ let inhabited_needs_tier2 mutual_paths ((_, tnvar_list, path, t, _)) : bool =
               let args = Seplist.to_list src_ts in
               not (List.exists (src_t_is_directly_mutual [path]) args)) ctors))
       | Te_opaque ->
-        (* Arc-8 S2 (D4): user-module opaque types are fail-closed — no
-           constructors to derive through, so tier 2 records Plan_none /
-           Inh_none (NO instance, no fallback; backend-visible demands
-           are generation-time errors). The former non-parameterized
-           `default := sorry` fallback instance is gone. *)
+        (* User-module opaque types are fail-closed — no constructors to
+           derive through, so tier 2 records Plan_none / Inh_none (NO
+           instance, no fallback; backend-visible demands are
+           generation-time errors). *)
         true
       | _ -> false
   else
@@ -1508,7 +1501,7 @@ let inhabited_needs_tier2 mutual_paths ((_, tnvar_list, path, t, _)) : bool =
           Seplist.to_list src_ts = []) (Seplist.to_list seplist))
       | _ -> true
 
-(* Arc-8 S1 derivability analysis (design note rules 2 and 4) for a
+(* Derivability analysis (design note rules 2 and 4) for a
    constructor-field type. Returns Some bound-tyvar-names — the
    [Inhabited tv] bounds the field's default needs — or None (field not
    derivably inhabitable). Recursively: type variables induce a bound;
@@ -1588,7 +1581,7 @@ let inhabited_bounds_to_positions tnvar_list (bounds : string list) : int list =
       if List.mem (tnvar_to_string tv) bounds then i :: tail else tail
   in go 0 tnvar_list
 
-(* Tier-2 plan for one type (arc-8 S1): one entry per usable
+(* Tier-2 plan for one type: one entry per usable
    constructor, in declaration order; Plan_none = fail-closed. *)
 let inhabited_tier2_compute (pending : Path.t list) ((_, _, _, t, _)) : inh_plan =
   match t with
@@ -1621,7 +1614,7 @@ let skip_inhabited_for_type_env env t path =
       Target.Targetmap.apply_target td.Types.type_target_rep
         (Target.Target_no_ident Target.Target_lean) <> None
 
-(* Arc-8 S1 Inhabited pre-pass: computes the instance census and the
+(* Inhabited pre-pass: computes the instance census and the
    tier-2 derivation plans for a whole file IN DECLARATION ORDER,
    before emission (which walks definitions with fold_right, i.e.
    last-to-first side effects — the lean_reader_prepass /
@@ -1688,19 +1681,18 @@ let lean_inhabited_prepass env (ds : def list) =
     | _ -> ()
   in List.iter walk ds
 
-(* ===== Arc-8 S2: failwith -> failwithI + selective [Inhabited] threading =====
+(* ===== failwith -> failwithI + selective [Inhabited] threading =====
    Design note doc/notes/2026-08-20_arc8-inhabited-threading-design.md,
    section S2 (rules 1-6). EVERY failure site (failwith-mapped constants,
-   plus the L_undefined literals from pattern compilation) now emits an
-   Inhabited-backed failwithI (audit fix: L_undefined too mirrors
-   OCaml's `failwith m`, src/backend.ml:864) — never legacy failwith,
-   never sorry, never a silent default. Sites whose type mentions free
-   type variables that are
-   NOT discharged by the S1 instance census induce [Inhabited tv]
+   plus the L_undefined literals from pattern compilation) emits an
+   Inhabited-backed failwithI (L_undefined too mirrors OCaml's
+   `failwith m`, src/backend.ml:864) — never a silent default. Sites
+   whose type mentions free type variables that are
+   NOT discharged by the instance census induce [Inhabited tv]
    instance-implicit binders on the ENCLOSING def's signature, computed
    here as a monotone fixpoint over the call graph (a caller that passes
    its own free tyvar into a threaded position inherits the binder).
-   Instance-implicit binders need no call-site edits (S0 probe fact 2);
+   Instance-implicit binders need no call-site edits;
    the pass edits signatures only. Fail-closed guards (rules 3-4):
    - a tyvar failure site inside a generated instance method (binders
      impossible there) is a generation-time error naming the instance;
@@ -1713,13 +1705,13 @@ let lean_inhabited_prepass env (ds : def list) =
 module ExpW = Exps_in_context(struct let env_opt = None let avoid = None end)
 
 (* Every name BOUND anywhere inside an expression — pattern binders of
-   funs/matches/lets/do-lines/quantifiers, compiled or not (arc-14
-   re-mark RG1, be:S2: the reserved-name scan must cover CLAUSE BODIES —
-   the parameter-only scan missed body-level binders, and a body binder
-   named lemFuel/_lemReader_* silently shadows the synthesized binder at
-   self-call/injection sites; A' witness: use2 100 (1,2) = 5, not 103).
-   Conservative over-collection is fine: the consumer only greps for the
-   reserved names. *)
+   funs/matches/lets/do-lines/quantifiers, compiled or not. The
+   reserved-name scan must cover CLAUSE BODIES: a body binder named
+   lemFuel/_lemReader_* silently shadows the synthesized binder at the
+   self-call/injection sites just as a parameter does (a parameter-only
+   scan once let such a program compile and run wrong). Conservative
+   over-collection is fine: the consumer only greps for the reserved
+   names. *)
 let rec exp_bound_names (e : exp) : string list =
   let pat_names p =
     List.map (fun a -> Name.to_string (Name.strip_lskip a.term))
@@ -2048,7 +2040,7 @@ let lean_structural_assign
          else String.concat "\n" per_param)))
 
 (* Types.t analog of derive_field_bounds: which tyvars must carry an
-   [Inhabited tv] bound for the type to be synthesizable from the S1
+   [Inhabited tv] bound for the type to be synthesizable from the
    instance census. Some [] = discharged unconditionally; Some tvs =
    discharged given [Inhabited tv] for each; None = not derivable at all
    (an Inh_none-census type in a demanded position). Type abbreviations
@@ -2094,7 +2086,7 @@ let rec typ_inhabited_bounds (d : Types.type_defs) (t : Types.t) : string list o
                 (Some []) e)
           None entries
 
-(* ===== Arc-10 S2: derived structural comparisons for mutual blocks =====
+(* ===== Derived structural comparisons for mutual blocks =====
    Shape analysis for constructor-field types, deciding how a derived
    BEq/compare body compares each field. Computed on SEMANTIC types
    (Types.t, head-normalized) so type abbreviations can never hide a
@@ -2107,7 +2099,7 @@ type cmp_shape =
   | CSoption of Types.t * cmp_shape          (* mutual option helper *)
   | CSsum of (Types.t * cmp_shape) * (Types.t * cmp_shape)  (* mutual sum helper *)
   | CSbad of string                          (* underivable: reason (fail-closed, type keeps its residual) *)
-  | CSfn                                     (* function-typed field (linksem audit A1): comparing it panics as OCaml's
+  | CSfn                                     (* function-typed field: comparing it panics as OCaml's
                                                 polymorphic compare raises "compare: functional value" on closures *)
 
 (* Does the (head-normalized) type reference any of the given paths? *)
@@ -2122,14 +2114,6 @@ let rec lean_typ_refs_paths (d : Types.type_defs) (paths : Path.t list) (t : Typ
       List.exists (fun q -> Path.compare p q = 0) paths ||
       List.exists (lean_typ_refs_paths d paths) ts
 
-(* Compute the comparison shape of a field type.
-   derived: the mutual siblings currently in the derived set (path ->
-   Lean name); sorried: sibling paths OUTSIDE the derived set (their
-   instances stay sorried, so a reference makes this type underivable —
-   underivability propagates rather than routing a "real" body through
-   a sorry instance). Containers with a Lean-instance comparison story
-   (list, maybe, either, tuples) recurse; any other head over a sibling
-   is fail-closed CSbad. *)
 (* Does the (head-normalized) type contain a function type anywhere? *)
 and lean_typ_has_fn (d : Types.type_defs) (t : Types.t) : bool =
   let t = Types.head_norm d t in
@@ -2138,10 +2122,18 @@ and lean_typ_has_fn (d : Types.type_defs) (t : Types.t) : bool =
     | Types.Ttup ts | Types.Tbackend (ts, _) | Types.Tapp (ts, _) -> List.exists (lean_typ_has_fn d) ts
     | Types.Tvar _ | Types.Tne _ | Types.Tuvar _ -> false
 
+(* Compute the comparison shape of a field type.
+   derived: the mutual siblings currently in the derived set (path ->
+   Lean name); residual: sibling paths OUTSIDE the derived set (their
+   instances are the loud residuals, so a reference makes this type
+   underivable — underivability propagates rather than routing a "real"
+   body through a residual instance). Containers with a Lean-instance
+   comparison story (list, maybe, either, tuples) recurse; any other head
+   over a sibling is fail-closed CSbad. *)
 let rec lean_cmp_shape (d : Types.type_defs) (derived : (Path.t * string) list)
-    (sorried : Path.t list) (t : Types.t) : cmp_shape =
-  let all_paths = List.map fst derived @ sorried in
-  (* linksem audit A1: a field type containing a function type is compared
+    (residual : Path.t list) (t : Types.t) : cmp_shape =
+  let all_paths = List.map fst derived @ residual in
+  (* A field type containing a function type is compared
      structurally down to the function (OCaml's polymorphic compare raises
      only when it REACHES a closure: `GOT []` compares fine). *)
   if not (lean_typ_refs_paths d all_paths t) && not (lean_typ_has_fn d t) then CSleaf
@@ -2151,7 +2143,7 @@ let rec lean_cmp_shape (d : Types.type_defs) (derived : (Path.t * string) list)
     match t'.Types.t with
       | Types.Tfn _ -> CSfn
       | Types.Ttup ts ->
-        let shs = List.map (lean_cmp_shape d derived sorried) ts in
+        let shs = List.map (lean_cmp_shape d derived residual) ts in
         (match List.find_map bad_of shs with
           | Some r -> CSbad r
           | None -> CStuple shs)
@@ -2162,19 +2154,19 @@ let rec lean_cmp_shape (d : Types.type_defs) (derived : (Path.t * string) list)
             then CSbad "mutual type applied to mutual-referencing arguments"
             else CSsibling name
           | None ->
-            if List.exists (fun q -> Path.compare p q = 0) sorried then
+            if List.exists (fun q -> Path.compare p q = 0) residual then
               CSbad "reference to a mutual sibling outside the derived set"
             else
               (match Name.to_string (Path.get_name p), ts with
                 | "list", [e] ->
-                  let sh = lean_cmp_shape d derived sorried e in
+                  let sh = lean_cmp_shape d derived residual e in
                   (match bad_of sh with Some r -> CSbad r | None -> CSlist (e, sh))
                 | "maybe", [e] ->
-                  let sh = lean_cmp_shape d derived sorried e in
+                  let sh = lean_cmp_shape d derived residual e in
                   (match bad_of sh with Some r -> CSbad r | None -> CSoption (e, sh))
                 | "either", [l; r] ->
-                  let shl = lean_cmp_shape d derived sorried l in
-                  let shr = lean_cmp_shape d derived sorried r in
+                  let shl = lean_cmp_shape d derived residual l in
+                  let shr = lean_cmp_shape d derived residual r in
                   (match bad_of shl, bad_of shr with
                     | Some r, _ | _, Some r -> CSbad r
                     | None, None -> CSsum ((l, shl), (r, shr)))
@@ -2183,8 +2175,7 @@ let rec lean_cmp_shape (d : Types.type_defs) (derived : (Path.t * string) list)
 
 let lean_cmp_shape_is_bad = function CSbad _ -> true | _ -> false
 
-(* ===== Backend-derived computable SIZE functions (D2-enablers slice,
-   2026-09-04; TODO row 15) =====
+(* ===== Backend-derived computable SIZE functions =====
 
    Classic mechanism name: a STRUCTURAL SIZE (the term-size measure of a
    nested inductive), derived by the backend for every recursive block of
@@ -2200,7 +2191,7 @@ let lean_cmp_shape_is_bad = function CSbad _ -> true | _ -> false
    in the SAME module as the measured function cannot be a hand-written
    Lean function (that module would have to import the generated one — a
    cycle), and Lean's automatic `sizeOf` is NONCOMPUTABLE (`List._sizeOf_inst
-   … has no executable code`, measured in the fuel-measure slice), while a
+   … has no executable code`, measured), while a
    measured wrapper must EXECUTE. So the backend derives the computable
    size itself, in the derived-comparison machinery's shape (one mutual
    block per type block, list/option/sum helpers per container element
@@ -2327,7 +2318,7 @@ let lean_size_block (env : env) (module_name : string)
           let paths = List.map fst siblings in
           let fields = List.concat_map (fun (_, _, _, ctors) -> List.concat_map snd ctors) members in
           let recursive = List.exists (fun ty -> lean_size_shape env.t_env siblings ty <> CSleaf) fields in
-          (* pre-merge audit MINOR-1: a block whose only sibling references
+          (* A block whose only sibling references
              sit under heads the derivation cannot count (`set t`, a user
              type applied to `t`) IS recursive — say so, and say why no size
              is derived, instead of calling it non-recursive *)
@@ -2347,7 +2338,7 @@ let lean_size_block (env : env) (module_name : string)
 let lean_size_prepass env (ds : def list) =
   let rec walk (ns : string list) (((d_aux, _), _, _) : def) =
     match d_aux with
-      (* pre-merge audit MINOR-2: a type with a Lean target_rep reaches the
+      (* A type with a Lean target_rep reaches the
          backend as a Comment-wrapped Type_def (the target's def_trans
          comments it out; the emitter renders the abbrev from the Comment
          case) — walk into it so the census carries the target_rep reason
@@ -2376,18 +2367,16 @@ let lean_thread_lookup (c : Types.const_descr_ref) : (int list * string list) op
    (DESIGN, "Debugging the analyses"). *)
 let lean_thread_debug = Sys.getenv_opt "LEM_THREAD_DEBUG" <> None
 
-(* ===== The reserved-name CAPTURE check (tails-and-pmap-laws audit response
-   F1, 2026-09-05) =====
+(* ===== The reserved-name CAPTURE check =====
 
    The reserved-binder scan (reserved_binder_check, emission) refuses a lem
-   BINDER named like a synthesized binder. It never looked at what a
+   BINDER named like a synthesized binder. It does not see what a
    referenced CONSTANT renders as: a constant whose Lean target_rep text is
    `lemTail` (or `lemFuel`) renders as exactly that identifier inside the
    worker, where the synthesized binder is in scope — captured silently.
-   Measured by the pre-merge audit: `declare lean target_rep function dl =
-   `lemTail`` referenced in a hoisted body evaluated 4 on Lean vs 1 on
-   OCaml (probe p11b); the same shape with `lemFuel` was accepted by the
-   ecf75b4 lem (p11c) — a pre-existing class. One generic check for every
+   Measured: `declare lean target_rep function dl = `lemTail`` referenced
+   in a hoisted body evaluated 4 on Lean vs 1 on OCaml; the same shape
+   with `lemFuel` was accepted too. One generic check for every
    reserved name: every constant the clause body references contributes
    the identifiers of its Lean rep (`CR_simple`/`CR_inline` bodies —
    every `Backend` ident in the rep expression —, `CR_infix`'s ident,
@@ -2494,7 +2483,7 @@ let rec exp_backend_idents (e : exp) : string list =
     List.concat_map (fun (Do_line (_, _, rhs, _)) -> exp_backend_idents rhs) dls
     @ exp_backend_idents e1
 
-(* ===== Comparison-dictionary threading (linksem 2026-09-29, audit A1) =====
+(* ===== Comparison-dictionary threading =====
    Lem's DEFAULT instances of Eq and SetType (and MapKeyType, via SetType)
    are OCaml's polymorphic comparison: available at every type, no
    dictionary. The Lean realisation of such a comparison at a type
@@ -2554,7 +2543,7 @@ let lean_cmp_class_of_lem (p : Path.t) : string option =
 
 let tnvar_name (tv : Types.tnvar) : string = Ulib.Text.to_string (Types.tnvar_to_rope tv)
 
-(* ---- Type-variable capture (backend-hardening record, 2026-10-03, item 3)
+(* ---- Type-variable capture
    A value definition's type variables are Lean implicit binders
    (`{a : Type}`), which shadow every global of that name in the
    definition's signature and body: `type t = …` with
@@ -2769,7 +2758,7 @@ let lean_cmp_prepass env (ds : def list) =
            Seplist.to_list_map (fun ((_, c, _, _, _, _):funcl_aux) -> c) funs)) vds
   done
 
-(* ===== Tuple instances of different arities (linksem 2026-09-29, B14) =====
+(* ===== Tuple instances of different arities =====
    Lem tuples are n-ary; Lean's are right-nested pairs, so the Lean type of
    a Lem triple whose LAST component is a pair, `a × b × (c × d)`, IS the
    Lean type of a quadruple. A class with instances at several tuple
@@ -2843,7 +2832,7 @@ let lean_tuple_inst_demands env (c : const_descr_ref id)
        near the bound is known. *)
     if depth > 50 then
       raise (Reporting_basic.err_general true c.id_locn
-        (Stdlib.(^) "Lean backend: internal error — B14 tuple-instance walk exceeded depth 50 at class "
+        (Stdlib.(^) "Lean backend: internal error — the tuple-instance walk exceeded depth 50 at class "
            (Path.to_string p)));
     if not (lean_tuple_inst_exempt p) then
       match Types.get_matching_instance env.t_env (p, ty) env.i_env with
@@ -2874,7 +2863,7 @@ let lean_tuple_inst_demands env (c : const_descr_ref id)
   !out
 
 (* The constant heading an expression node (constant, application spine,
-   infix operator): the node that receives B14's local instance bindings. *)
+   infix operator): the node that receives the local tuple-instance bindings. *)
 let lean_exp_head_const (e : exp) : const_descr_ref id option =
   let rec head e = match ExpW.exp_to_term e with
     | Constant c -> Some c
@@ -2886,7 +2875,7 @@ let lean_exp_head_const (e : exp) : const_descr_ref id option =
   | Infix (_, op, _) -> (match ExpW.exp_to_term op with Constant c -> Some c | _ -> None)
   | _ -> None
 
-(* ===== Sequencing `let _ = e1 in e2` (linksem 2026-09-29, B15) =====
+(* ===== Sequencing `let _ = e1 in e2` =====
    Lem's idiom for evaluating e1 for its effect (OCaml is strict: e1 runs,
    and a failure in e1 stops the program). Lean's compiler drops an unused
    pure let, and any Unit-typed value is interchangeable with `()`, so
@@ -2926,7 +2915,7 @@ let rec lean_seq_pattern (p : pat) : bool =
   | P_paren (_, p', _) | P_typ (_, p', _, _, _) -> lean_seq_pattern p'
   | _ -> false
 
-(* Public-readiness M4: a bare `sorry` target representation is a proof
+(* A bare `sorry` target representation is a proof
    hole, not a runtime boundary. Check declarations as well as uses, so
    an unused or partially applied constant cannot hide this escape.
    Raw Lean snippets remain trusted input, not a Lean parser/typechecker. *)
@@ -2996,8 +2985,8 @@ let lean_is_failwith_rep_env env cref =
      | _ -> false)
   | _ -> false
 
-(* ===== Unsupported-construct hook (parity-fix audit response, 2026-09-03;
-   [USER 2026-09-03] exception class (c): a construct the Lean backend does
+(* ===== Unsupported-construct hook ([USER 2026-09-03] exception class
+   (c): a construct the Lean backend does
    not support may be REFUSED at generation time with a loud,
    construct-naming error — never emitted as something that computes a
    different result or silently drops).
@@ -3013,7 +3002,7 @@ let lean_is_failwith_rep_env env cref =
    compiles); user code can never reach those instances without naming
    the type or an entry point, both refused. The marker is the whole
    protocol: adding a construct to the refused set is a one-line library
-   change, no backend table (the m9 direction). *)
+   change, no backend table. *)
 let lean_unsupported_prefix = "LemUnsupported."
 let lean_unsupported_ident_of_cref env cref : string option =
   let cd = c_env_lookup Ast.Unknown env.c_env cref in
@@ -3185,8 +3174,7 @@ let lean_thread_demand env (where_ : string) (sc : thread_scan) : string list =
    first-appearance order. Lem allows interleaved clauses of a rec-and
    block; Lean's equation compiler requires all clauses of one function
    in sequence. Keyed by cref, never by name string — two traversals
-   grouping under different keys are a drift trap (2026-08-31 backend
-   quality review, notes). *)
+   grouping under different keys are a drift trap. *)
 let lean_group_funcls (funcls : funcl_aux list)
     : (const_descr_ref * funcl_aux list) list =
   let order = ref [] in
@@ -3238,7 +3226,7 @@ let lean_supply_prepass env (ds : def list) =
         let defined = (add_def_entities target true empty_used_entities d).used_consts_set in
         if Types.Cdset.exists has_lean_rep defined then acc
         else begin
-          (* audit minor-2: a supply constant DEFINED by a live lem
+          (* A supply constant DEFINED by a live lem
              definition (no Lean target_rep, so the def would emit as
              an ordinary referenceable def) while its draw sites
              rewrite to LemLib.supplySplit is one constant with two
@@ -3278,8 +3266,8 @@ let lean_supply_prepass env (ds : def list) =
               || not (Types.Cdset.is_empty
                         (Types.Cdset.inter used !St.supply_lifted)) in
             if needs then begin
-              (* Parity-fix F6 (deviation-4 disposition, [USER] zero-
-                 discrepancy ruling): a drawing top-level VALUE binding
+              (* The [USER 2026-09-03] zero-discrepancy ruling: a drawing
+                 top-level VALUE binding
                  is evaluated ONCE at module initialisation by the OCaml
                  reference, while state-passing would re-run its draws at
                  every use — no faithful lifting exists, so it is refused
@@ -3397,7 +3385,7 @@ let lean_failwith_thread_prepass env (ds : def list) =
     | _ -> ()
   in List.iter guard ds
 
-(* Arc-8 S2: run the analysis pre-passes over EVERY typechecked module
+(* Run the analysis pre-passes over EVERY typechecked module
    of the invocation — including the non-output LIBRARY modules — in
    dependency order, BEFORE any emission (called from
    process_file.output). Rationale: analysis knowledge must span
@@ -3899,7 +3887,7 @@ let lean_escape_keyword s =
     String.concat "" ["\xC2\xAB"; s; "\xC2\xBB"]  (* «name» *)
   else s
 
-(* Record field names (backend-hardening record, 2026-10-03). A field is
+(* Record field names. A field is
    emitted in six places — the structure or single-constructor-inductive
    declaration, the projection, the literal, the update, the mutual-record
    accessor and the positional update of a mutual record — and every one
@@ -3919,8 +3907,8 @@ let lean_escape_keyword s =
 let lean_structure_generated_names =
   ["mk"; "rec"; "recOn"; "casesOn"; "noConfusion"; "noConfusionType"; "below"; "brecOn"]
 
-(* Lean 4.32.2 runtime limit (backend-hardening record, 2026-10-03, item
-   6): a binary built from a structure or constructor with 128 or more
+(* Lean 4.32.2 runtime limit: a binary built from a structure or
+   constructor with 128 or more
    fields segfaults when it allocates such an object at run time — the
    object header plus 128 pointer-sized fields is 1032 bytes, past the
    runtime allocator's 1024-byte small-object limit, and the allocation
@@ -4144,7 +4132,7 @@ let lean_default_instance_extra_constraints class_name =
   | _ -> []
 ;;
 
-(* Symbolic constant names (linksem 2026-09-28, B1). Lean cannot define or
+(* Symbolic constant names. Lean cannot define or
    reference a constant named `>>=`: `def >>= ...` is a parse error, and an
    infix `x >>= f` silently resolves to Lean's own `Bind` operator instead of
    the Lem constant. A SHOWN constant (no Lean target rep) whose Lean name is
@@ -4267,10 +4255,10 @@ let lean_tyvar_renames_for env (tv_set : Types.TNset.t) (pats : pat list) (exps 
    - function arguments: f (match ...) instead of f match ...
    - match arm bodies: | p => (match ...) to avoid consuming outer | arms
    - if conditions: if (match ...) then ... to avoid misparsing *)
-(* B3 (linksem 2026-09-28): if/else-if chains longer than this are split
+(* If/else-if chains longer than this are split
    into blocks of [lean_if_chain_block] arms (see the If renderer). Lean's
    limit is ~128 levels; the margin covers chains nested in other terms. *)
-(* linksem 2026-09-28 (B13): Lem's `if` takes a `bool`. Emitted as Lean's
+(* Lem's `if` takes a `bool`. Emitted as Lean's
    `if c then ...`, it relied on the Bool->Prop coercion plus a Decidable
    instance search, both instance problems that Lean elaborates behind
    `wait_if_type_mvar%` and that can get STUCK depending on context
@@ -4371,8 +4359,7 @@ type pat_style = FunParam | MatchArm
     (* declare {lean} structural val (mechanism comment at lean_is_structural) *)
     let is_structural_cref = lean_is_structural A.env
 
-    (* ===== Point-free `function` tails (tails-and-pmap-laws slice,
-       2026-09-05; TODO row 17) =====
+    (* ===== Point-free `function` tails =====
 
        `let rec f acc = function | [] -> … | x :: xs -> f (acc + x) xs`
        recurses on a list that is the anonymous scrutinee of a trailing
@@ -4481,7 +4468,7 @@ type pat_style = FunParam | MatchArm
                      if List.mem lean_tail_binder body_free then clash "capture a free variable of the same name in the body";
                      if List.mem lean_tail_binder body_consts then clash "capture a constant of the same name referenced in the body";
                      (* what the body's constants RENDER as — a Lean
-                        target_rep spelled `lemTail` (audit response F1) *)
+                        target_rep spelled `lemTail` *)
                      lean_reserved_capture_check A.env l fname e;
                      let p' = C.mk_pvar p.locn tail_name p.typ in
                      let scrut' = C.mk_var (Typed_ast.exp_to_locn scrut) tail_name p.typ in
@@ -4615,7 +4602,7 @@ type pat_style = FunParam | MatchArm
            @ [from_string ")"])
       else Output.flat [from_string "("; from_string sentinel; from_string ")"]
 
-    (* Short-circuit heads (audit MAJOR-1, charter O1): lem constants
+    (* Short-circuit heads: lem constants
        whose Lean rep is the infix Bool operator && / ||. Lean's
        macro_inline and/or evaluate their RIGHT operand only on the
        non-short-circuit path, so the supply transform must thread a
@@ -4645,7 +4632,8 @@ type pat_style = FunParam | MatchArm
        Lean-build-time surprises. Suppressed only (a) while the supply
        transform itself renders a threaded call HEAD (St.supply_head_ok)
        and (b) inside block-comment renderings of dead text
-       (St.rendering_comment — the arc-10 comment-inertness rule). *)
+       (St.rendering_comment: the checks are inert while dead text is
+       rendered as a comment). *)
     let supply_net_check (l : Ast.l) (cref : Types.const_descr_ref) (ctx : string) : unit =
       if not (!St.supply_head_ok || !St.rendering_comment) then begin
         if is_supply_cref cref then
@@ -4674,7 +4662,7 @@ type pat_style = FunParam | MatchArm
       Target.Targetmap.apply_target cd.ground_rep (Target.Target_no_ident Target.Target_lean)
 
     (* Constants whose LEAN target_rep is the bare identifier `failwith`
-       (Assert_extra.failwith, cerberus's Utils.error, ...). Arc-8 S2:
+       (Assert_extra.failwith, cerberus's Utils.error, ...).
        EVERY such call site is re-emitted as LemLib.failwithI (opaque,
        [Inhabited]-bounded, axiom-free); tyvar-typed sites are
        discharged by the [Inhabited tv] binders the threading pre-pass
@@ -4725,9 +4713,9 @@ type pat_style = FunParam | MatchArm
                 from_string (String.concat "" ["  else throw (IO.userError \"FAIL: "; lean_string_escape name_str; "\")"])
               ]
             | Ast.Lemma_lemma _ | Ast.Lemma_theorem _ ->
-              (* Skip lemma/theorem generation for Lean. These assert inline expansion
-                 correctness but contain complex expressions (match, forall) that
-                 cause parsing issues, and the proof is by sorry anyway. *)
+              (* A Lem lemma/theorem is emitted as a name marker only: its
+                 statement is not translated (TODO item 29 considers emitting
+                 the statement as a comment). *)
               Output.flat [
                 ws skips; from_string "/- lem: theorem "; name_out; from_string " not translated -/"
               ]
@@ -5178,7 +5166,7 @@ type pat_style = FunParam | MatchArm
             ) cds in
             filter_new_tyr_constraints extras class_constraints
           in
-          (* comparison dictionaries (lean_cmp_prepass, audit A1) *)
+          (* comparison dictionaries (lean_cmp_prepass) *)
           let cmp_binders = if inside_instance then [] else
             let cs = match def with
               | Let_def(_, _, (_, nm, _, _, _)) -> List.map snd nm
@@ -5258,8 +5246,8 @@ type pat_style = FunParam | MatchArm
                     (Target.Target_no_ident Target.Target_lean) cd in
                   let s = Name.to_string renamed in
                   lean_check_reserved_def_name (exp_to_locn e) s; s in
-                (* Arc-8 S2: [Inhabited tv] binders for a threaded
-                   Let_def-bound constant. *)
+                (* [Inhabited tv] binders for a threaded Let_def-bound
+                   constant. *)
                 let thread_out_of cref =
                   if inside_instance then emp
                   else match lean_thread_lookup cref with
@@ -5267,7 +5255,7 @@ type pat_style = FunParam | MatchArm
                       Output.flat (List.map (fun n ->
                           Output.flat [from_string " [Inhabited "; from_string n; from_string "]"]) ns)
                     | None -> emp in
-                (* m7 (2026-08-31 backend quality review): a multi-name
+                (* A multi-name
                    destructuring let must NOT duplicate its RHS per bound
                    name — OCaml evaluates the RHS once, so a duplicated
                    supply-drawing (or hand-written-impure-extern) RHS is a
@@ -5308,7 +5296,7 @@ type pat_style = FunParam | MatchArm
                        thread the supply binders when supply-lifted: the
                        projections carry the same binders as the RHS def
                        (ONE call of the single-RHS def per projection —
-                       the L0/m7 single-evaluation emitter; a duplicated
+                       the single-evaluation emitter; a duplicated
                        RHS would fork the draw numbering) *)
                     Output.flat [from_string " "; from_string rhs_def_name;
                                  (if let_lifted then reader_args_output () else emp);
@@ -5372,7 +5360,7 @@ type pat_style = FunParam | MatchArm
                    parameters *)
                 let groups = List.map (lean_hoist_tail_binders inside_instance) groups in
                 let num_functions = List.length groups in
-                (* Acyclic de-mutualization (arc 3): a 'let rec ... and ...'
+                (* Acyclic de-mutualization: a 'let rec ... and ...'
                    block whose call graph is a DAG (ignoring self-loops) is
                    emitted as SEQUENTIAL defs in dependency order — Lean's
                    'mutual' is reserved for genuine cycles. Lem sources use
@@ -5505,7 +5493,7 @@ type pat_style = FunParam | MatchArm
                           "Lean backend: internal error — designated structural parameter is not a variable") in
                     Output.flat [from_string "\ntermination_by structural "; from_string pname; from_string "\n"]
                   | _ -> emp in
-                (* linksem 2026-09-28 (B8): a POLYMORPHIC definition with no
+                (* A POLYMORPHIC definition with no
                    explicit parameters (`def fail {a} [Inhabited a] : a :=
                    failwithI "fail"`, LemLib's Assert_extra.fail) compiles to a
                    function of erased/instance arguments, so every USE
@@ -5606,7 +5594,7 @@ type pat_style = FunParam | MatchArm
                       from_string " : "; full_type; equations
                     ]
                 in
-                (* Block-level fuel plan (arc 3, B2): every fuel'd def of
+                (* Block-level fuel plan: every fuel'd def of
                    this block, so cross-member calls inside a fuel'd mutual
                    block rewrite to '(worker lemFuel)' — each hop passes the
                    decremented binder and Lean sees mutual structural
@@ -5669,11 +5657,9 @@ type pat_style = FunParam | MatchArm
                 let obligations_before = !St.measure_obligations in
                 let bodies_raw = List.map (fun g ->
                     (* Fuel emission (declare {lean} fuel val): single-clause,
-                       non-instance. Composes with truly-mutual blocks (arc 3,
-                       B2) and with reader lifting — INCLUDING inside a mutual
-                       block (doc/lean-backend/2026-09-20_fuel-mutual-reader-
-                       record.md: B2's "extend when needed" guard is gone; the
-                       prepass lifts a mutual Val_def's members all-or-none,
+                       non-instance. Composes with truly-mutual blocks and
+                       with reader lifting — INCLUDING inside a mutual block
+                       (the prepass lifts a mutual Val_def's members all-or-none,
                        and the per-member emission below is generic in
                        `lifted`). Fail closed on the remaining unsupported
                        combinations: supply x truly-mutual, reader_seed x
@@ -5786,8 +5772,8 @@ type pat_style = FunParam | MatchArm
                        on truly-mutual blocks and multi-clause groups —
                        named errors, the fuel machinery's precedent;
                        everything else the supply net + transform guard).
-                       All inert while rendering block comments (the
-                       arc-10 dead-text rule). --- *)
+                       All inert while rendering block comments (dead
+                       text). --- *)
                     let supply_lifted_g =
                       (not !St.rendering_comment)
                       && List.exists (fun (_, c, _, _, _, _) ->
@@ -5834,18 +5820,18 @@ type pat_style = FunParam | MatchArm
                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: 'declare {lean} fuel val' inside an instance (unsupported)")
                      | _ -> ());
-                    (* fuel x reader composes (arc 3, B1): the worker's fuel
+                    (* fuel x reader composes: the worker's fuel
                        counter is emitted BEFORE the reader binders, so the
                        point-free wrapper 'worker LemFuel.fuel' has the
                        reader-prefixed type and lifted callers inject into
                        the wrapper as for any lifted def. In a truly-mutual
-                       block the same holds per member (2026-09-20): every
+                       block the same holds per member: every
                        member is lifted together (the prepass unions the
                        block's defined set), each worker/wrapper/obligation/
                        `_zero` lemma takes the readers through `lifted`, and
                        a sibling call `(sibling_lemFuel lemFuel <readers>)`
                        re-injects them at the St.fuel_workers rewrite. *)
-                    (* Arc-8 S2: [Inhabited tv] binders for this group,
+                    (* [Inhabited tv] binders for this group,
                        from the threading pre-pass (instance methods are
                        never threaded — the pre-pass guard errors first). *)
                     let thread_names =
@@ -5898,10 +5884,8 @@ type pat_style = FunParam | MatchArm
                          worker only when it passes it on (workers_need_fuel) *)
                       St.fuel_binder := workers_need_fuel && not inside_instance;
                       (* worker name must agree with the block-level plan —
-                         a real error, not a bare assert (arc-14 S2 B6,
-                         be:N1: `assert` is compiled out under -noassert;
-                         this file's own history hunted `assert false`
-                         down in favor of Reporting_basic). *)
+                         a real error, not a bare assert (`assert` is
+                         compiled out under -noassert). *)
                       if List.assoc_opt c !St.fuel_workers <> Some worker then
                         raise (Reporting_basic.err_general true Ast.Unknown
                           "Lean backend: internal error — fuel worker name disagrees with the block-level fuel plan");
@@ -5955,8 +5939,8 @@ type pat_style = FunParam | MatchArm
                               | Types.Tfn (_, b) -> 1 + go b | _ -> 0 in
                             go cd.const_type in
                           (* class-constraint binders must be re-emitted on
-                             the wrapper too (arc-3 batch D: [Eq0 a]-style
-                             constrained defs failed to elaborate) *)
+                             the wrapper too ([Eq0 a]-style constrained defs
+                             failed to elaborate without them) *)
                           let cons_out =
                             if constraints = emp then emp
                             else Output.flat [from_string " "; constraints] in
@@ -5970,7 +5954,7 @@ type pat_style = FunParam | MatchArm
                              the instance. No numeral is ever emitted here
                              ([USER 2026-09-03], "No magic values"). *)
                           (* A lifted worker's wrapper has the reader-prefixed
-                             type (arc 3, B1): reader binders sit between the
+                             type: reader binders sit between the
                              fuel counter and the original arguments, so
                              'worker LemFuel.fuel' is reader-first. *)
                           let reader_arrows =
@@ -6039,8 +6023,8 @@ type pat_style = FunParam | MatchArm
                               | Some ln -> Some (ln, (lean_escape_keyword ln, ty))
                               | None -> None) bs in
                           let measure_out = lean_render_measure A.env.t_env l base_name params measure in
-                          (* the `assuming` hypothesis (measure-hypothesis
-                             slice): rendered under the same scope rules;
+                          (* the `assuming` hypothesis: rendered under the
+                             same scope rules;
                              it appears ONLY in the obligation, as the binder
                              `lemHyp` immediately before `lemFuel` — the
                              wrapper stays fuel-free and hypothesis-free *)
@@ -6126,7 +6110,7 @@ type pat_style = FunParam | MatchArm
                               (* a point-free tail (npats < arity): ascribe the
                                  codomain to the LHS, or the RHS lambda's implicit
                                  type arguments have nothing to unify with
-                                 (cerberus dry run 2026-09-04, liftAction_lemFuel_zero:
+                                 (Cerberus's liftAction_lemFuel_zero:
                                  `don't know how to synthesize implicit argument`);
                                  not under supply lifting, whose codomain is the
                                  transformed pair type (no such case exists) *)
@@ -6154,7 +6138,7 @@ type pat_style = FunParam | MatchArm
                           (* Wrapper (and its lemma) are returned separately:
                              in a mutual block they must be emitted AFTER
                              'end', or the wrapper would join the recursion
-                             set (arc 3, B2). *)
+                             set. *)
                           (from_string "def", body, Output.flat [wrapper; zero_lemma]))
                   ) groups in
                 let bodies =
@@ -6212,7 +6196,7 @@ type pat_style = FunParam | MatchArm
               let name = name_lskips_annot.term in
               let name = Name.strip_lskip name in
               (* Name.compare, not polymorphic Stdlib.compare on the
-                 abstract Name.t (arc-14 S2 B6, be:N2). *)
+                 abstract Name.t. *)
               if List.exists (fun (n, _) -> Name.compare n name = 0) buffer then
                 gather_names_aux buffer xs
               else
@@ -6221,7 +6205,7 @@ type pat_style = FunParam | MatchArm
           gather_names_aux [] clause_list
       in
       let gathered = gather_names clause_list in
-      (* D2-enablers (2026-09-04): a relation in the fuel-lifted set (its
+      (* A relation in the fuel-lifted set (its
          premises reach the ambient fuel; lean_fuel_prepass lifts the whole
          block) takes `[LemFuel]` as an inductive parameter, and its
          premises render inside a fuel scope. Inert for block comments. *)
@@ -6248,7 +6232,7 @@ type pat_style = FunParam | MatchArm
       let compare_clauses_by_name name (Rule(_,_, _, _, _, _, _, name', _, _),_) =
         let name' = name'.term in
         let name' = Name.strip_lskip name' in
-          Name.compare name name' = 0  (* be:N2: not polymorphic compare *)
+          Name.compare name name' = 0  (* not polymorphic compare *)
       in
       let indrelns =
         List.map (fun (name, c_ref) ->
@@ -6378,7 +6362,7 @@ type pat_style = FunParam | MatchArm
                 from_string " ", tv_set
             in
             let tv_set = let_type_variables top_level tv_set in
-            (* linksem 2026-09-28 (B11): a LOCAL `let f = fun (a, b) -> ...`
+            (* A LOCAL `let f = fun (a, b) -> ...`
                with no annotation. Lem's pattern compiler turns the tuple
                parameter into `fun p => match p with | (a, b) => ...`; with no
                expected type Lean infers a DEPENDENT motive for that match,
@@ -6480,10 +6464,10 @@ type pat_style = FunParam | MatchArm
         let body =
           if !St.supply_binder then supply_block inside_instance e
           else exp inside_instance e in
-        (* Inside instance definitions, flatten newlines in the body expression.
-           Without this, multiline bodies (e.g., sorry-based opaque type instances)
-           can have arguments on a new line at field-name indentation, which Lean
-           misparses as a new field definition. *)
+        (* Inside instance definitions, flatten newlines in the body
+           expression. Without this, a multi-line body can have arguments on
+           a new line at field-name indentation, which Lean misparses as a
+           new field definition. *)
         let body = if inside_instance then flatten_newlines body else body in
         (match !St.fuel_emit with
          | Some sentinel ->
@@ -6499,7 +6483,7 @@ type pat_style = FunParam | MatchArm
              (* the succ-arm body is parenthesized like the sentinel: a
                 hoisted infix head (e.g. a bind rendered prefix) followed by
                 argument lines at low indentation would otherwise escape the
-                match arm (arc-3 batch E: full_eval_pexpr) *)
+                match arm (Cerberus's full_eval_pexpr was the case) *)
              from_string "\n  | Nat.succ lemFuel => (";
              body;
              from_string ")"
@@ -6517,7 +6501,7 @@ type pat_style = FunParam | MatchArm
             from_string " ("; from_string pname; from_string " : ";
             pat_typ (C.t_to_src_t (reader_value_typ cref)); from_string ")"])
         (get_reader_params ()))
-    (* Arc-8 S2: [Inhabited tv] instance-implicit binders for a threaded
+    (* [Inhabited tv] instance-implicit binders for a threaded
        def (zero call-site rewrites — Lean synthesizes the instance
        arguments at every application). *)
     and inhabited_binder_output () =
@@ -6530,8 +6514,8 @@ type pat_style = FunParam | MatchArm
        [supply_thread senv e] emits e with every draw and every lifted
        call A-normalized into let-bindings, sequenced in the EVALUATION
        ORDER OF THE OCAML TARGET — the reference semantics of the lem
-       program (parity-fix F6, 2026-09-03; [USER] ruling: follow the LEM
-       semantics, i.e. what the OCaml backend computes). ocamlopt and
+       program ([USER 2026-09-03] ruling: follow the LEM semantics, i.e.
+       what the OCaml backend computes). ocamlopt and
        the bytecode compiler evaluate the subexpressions of one node
        RIGHT-TO-LEFT: function-application arguments (then the head),
        tuple components, constructor arguments, list-literal elements,
@@ -6547,7 +6531,7 @@ type pat_style = FunParam | MatchArm
        (supply cref -> current state variable name). Supply-free
        subexpressions delegate to the ordinary [exp] emitter verbatim.
 
-       DETERMINISM (charter non-goal O7): the transform emits only
+       DETERMINISM: the transform emits only
        let-bindings, tuples, LemLib.supplySplit applications, and the
        control forms already present in the source — it contains no
        nondeterminism constructor and cannot introduce a branch point
@@ -6594,7 +6578,7 @@ type pat_style = FunParam | MatchArm
         ([from_string "("]
          @ List.concat_map (fun b -> [b; from_string ";\n      "]) bs
          @ [tup; from_string ")"])
-    (* Short-circuit threading (audit MAJOR-1 fix): left operand
+    (* Short-circuit threading: left operand
        strict, right operand as a branch arm of the equivalent if —
        draws in the right operand fire only when it evaluates. *)
     and supply_shortcircuit inside_instance senv (kind : string) le re =
@@ -6616,7 +6600,7 @@ type pat_style = FunParam | MatchArm
                        from_string " else "; arm_r] in
       let (bind, v, senv') = supply_join senv1 rhs in
       (bs1 @ [bind], v, senv')
-    (* F5 (2026-09-03): materialise threaded argument values as real `Var`
+    (* Materialise threaded argument values as real `Var`
        expressions so the shared application renderer (target reps, ascii
        reps, renaming, paren insertion) can render an application whose
        arguments drew — it may REBUILD argument nodes (identifier-form
@@ -6669,7 +6653,7 @@ type pat_style = FunParam | MatchArm
          | Let_val (p, _, _, e1) when (lean_seq_pattern p || lean_seq_unused_binding p e2)
                                      && not (lean_seq_trivial e1)
                                      && not (exp_needs_supply e1) ->
-           err "Lean backend: `let _ = e1 in e2` with a pure e1 in a supply-threaded body (B15: e1 would be dropped; unsupported — bind e1 to a used name, or move it out of the supply-threaded region)"
+           err "Lean backend: `let _ = e1 in e2` with a pure e1 in a supply-threaded body (e1 would be dropped; unsupported — bind e1 to a used name, or move it out of the supply-threaded region)"
          | Let_val (p, topt, _, e1) ->
            let (bs1, v1, senv1) = supply_thread inside_instance senv e1 in
            let p_out, topt_out = (match p.term with
@@ -6706,7 +6690,7 @@ type pat_style = FunParam | MatchArm
       | Case (_, _, e0, _, cases, _)
         when Seplist.length cases = 1 && not (lean_seq_trivial e0) && not (exp_needs_supply e0)
              && (let (p, _, _, _) = Seplist.hd cases in lean_seq_pattern p) ->
-        err "Lean backend: `let () = e1 in e2` with a pure e1 in a supply-threaded body (B15: e1 would be dropped; unsupported — bind e1 to a used name, or move it out of the supply-threaded region)"
+        err "Lean backend: `let () = e1 in e2` with a pure e1 in a supply-threaded body (e1 would be dropped; unsupported — bind e1 to a used name, or move it out of the supply-threaded region)"
       | Case (_, _, e0, _, cases, _) ->
         let (bs0, v0, senv0) = supply_thread inside_instance senv e0 in
         let v0 = lean_sv_out v0 in
@@ -6787,7 +6771,7 @@ type pat_style = FunParam | MatchArm
            err "Lean backend: reader_consumer used in infix position (unsupported: the leading reader arguments cannot be injected around an infix operator — use prefix application)"
          | Constant cd when lean_shortcircuit_kind cd.descr <> None
                             && exp_needs_supply re ->
-           (* audit MAJOR-1 / charter O1: never hoist right-operand
+           (* never hoist right-operand
               draws above a short-circuit test *)
            let kind = (match lean_shortcircuit_kind cd.descr with
              | Some k -> k
@@ -6795,13 +6779,13 @@ type pat_style = FunParam | MatchArm
                err "Lean backend: internal error — short-circuit head lost its classification") in
            supply_shortcircuit inside_instance senv kind le re
          | Constant cd when lean_tuple_inst_demands A.env cd <> [] ->
-           err "Lean backend: a confusable tuple-instance demand (B14) in a supply-threaded infix application (unsupported; bind the operands in lets first)"
+           err "Lean backend: a confusable tuple-instance demand in a supply-threaded infix application (unsupported; bind the operands in lets first)"
          | Constant cd ->
            (* OCaml order: the RIGHT operand is evaluated first *)
            let (bs2, vr, senv1) = supply_thread inside_instance senv re in
            let (bs1, vl, senv2) = supply_thread inside_instance senv1 le in
            (* render via the pure Infix machinery with the drawing
-              operands replaced by their threaded variables (F5) *)
+              operands replaced by their threaded variables *)
            let (bs_a, ops) = supply_atomize_args [le; re] [vl; vr] in
            let pieces = B.function_application_to_output (exp_to_locn e) pure_out true e cd ops (use_ascii_rep_for_const cd.descr) in
            (bs2 @ bs1 @ bs_a,
@@ -6889,8 +6873,8 @@ type pat_style = FunParam | MatchArm
                           | Some _, [_; b] -> exp_needs_supply b
                           | Some _, _ -> List.exists exp_needs_supply args
                           | None, _ -> false) ->
-        (* short-circuit operator reached as an application spine
-           (audit MAJOR-1): same arm-threading as the Infix leg when
+        (* short-circuit operator reached as an application spine:
+           same arm-threading as the Infix leg when
            fully applied; anything else fails closed *)
         (match args with
          | [a; b] ->
@@ -6920,7 +6904,7 @@ type pat_style = FunParam | MatchArm
            and fail closed. *)
         lean_unsupported_check_cref A.env l cd.descr;
         if lean_tuple_inst_demands A.env cd <> [] then
-          err "Lean backend: a confusable tuple-instance demand (B14) in a supply-threaded application (unsupported; bind the drawn values in lets first)";
+          err "Lean backend: a confusable tuple-instance demand in a supply-threaded application (unsupported; bind the drawn values in lets first)";
         if is_lean_failwith_rep cd.descr then
           err "Lean backend: a failwith-mapped call with supply-drawing arguments (unsupported; bind the drawn values in lets first)";
         if ground_rep_for cd.descr <> None then
@@ -6928,7 +6912,7 @@ type pat_style = FunParam | MatchArm
         if is_reader_cref cd.descr then
           err "Lean backend: internal error — a reader constant's unit argument cannot use the supply";
         let (bs, argvs, senv1) = supply_thread_list inside_instance senv args in
-        (* F5: drawing arguments become real variables (see supply_atomize_args) *)
+        (* drawing arguments become real variables (see supply_atomize_args) *)
         let (bs_a, args') = supply_atomize_args args argvs in
         let pieces = B.function_application_to_output (exp_to_locn e) pure_out false e cd args' (use_ascii_rep_for_const cd.descr) in
         (bs @ bs_a,
@@ -6938,7 +6922,7 @@ type pat_style = FunParam | MatchArm
         (* general head (variable, threaded subexpression, ...): every
            argument and then the head are hoisted — STRICT threading in
            OCaml order.
-           NOTE (L1 delta audit NOTE-1, pinned in L2): PAREN-WRAPPED
+           NOTE: PAREN-WRAPPED
            heads land here too, because strip_app_exp
            (typed_ast_syntax.ml) deliberately does not unwrap Paren.
            In particular the paren-split short-circuit spine
@@ -7054,7 +7038,7 @@ type pat_style = FunParam | MatchArm
        - For polymorphic indreln self-references (St.indreln_params), explicit
          type parameters are inserted since Lean can't infer them
        - Class method constants get explicit @ type application when used bare *)
-    (* B15: `lemSeq (fun _ => e1) (fun _ => e2)` *)
+    (* Sequencing: `lemSeq (fun _ => e1) (fun _ => e2)` *)
     and lem_seq_out inside_instance skips e1 e2 =
       let e1_out = exp inside_instance e1 in
       Output.flat [
@@ -7062,7 +7046,7 @@ type pat_style = FunParam | MatchArm
         from_string ") (fun _ => "; exp inside_instance e2; from_string "))"
       ]
 
-    (* B14: a node headed by a constant whose class constraints reach a
+    (* A node headed by a constant whose class constraints reach a
        confusable tuple type binds Lem's instances locally first. *)
     and exp inside_instance e =
       (* The comments in front of an expression are taken out of its skips and
@@ -7085,7 +7069,7 @@ type pat_style = FunParam | MatchArm
                match tv with
                | Types.Nv _ ->
                  raise (Reporting_basic.err_general true l
-                   "Lean backend: tuple instance with a numeric type variable (unsupported for B14 local binding)")
+                   "Lean backend: tuple instance with a numeric type variable (unsupported for local instance binding)")
                | Types.Ty _ ->
                  (match Types.TNfmap.apply subst tv with
                   | Some t ->
@@ -7168,7 +7152,7 @@ type pat_style = FunParam | MatchArm
                       else if is_reader_cref cd.descr then begin
                         (* Application of the reader constant itself: 'tagDefs ()'
                            becomes the reader parameter. The only argument is
-                           unit — CHECKED (arc-14 S2 B6, be:S8): the rewrite
+                           unit — CHECKED: the rewrite
                            replaces the whole application spine, so a reader
                            constant of arity beyond `unit -> T` applied to
                            extra arguments would silently DROP them; the
@@ -7201,11 +7185,11 @@ type pat_style = FunParam | MatchArm
                           @ List.map (fun a -> Output.flat [from_string " "; a]) args_out
                           @ [from_string " : "; pat_typ (C.t_to_src_t (Typed_ast.exp_to_typ e)); from_string ")"])]
                       else if is_lean_failwith_rep cd.descr && args <> [] then begin
-                        (* Failure site (arc-8 S2: EVERY site, ground or
-                           tyvar-typed): axiom-free failwithI, with an
-                           ascription so the instance resolves at exactly
-                           this type. Tyvar sites resolve through the S1
-                           derived instances and/or the [Inhabited tv]
+                        (* Failure site (EVERY site, ground or tyvar-typed):
+                           axiom-free failwithI, with an ascription so the
+                           instance resolves at exactly this type. Tyvar
+                           sites resolve through the derived instances
+                           and/or the [Inhabited tv]
                            binders threaded onto the enclosing def. *)
                         let site_t = Typed_ast.exp_to_typ e in
                         failwith_instance_guard inside_instance site_t;
@@ -7254,8 +7238,8 @@ type pat_style = FunParam | MatchArm
                   ws skips; from_string "("; tups; from_string ")"; ws skips'
                 ]
           (* An empty list literal whose Lem type is closed is ascribed with
-             it, wherever it occurs (review fix 2026-09-30, replacing a rule
-             that applied only inside a discarded `let _ = e1`): a target rep
+             it, wherever it occurs (an earlier rule applied only inside a
+             discarded `let _ = e1`): a target rep
              more general than its Lem type (Cerberus's `print_debug_pure :
              Nat -> List d -> ...` for Lem's `list domain`; `List.length` for
              a `list bool -> nat`) otherwise leaves the element type unsolved
@@ -7301,7 +7285,7 @@ type pat_style = FunParam | MatchArm
               | Some w ->
                 (* Self- or cross-member call inside a fuel'd block: recurse
                    on the decremented fuel binder; a lifted worker also
-                   re-injects its reader binders (arc 3, B1/B2). *)
+                   re-injects its reader binders. *)
                 let readers =
                   if !St.reader_binder then reader_args_output () else emp in
                 Output.flat [from_string "("; from_string w;
@@ -7328,7 +7312,7 @@ type pat_style = FunParam | MatchArm
                 Output.flat [from_string "("; default_const_output ();
                              reader_args_output (); from_string ")"]
               else if is_lean_failwith_rep const.descr then begin
-                (* Bare / point-free failure reference (arc-8 S2): the
+                (* Bare / point-free failure reference: the
                    ascription (String -> tau) determines failwithI's
                    type argument; Inhabited tau resolves as at applied
                    sites. Legacy failwith is never emitted. *)
@@ -7409,7 +7393,7 @@ type pat_style = FunParam | MatchArm
                  Use constructor syntax: TypeName.mk val1 val2 ...
                  The `mk` arguments are POSITIONAL in the type's field
                  DECLARATION order; the literal may list its fields in any
-                 order (linksem 2026-09-28, B7: dwarf.lem's sdt_subroutine
+                 order (linksem's dwarf.lem: the sdt_subroutine
                  literal lists ss_unspecified_parameters before ss_pc_ranges;
                  emitting in literal order was a type error there, and a
                  SILENT field swap wherever the swapped fields share a type). *)
@@ -7484,8 +7468,7 @@ type pat_style = FunParam | MatchArm
                  evaluated once per field. The binder is a reserved name
                  (lean_reserved_exact_names): a free variable or a referenced
                  constant of that name in the base or an updated value would
-                 be captured, so it is refused (backend-hardening record,
-                 2026-10-03). *)
+                 be captured, so it is refused. *)
               let base = lean_reserved_rec_base_name in
               let locn = Typed_ast.exp_to_locn e in
               let capture_check (e' : exp) =
@@ -7538,7 +7521,7 @@ type pat_style = FunParam | MatchArm
           | Case (_, skips, e1, _, cases, _)
             when Seplist.length cases = 1 && not (lean_seq_trivial e1)
                  && (let (p, _, _, _) = Seplist.hd cases in lean_seq_pattern p) ->
-            (* B15: `let () = e1 in e2` reaches the backend as a one-arm
+            (* `let () = e1 in e2` reaches the backend as a one-arm
                match; OCaml evaluates the scrutinee for its effect *)
             let (_, _, e2, _) = Seplist.hd cases in
             lem_seq_out inside_instance skips e1 e2
@@ -7584,13 +7567,16 @@ type pat_style = FunParam | MatchArm
               in
               let sep = from_string " " in
               begin
-                (* NOTE (audit, 2026-08-18; effectful leg retired 2026-09-01):
-                   this Infix path has NONE of the reader/fuel hooks. A
-                   lifted or fuel'd constant used in infix position emits
-                   without injection — every such case fails VISIBLY at the
-                   Lean build (missing binder / unknown worker), never
-                   silently. Hook here if a legitimate infix use ever
-                   appears. *)
+                (* This Infix path runs the fail-closed checks (unsupported
+                   construct, supply, fuel scope, reader_consumer) but has
+                   none of the App path's INJECTION hooks: a reader-lifted
+                   constant in infix position emits without its reader
+                   arguments, a fuel'd constant without the worker rewrite
+                   (its `[LemFuel]` binder is instance-implicit, so it
+                   resolves where the scope check passes). Every such case
+                   fails VISIBLY at the Lean build (missing binder / unknown
+                   worker), never silently. Hook here if a legitimate infix
+                   use ever appears. *)
                 match C.exp_to_term c with
                   | Constant cd ->
                     begin
@@ -7618,7 +7604,7 @@ type pat_style = FunParam | MatchArm
                         else Output.flat [l_out; meta_utf8 "  \xe2\x89\xa0  "; r_out]
                       | _ -> begin
                         (* A symbolic constant rendered by its ASCII name
-                           (B1) is emitted in PREFIX form, `name l r`: an
+                           is emitted in PREFIX form, `name l r`: an
                            operand that was fine in infix position (an
                            application `f x`, a nested infix) must now be
                            parenthesised as an argument. *)
@@ -7654,7 +7640,7 @@ type pat_style = FunParam | MatchArm
                   ws skips''; from_string " else "
                 ]
               in
-              (* Long else-if chains (linksem 2026-09-28, B3). Lean cannot
+              (* Long else-if chains. Lean cannot
                  elaborate an if/else-if chain nested more than ~128 deep
                  ("maximum recursion depth has been reached", independent of
                  the branch contents; measured on 4.28 at 150 and 600 arms);
@@ -7746,9 +7732,7 @@ type pat_style = FunParam | MatchArm
                  functions with comprehensions have Lean target reps that
                  bypass this code path (their lem definitions render only as
                  block comments, guarded below); anything LIVE is
-                 FAIL-CLOSED: a loud generation-time error (arc-10 S2,
-                 decision log D1 ruling 3 — formerly an opaque `(sorry ...)`
-                 stub). *)
+                 FAIL-CLOSED: a loud generation-time error. *)
               if !St.rendering_comment then
                 from_string "(sorry /- lem: set comprehension binding not supported -/)"
               else
@@ -7892,7 +7876,7 @@ type pat_style = FunParam | MatchArm
             ws s; from_string "true"
           ]
         | L_char (s, c, _) ->
-          (* M3: Char.escaped emits decimal escapes — invalid Lean.
+          (* Char.escaped emits decimal escapes — invalid Lean.
              lean_char_escape emits \xHH for non-printable/non-ASCII. *)
           let c = from_string (Printf.sprintf "'%s'" (lean_char_escape c)) in
           Output.flat [
@@ -7908,7 +7892,7 @@ type pat_style = FunParam | MatchArm
               ws s; from_string (String.concat "" [prefix; bits])
             ]
         | L_undefined (skips, explanation) ->
-          (* Arc-8 audit fix (auditor A F1): mirror the OCaml backend,
+          (* Mirror the OCaml backend,
              which renders L_undefined as a RAISE carrying the
              incomplete-pattern message — `failwith m`
              (src/backend.ml:864, `const_undefined` in module Ocaml at
@@ -8033,7 +8017,7 @@ type pat_style = FunParam | MatchArm
         | P_paren (skips, p, skips') ->
             (match style with
             | FunParam ->
-              (* linksem 2026-09-28 (B6): a parenthesised variable `(ev)` in
+              (* A parenthesised variable `(ev)` in
                  parameter position rendered as `((ev : T))`, which Lean
                  rejects ("expected '_' or identifier"). The shapes below
                  already render as a parenthesised binder `(x : T)`, so the
@@ -8104,7 +8088,7 @@ type pat_style = FunParam | MatchArm
         | Typ_paren (_, t, _) -> src_t_has_fn t
         | Typ_with_sort (t, _) -> src_t_has_fn t
         | Typ_wild _ | Typ_var _ | Typ_len _ -> false
-    (* linksem audit A1: a variant/record with function-typed fields gets a
+    (* A variant/record with function-typed fields gets a
        real structural comparison (function fields panic only when reached)
        instead of an always-panicking residual. *)
     and texp_fn_fields (t : texp) : bool =
@@ -8120,7 +8104,7 @@ type pat_style = FunParam | MatchArm
         | Te_record (_, _, fields, _) ->
           not (Seplist.exists (fun (_, _, _, src_t) -> src_t_has_fn src_t) fields)
         | Te_opaque | Te_abbrev _ -> false
-    (* Parity-fix F4 (2026-09-03): does Lean's `deriving Ord` order differ
+    (* Does Lean's `deriving Ord` order differ
        from OCaml's polymorphic compare on this variant? Lean's derive
        handler ranks constructors by DECLARATION INDEX; OCaml ranks every
        nullary constructor (immediate) below every non-nullary one (block),
@@ -8675,8 +8659,8 @@ type pat_style = FunParam | MatchArm
           Output.flat [
             from_string "  | "; ctor_name; from_string " :"; ws skips; body; tail
           ]
-    (* Constructor argument types and nested inductives (linksem 2026-09-28,
-       B4). Lean's kernel accepts a nested occurrence `List (X ty)` only when
+    (* Constructor argument types and nested inductives. Lean's kernel
+       accepts a nested occurrence `List (X ty)` only when
        X is an inductive type applied to arguments; a Lem type ABBREVIATION
        emitted as a Lean `abbrev` is not unfolded there, so
        `abbrev dim t := Option Nat × Option t`, `| arr : List (dim t) → top t`
@@ -8880,21 +8864,21 @@ type pat_style = FunParam | MatchArm
     (* --- Instance generation ---
        For each type definition, generates:
        1. Inhabited instance(s): tier 1 (safe constructor) or tier-2
-          per-constructor bounded derivation (arc-8 S1; fail-closed —
+          per-constructor bounded derivation (fail-closed —
           underivable types get no instance and backend-visible demands
           on them are generation-time errors)
        2. BEq + Ord (via `deriving` if possible; otherwise derived
-          structural comparisons (arc-10 S2b) or loud failwithI residuals
-          — NO sorry emission path; Type-1 blocks are a generation-time
-          error (arc-10 audit fix), fail-closed like the Inhabited path)
+          structural comparisons or loud failwithI residuals; Type-1
+          blocks are a generation-time error, fail-closed like the
+          Inhabited path)
        3. SetType / Eq0 / Ord0 instances (with [BEq]/[Ord] constraints for parameterized types)
        Mutual types use find_safe_ctor_for_mutual to avoid self-referential defaults.
        Library opaque types (phantom types like ty1..ty4096) skip instance generation. *)
     (* src_t_references_paths / src_t_is_directly_mutual /
        find_safe_ctor_for_mutual / the derivability analysis now live at
-       top level (shared with lean_inhabited_prepass, arc-8 S1). *)
-    (* Arc-8 S1 fail-closed demand check (design note rule 5, charter
-       durability req 2): the backend is about to emit a value-level
+       top level (shared with lean_inhabited_prepass). *)
+    (* Fail-closed demand check (design note rule 5): the backend is
+       about to emit a value-level
        `default` — an Inhabited demand it KNOWS about, inside a generated
        instance body — at an applied type. If the census says derivation
        FAILED for that type (Inh_none), refuse at generation time, naming
@@ -8944,11 +8928,10 @@ type pat_style = FunParam | MatchArm
     and generate_default_value_texp (t: texp) =
       match t with
         | Te_opaque ->
-          (* Arc-8 S2 (D4): opaque types are tier-2/fail-closed — they
-             never reach the tier-1 default renderer. The former
-             `default := sorry` fallback instance is gone. *)
+          (* Opaque types are tier-2/fail-closed — they never reach the
+             tier-1 default renderer. *)
           raise (Reporting_basic.err_general true Ast.Unknown
-            "Lean backend: Te_opaque in generate_default_value_texp is unreachable (opaque types are fail-closed, arc-8 S2)")
+            "Lean backend: internal error — Te_opaque in generate_default_value_texp is unreachable (opaque types are fail-closed)")
         | Te_abbrev (_, src_t) -> default_value_inhabited src_t
         | Te_record (_, _, seplist, _) ->
             let fields = Seplist.to_list seplist in
@@ -8978,7 +8961,7 @@ type pat_style = FunParam | MatchArm
        args (for use inside mutual def blocks where Inhabited instances don't exist yet). *)
     (* Returns None when tier 1 has no safe constructor: the caller must
        then render the pre-pass tier-2 plan (per-constructor bounded
-       instances — arc-8 S1; the DAEMON fallback is gone). The tier
+       instances). The tier
        split itself is inhabited_needs_tier2 (top level, shared with the
        pre-pass so the plan and the emission can never disagree). *)
     and inhabited_default_expr ?(mutual_name_map=[]) mutual_paths (((name, _), tnvar_list, path, t, _) as td) : Output.t option =
@@ -9027,7 +9010,7 @@ type pat_style = FunParam | MatchArm
           (* Unconstrained {a : Type} bindings. Tier-1 instances (nullary/
              safe ctors) need no [Inhabited a] constraints; tier-2 derived
              instances append their [Inhabited tv] binders separately
-             (inhabited_bound_binders, arc-8 S1). *)
+             (inhabited_bound_binders). *)
           let tvs = List.map (fun tv ->
             match tv with
             | Typed_ast.Tn_A (_, r, _) -> Types.Ty (Tyvar.from_rope r)
@@ -9041,8 +9024,8 @@ type pat_style = FunParam | MatchArm
         else Output.flat [from_string " "; tnvar_names]
       in
       (tnvar_list', type_args)
-    (* Arc-8 S1 tier 2: per-constructor bounded derivation (design note
-       rules 2-5), replacing the DAEMON fallback. For each constructor
+    (* Tier 2: per-constructor bounded derivation (design note rules
+       2-5). For each constructor
        whose fields are all derivably inhabitable, emit one bounded
        instance — the first at default priority, the rest at
        (priority := low), the LemLib Sum inl/inr pair precedent
@@ -9117,7 +9100,7 @@ type pat_style = FunParam | MatchArm
         (path, type_name_str)
       ) active in
       (* Compute defaults and split into tier 1 (real ctors, need mutual def)
-         and tier 2 (arc-8 S1: per-constructor derived bounded instances
+         and tier 2 (per-constructor derived bounded instances
          rendered from the pre-pass plan). *)
       let typed_defaults = List.map (fun (((name, _), tnvar_list, path, _, _) as td) ->
         let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip (B.type_path_to_name name path))) in
@@ -9153,7 +9136,7 @@ type pat_style = FunParam | MatchArm
           from_string "\nend"; concat emp instances;
         ]
       in
-      (* Tier 2 (arc-8 S1): per-constructor derived instances (from the
+      (* Tier 2: per-constructor derived instances (from the
          pre-pass plan), emitted in declaration order after the tier-1
          instances — so tier-2 bodies may resolve through every tier-1
          instance of the block and every EARLIER tier-2 sibling's
@@ -9188,8 +9171,8 @@ type pat_style = FunParam | MatchArm
             if List.length tnvar_list = 0 then emp
             else Output.flat [from_string " "; tnvar_names]
           in
-          (* If the type uses deriving BEq, Ord (emitted by tyexp), skip sorry
-             BEq/Ord instances. Mutual types normally can't use deriving
+          (* If the type uses deriving BEq, Ord (emitted by tyexp), emit no
+             BEq/Ord instances here. Mutual types normally can't use deriving
              (emit_deriving=false), but all-nullary enums in mutual blocks
              CAN derive — they have no args so no dependency on other types. *)
           let is_all_nullary = match t with
@@ -9202,7 +9185,7 @@ type pat_style = FunParam | MatchArm
           let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n)) in
           let bare_tvs = from_string (merge_implicit_binders (String.concat "" (List.map (fun t ->
               String.concat "" [" {"; tnvar_to_string t; " : "; tnvar_kind t; "}"]) tnvar_list))) in
-          (* Arc-10 S2: render " [Cls tv]" binders for the given tyvar names,
+          (* Render " [Cls tv]" binders for the given tyvar names,
              in parameter-declaration order (the inhabited_bound_binders
              pattern applied to comparison classes). *)
           let cls_bounds cls (bounds : string list) : Output.t =
@@ -9249,20 +9232,18 @@ type pat_style = FunParam | MatchArm
             if has_deriving then (emp, emp)
             else if is_type1 then
               (* Type-1 universe (heterogeneous parameter counts in the
-                 mutual block): FAIL-CLOSED (arc-10 audit fix, auditor A
-                 F1). The historical `:= sorry` residual bodies are
-                 DELETED — no opaque-inhabitant emission path may remain
-                 (the arc-8 convention; population is empty today, so
-                 any future Type-1 type reaching instance emission is a
-                 loud generation-time error naming the escape hatches,
-                 exactly like the Inhabited path). *)
+                 mutual block): FAIL-CLOSED. No residual instance is emitted
+                 — the population is empty today, so any future Type-1 type
+                 reaching instance emission is a loud generation-time error
+                 naming the escape hatches, exactly like the Inhabited
+                 path. *)
               raise (Reporting_basic.err_general true Ast.Unknown
                 (Printf.sprintf
-                  "Lean backend: cannot derive BEq/Ord instances for type '%s': heterogeneous type-parameter counts put its mutual block in the Type 1 universe (the historical sorry-bodied residual instances are deleted, arc-10 audit fix); escape hatches: 'declare {lean} skip_instances type %s' plus hand-written Lean instances where demanded, or 'declare lean target_rep type %s' mapping it to a hand-written Lean type"
+                  "Lean backend: cannot derive BEq/Ord instances for type '%s': heterogeneous type-parameter counts put its mutual block in the Type 1 universe, where the comparison classes are not defined; escape hatches: 'declare {lean} skip_instances type %s' plus hand-written Lean instances where demanded, or 'declare lean target_rep type %s' mapping it to a hand-written Lean type"
                   type_name_str type_name_str type_name_str))
             else match derived_cmp with
               | Some bounds ->
-                (* Arc-10 S2: REAL instances over the derived structural
+                (* REAL instances over the derived structural
                    comparison functions (emitted by
                    generate_derived_comparisons in this type's mutual
                    block). DEFAULT priority — the same standing Lean's own
@@ -9297,26 +9278,23 @@ type pat_style = FunParam | MatchArm
             (* SetType/Eq0/Ord0 (lem classes): bridge to the Lean BEq/Ord
                instances wherever those are real — derived-with-`deriving`
                (monomorphic: unconditional; parameterized: [BEq tv]/[Ord tv]
-               bounds, arc-10 S2) or comparison-derived (bounds from the
-               derivation plan). Residual types (and the open-tyvar fallback
-               for parameterized ones) carry loud failwithI bodies.
+               bounds) or comparison-derived (bounds from the derivation
+               plan). Residual types carry loud failwithI bodies.
 
-               PRIORITY (arc-14 S2 B4, be:G1 + sem:S2): the AUTO trio is
-               emitted at (priority := 500) — the "auto" slot of the
-               normative lattice (doc/notes/2026-08-22_arc14-instance-
-               priority-lattice.md): strictly BELOW model-declared lem
-               `instance` declarations and hand-written overrides (default
-               = 1000), so a model's own Eq0/SetType/Ord0 wins by PRIORITY
-               (previously both were default and the model instance won
-               only by newest-declaration-first order — the sem:S2
-               accident: e.g. Symbol.identifier's location-sensitive auto
-               Eq0 vs the model's name-only Eq0); strictly ABOVE the
-               generic low(=100) bridges/defaults in LemLib/Basic_classes
-               and the open-tyvar fallbacks (50), so where no model
-               instance exists the real auto trio still beats every
-               fallback. Resolution probe: tests/comprehensive
-               instance_priority.lem (build-failing if the wrong instance
-               wins). *)
+               PRIORITY: the AUTO trio is emitted at the lattice's "auto"
+               slot (lean_instance_kw_auto): strictly BELOW model-declared
+               lem `instance` declarations and hand-written overrides
+               (default = 1000), so a model's own Eq0/SetType/Ord0 wins by
+               PRIORITY and not by declaration order (when both were at
+               the default the model instance won only by
+               newest-declaration-first order, which once let Cerberus's
+               location-sensitive auto Eq0 for Symbol.identifier be chosen
+               over the model's name-only one); strictly ABOVE the generic
+               low(=100) bridges/defaults in LemLib/Basic_classes, so where
+               no model instance exists the real auto trio still beats
+               every default. Resolution probe:
+               tests/comprehensive/test_instance_priority.lem
+               (build-failing if the wrong instance wins). *)
             let real_trio (bounds : string list) (inst_kw : string) : Output.t =
               Output.flat [
                 from_string inst_kw; bare_tvs; cls_bounds "Ord" bounds;
@@ -9391,14 +9369,14 @@ type pat_style = FunParam | MatchArm
                  | Some bounds -> derived_trio bounds
                  | None -> residual_trio residual_reason "\ninstance (priority := low)");
             ]
-    (* ===== Arc-10 S2: derived structural comparisons for mutual blocks =====
+    (* ===== Derived structural comparisons for mutual blocks =====
        For every derivable type of a (homogeneous-parameter) mutual block,
        emit total mutual `beq_derived` / `compare_derived` functions plus
        the specialized container helpers structural recursion needs, then
        let generate_beq_ord_instances bridge the BEq/Ord/SetType/Eq0/Ord0
        instances onto them.
 
-       PARITY CONVENTION (OCaml polymorphic (=) / compare, the arc-4
+       PARITY CONVENTION (OCaml polymorphic (=) / compare, Cerberus's
        CerbStepInstances precedent):
        - equality is structural: same constructor + equal fields;
        - compare ranks constructors like the OCaml runtime
@@ -9413,17 +9391,16 @@ type pat_style = FunParam | MatchArm
        - leaf fields (no mutual sibling inside) compare through their Lean
          BEq/Ord instances. Leaf variants that mix nullary-after-block
          constructors no longer take Lean's `deriving Ord` (flat declaration
-         index): the parity-fix slice (2026-09-03, F4) routes every such
-         variant through this derivation (texp_needs_ocaml_rank), so the
+         index): every such variant is routed through this derivation
+         (texp_needs_ocaml_rank), so the
          OCaml two-class rank holds at leaves too.
 
        FAIL-CLOSED: types whose comparison cannot be honestly derived
        (function-typed fields anywhere — where OCaml (=)/compare RAISE —
        or references to such siblings, or siblings under unsupported
-       container heads) are left exactly as before: sorried residual
-       instances, explicitly counted, overridable by hand instance files.
-       Underivability PROPAGATES: a "derived" body is never routed through
-       a sorried instance. *)
+       container heads) keep their loud residual instances, overridable
+       by hand instance files. Underivability PROPAGATES: a "derived"
+       body is never routed through a residual instance. *)
     and lean_output_str (o : Output.t) : string =
       Ulib.Text.to_string (to_rope (r"\"") lex_skip need_space o)
     and lean_typ_render (ty : Types.t) : string =
@@ -9448,9 +9425,9 @@ type pat_style = FunParam | MatchArm
       (* Candidates: (path, Lean type name, tnvar_list, ctors) with
          ctor = (Lean ctor name, field semantic types). Instance-backed
          block members (skip_instances / deriving-covered) are LEAVES;
-         everything else that fails candidacy is a SORRIED sibling —
+         everything else that fails candidacy is a RESIDUAL sibling —
          referencing it poisons the referencing type (fail-closed). *)
-      let candidates, sorried0 =
+      let candidates, residual0 =
         List.fold_right (fun (((name, _), tnvar_list, path, t, _)) (cs, os) ->
           if skip_type path then (cs, os)
           else if deriving_covered t then (cs, os)
@@ -9472,23 +9449,23 @@ type pat_style = FunParam | MatchArm
         ) non_abbrev ([], [])
       in
       (* Fixpoint: drop candidates with any underivable field shape;
-         dropped candidates become sorried siblings for the next round. *)
-      let rec solve cands sorried =
+         dropped candidates become residual siblings for the next round. *)
+      let rec solve cands residual =
         let derived_map = List.map (fun (p, nm, _, _) -> (p, nm)) cands in
         let ok, bad = List.partition (fun (_, _, _, ctors) ->
           List.for_all (fun (_, args) ->
             List.for_all (fun ty ->
-              not (lean_cmp_shape_is_bad (lean_cmp_shape d derived_map sorried ty))) args) ctors)
+              not (lean_cmp_shape_is_bad (lean_cmp_shape d derived_map residual ty))) args) ctors)
           cands
         in
-        if bad = [] then (ok, sorried)
-        else solve ok (List.map (fun (p, _, _, _) -> p) bad @ sorried)
+        if bad = [] then (ok, residual)
+        else solve ok (List.map (fun (p, _, _, _) -> p) bad @ residual)
       in
-      let derived, sorried = solve candidates sorried0 in
+      let derived, residual = solve candidates residual0 in
       if derived = [] then (emp, [])
       else begin
         let derived_map = List.map (fun (p, nm, _, _) -> (p, nm)) derived in
-        let shape_of ty = lean_cmp_shape d derived_map sorried ty in
+        let shape_of ty = lean_cmp_shape d derived_map residual ty in
         (* Bound tyvars of a type: Type-kind parameters free in some field
            (covers transitive needs — a sibling application's arguments are
            part of the field type), in parameter-declaration order. *)
@@ -9726,7 +9703,7 @@ type pat_style = FunParam | MatchArm
         ] in
         (from_string text, List.map (fun (path, _, _, bounds, _) -> (path, bounds)) per_type)
       end
-    (* ===== D2-enablers (2026-09-04): derived computable SIZE functions
+    (* ===== Derived computable SIZE functions
        (mechanism comment at lean_size_shape, top level). For a recursive
        block of generated inductives, one mutual block: `t.lemSize` per
        member type and `<first>.lemSize_aux<k>` per container element
@@ -9870,8 +9847,8 @@ type pat_style = FunParam | MatchArm
       (* In library modules, skip instance generation for opaque types
          (zero-constructor inductives like phantom types ty1..ty4096).
          These types carry only type-level information (e.g., bit widths
-         via Size) and are never used as data — sorry-based instances are
-         useless and produce compiler warnings.
+         via Size) and are never used as data, so no instance is emitted
+         for them.
          In user modules, opaque types (e.g., tid, location in cmm.lem) may
          appear as constructor arguments, so downstream types need their
          BEq/Ord instances for deriving to work. *)
@@ -9884,14 +9861,14 @@ type pat_style = FunParam | MatchArm
         generate_inhabited_instance [path] t) ts in
       let beq_instances = List.map (fun (((_, _), _, _, t, _) as td) ->
         if (texp_needs_ocaml_rank t && texp_can_derive_beq t) || texp_fn_fields t then
-          (* F4: OCaml constructor rank for a single mixed-order variant —
-             a mutual block of one through the arc-10 derivation; likewise
-             a type with function-typed fields (linksem audit A1). *)
+          (* OCaml constructor rank for a single mixed-order variant — a
+             mutual block of one through the derivation; likewise a type
+             with function-typed fields. *)
           let (cmp_defs, derived_cmp) = derived_comparison_single td in
           Output.flat [cmp_defs; generate_beq_ord_instances ~emit_deriving:false ?derived_cmp td]
         else generate_beq_ord_instances td) ts in
         Output.flat [concat_str "\n" mapped; concat emp beq_instances; generate_lem_size ts]
-    (* F4 helper: run the derived-comparison generator on a single type
+    (* Run the derived-comparison generator on a single type
        whose constructor order needs the OCaml rank, fail-closed. A shape
        the derivation cannot recurse through (a self-reference under a
        head other than list/maybe/either/tuple) would leave the type with
@@ -9941,19 +9918,17 @@ type pat_style = FunParam | MatchArm
       (* If only 1 non-abbreviation type remains, it was rendered with deriving
          (not as a mutual block), so emit_deriving:true to avoid duplicate instances. *)
       let emit_deriving = List.length non_abbrev <= 1 in
-      (* F4: a block of one whose single variant needs the OCaml rank goes
+      (* A block of one whose single variant needs the OCaml rank goes
          through the derivation like the single-type path. *)
       let single_needs_rank = match non_abbrev with
         | [(_, _, _, t, _)] -> (texp_needs_ocaml_rank t && texp_can_derive_beq t) || texp_fn_fields t
         | _ -> false in
-      (* Arc-10 S2: derived structural comparisons for the block's
-         derivable types (real mutual beq/compare defs; fail-closed
-         residual for the rest). Homogeneous-parameter multi-type blocks
-         only: single-type blocks keep the historical emission, and
-         Type-1 (indexed) blocks are a fail-closed generation-time
-         error in generate_beq_ord_instances (arc-10 audit fix,
-         auditor A F1 — the sorried Type-1 residual is deleted;
-         population empty). *)
+      (* Derived structural comparisons for the block's derivable types
+         (real mutual beq/compare defs; fail-closed residual for the
+         rest). Homogeneous-parameter multi-type blocks only: single-type
+         blocks keep the single-type emission, and Type-1 (indexed)
+         blocks are a fail-closed generation-time error in
+         generate_beq_ord_instances. *)
       let (cmp_defs, derived_info) =
         if single_needs_rank then
           (match List.find_opt (fun (_, _, _, t, _) -> texp_needs_ocaml_rank t || texp_fn_fields t) non_abbrev with
@@ -9970,11 +9945,9 @@ type pat_style = FunParam | MatchArm
           Option.map snd (List.find_opt (fun (p, _) -> Path.compare p path = 0) derived_info) in
         generate_beq_ord_instances ~is_type1 ~emit_deriving ?derived_cmp td) ts_list in
         Output.flat [inhabited_output; from_string "\n"; cmp_defs; concat emp beq_instances; generate_lem_size ts_list]
-    (* Arc-8 S2 (D4): the former `default_value` (the L_undefined
-       renderer whose Typ_var case emitted `sorry`) is DELETED —
-       L_undefined renders as failwithI (audit fix; mirrors OCaml's
-       `failwith m`, src/backend.ml:864), which never emits an opaque
-       inhabitant or a silent default. *)
+    (* L_undefined renders as failwithI (mirroring OCaml's `failwith m`,
+       src/backend.ml:864), never as an opaque inhabitant or a silent
+       default. *)
       ;;
 end
 ;;
@@ -10089,28 +10062,28 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
       lean_cmp_prepass A.env ds;
       lean_fuel_prepass A.env ds;
       lean_supply_prepass A.env ds;
-      (* Arc-8 S1: compute the Inhabited census + tier-2 plans in
-         declaration order before emission (defs is fold_right). *)
+      (* Compute the Inhabited census + tier-2 plans in declaration
+         order before emission (defs is fold_right). *)
       lean_inhabited_prepass A.env ds;
-      (* Arc-8 S2: compute the [Inhabited] threading census (failure
-         sites at tyvar-typed positions -> signature binders, monotone
-         over the call graph) — needs the S1 census, so runs after it.
+      (* Compute the [Inhabited] threading census (failure sites at
+         tyvar-typed positions -> signature binders, monotone over the
+         call graph) — needs the instance census, so runs after it.
          Also guard-sweeps instance methods (rule 3). *)
       lean_failwith_thread_prepass A.env ds;
-      (* D2-enablers: the derived-size census for this module's blocks
+      (* The derived-size census for this module's blocks
          (idempotent re-run of the invocation-wide pass). *)
       lean_size_prepass A.env ds;
       let lean_defs = defs false false ds in
       (* Drain any deferred abbrevs (e.g., abbrev mword after class Size).
 
-         INVARIANT (arc-14 S2 B6, be:S17, previously unstated): a deferred
+         INVARIANT: a deferred
          abbrev is for HAND-WRITTEN consumers only. Deferral to end-of-file
          is sound because TYR_subst substitutes the underlying type INLINE
          at every generated use, so nothing in the generated file ever
          references the abbrev by name before it appears. Making generated
          code use the abbrev name would create forward references — do not.
 
-         ORDER (be:S17): DECLARATION order, deliberately: defs folds
+         ORDER: DECLARATION order, deliberately: defs folds
          last-to-first and each abbrev PREPENDS, so the drained list is
          already in declaration order — no rev (the historical `List.rev`
          emitted reverse-declaration order, an accident of a twice-reversed
@@ -10174,9 +10147,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
           let bridges_import = if has_bridges then emp
             else from_string "import LemLib.Bridges\n" in
           let lib_namespaces = Types.Pfmap.fold (fun acc _path md ->
-            (* be:G5 consolidation: the ONE library test
-               (Backend_common.lean_module_is_library) — this scan
-               previously re-implemented the coq-rename proxy inline. *)
+            (* the ONE library test (Backend_common.lean_module_is_library) *)
             if Backend_common.lean_module_is_library md then begin
               let mod_name = Path.to_string md.Typed_ast.mod_binding in
               let lean_mod = String.concat "" ["LemLib."; String.capitalize_ascii mod_name] in
@@ -10211,8 +10182,8 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
           Output.flat (
             from_string "\n/- lem: fuel_measure obligations (statements generated here; proofs in the hand-written module imported above) -/\n"
             :: !St.measure_obligations) in
-        (* linksem 2026-09-28 (B9, retired with the 4.32.2 toolchain move):
-           Lean 4.28 evaluated hoisted closed terms when a module LOADED, so
+        (* No `compiler.extract_closed false` is emitted (it was, on Lean
+           4.28, which evaluated hoisted closed terms when a module LOADED, so
            a closed call to a partial function in an untaken branch
            (`if b then g 10 else 0`) panicked at start-up; generated modules
            then set `compiler.extract_closed false`. From 4.32 closed terms
