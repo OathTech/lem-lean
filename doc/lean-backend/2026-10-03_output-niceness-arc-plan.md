@@ -339,3 +339,32 @@ two-tier rule; the behavioural lanes run at the merge):
   exceptions are Cerberus's `Core_run` `import Operators`, which the
   Makefile strips, and linksem's two stale `Dump_image*` files.
 - Comment coverage after S2: Cerberus 62/4060 missing, linksem 42/3833.
+
+## 9. S3 scope (2026-10-03)
+
+**Review.** A fresh reviewer read the generated output as an experienced
+Lean user would. Its findings were grouped into four packages. The
+orchestrator re-measured the headline numbers:
+- 48% (linksem) and 59% (Cerberus) of the generated text sits on lines
+  over 200 characters; the longest line is 105,883 characters.
+- `Â§` appears in 32 files.
+- Cerberus has 1,044 `(priority := 500)` instance headers.
+
+The packages:
+- **A, layout engine:** one-line bodies broken into one arm per line at
+  the author's indentation; comments that drift past a signature's result
+  type.
+- **B, printer cleanup:** spacing, parentheses around atoms and doubled
+  parentheses, merged `open` lines, merged binders, the garbled `§` in
+  comments.
+- **C, derived-code compaction:** shorter instance and derived
+  boilerplate. It changes declarations.
+- **D, names, docs and types:** docstrings, kept abbreviations, fewer
+  renamed locals, fewer ascriptions. Consumer-visible.
+
+**Ruling** [USER 2026-10-03], answering "Which packages should the S3
+niceness pass include?": "A: Layout engine (Recommended), B: Printer
+cleanup (Recommended)". C and D are not in this arc; they stay candidates
+for later decisions. Order [AGENT]: B, then A. Gate for both: the
+generated declarations are unchanged, as shown by the declaration census
+on both consumers; the token check also applies to whitespace-only steps.
