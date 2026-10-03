@@ -649,3 +649,60 @@ middle of a line (`match let i := …` as a discriminant, `(let lo1 :=` in
 `Cmm_csem`) — the `Align` rule above is the fix; `x=>` and `:=lemNatDiv`
 (no space, left by S3-B) were one token to the first lexer, and the fixed
 keyword spacing of the first printer added a space there.
+
+## 12. Arc close: integration and final gate (2026-10-03)
+
+**Integration.** The branches were folded into `arc/output-niceness`:
+- `arc/output-niceness-layout` (S3-A, `ac5565b`): fast-forward.
+- `docs/lem-docs-rationalize` (S4): rebased onto it, then fast-forwarded:
+  - `8dd6ab8`: the docs rationalization;
+  - `14d77b5`: the fixes from a fresh reviewer's "accept with fixes"
+    review (no MAJOR findings; 33 of 34 checked claims held).
+- `74858d9`: the last two backend comments get `lem:`; DESIGN describes the
+  layout pass; TODO 42 is closed.
+
+The orchestrator re-verified the S3-A worker's gates independently. The
+worker had reported that the drift check could not run, because a pristine
+upstream build was missing. The build exists at
+`linksem-lean/deps/lem-upstream`, and the orchestrator ran the check.
+
+**Final gate on `74858d9`** (verbatim tails):
+```
+tokdiff: identical modulo comments/whitespace (170 files)     [vs S3-A output]
+tokdiff: identical modulo comments/whitespace (194 files)
+comment coverage: 62 of 4060 source comments missing (16 modules)
+comment coverage: 42 of 3833 source comments missing (11 modules)
+duplicated comments: 0 / 2
+code after a multi-line comment: 0 / 0
+linksem build exit 0 / linksem census (erased) diff lines vs B: 0
+cerberus build exit 0 / cerberus census (erased) diff lines vs B: 0
+lemlib exit 0
+=== Generation: 69 passed, 0 failed, 0 skipped ===
+  OK: Test_comments.lean: comments preserved, layout sound
+  OK: Test_layout.lean: layout sound (15 alternatives, 2 lets, 14 comments, width 100)
+Build completed successfully (199 jobs).
+parity: 48 probes: 38 OK, 10 XFAIL (registered, Lean side pinned), 0 FAIL
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+upstream-drift: 944 upstream files; 198 differ   [32 library code files, all comments/whitespace only; cerberus-ocaml and linksem-ocaml absent: byte-identical]
+lean_keyword_probe: 178 core keywords checked
+```
+- Line lengths, derived:
+  - Cerberus: longest line 78,812 → 602 characters; text on lines over
+    200 characters 55% → 1%.
+  - linksem: longest line 57,266 → 394; 43% → 0%.
+  - Lines over 1000 characters: 0 in both trees.
+- Behavioural lanes not run: the Cerberus ladder and the linksem corpus
+  differential. The declaration census, unchanged since S2 (macro scopes
+  erased), is the argument that no behaviour moved. Only S2 changed
+  declarations, and only from accessor `def`s to projections with the
+  same names.
+- **For the auditor:** the erased census is weaker than the strict one.
+  Two hygienic helpers can erase to the same name, so a value that switched
+  between them would not register. The strict censuses were checked by
+  hand for S1 (Cerberus `Cabs`) and for S3-B (linksem `c_type_top`): only
+  helper numbers moved, together with the values that cite them.
+
+**Side finding (linksem, not this arc):** `dwarf.lem:5143` writes
+`| None ->`. Lem's constructor is `Nothing`, so `None` is a variable
+pattern there. It is the last arm and behaves as a wildcard, on OCaml as
+well. It is a candidate for linksem's upstream tray.
