@@ -170,7 +170,21 @@ describe a design that is no longer current.
   Its "Package C" section (same day) is the cleanup slice: dead code and
   LemLib's dead definitions deleted with per-name consumer-grep evidence,
   one reserved-name table, one instance-priority constant, the comment and
-  message sweep, the TODO 39 test, and the gate tails per commit.
+  message sweep, the TODO 39 test, and the gate tails per commit. Its
+  "BEq-lattice slice" section (same day) lands the ruling on the
+  [BEq instance-lattice design note](2026-10-03_beq-instance-lattice-design.md)
+  ([USER 2026-10-03] "(a) 450/400"): the `[Eq0 a] : BEq a` bridge at 450
+  and the comparator bridges at 400, below core's `BEq`; the kernel
+  agreement theorems (`LemLibTheorems`, namespace `BeqLattice`), the
+  plant-tested probe legs, the before/after census of both consumers, the
+  Cerberus re-pin patch
+  ([`2026-10-03_beq-lattice-cerberus-repin.patch`](2026-10-03_beq-lattice-cerberus-repin.patch)),
+  the cerberus-sl re-pin note and the TODO 45 re-measurement.
+- 2026-10-03 [BEq instance-lattice design note](2026-10-03_beq-instance-lattice-design.md):
+  the design pass ruled "Design pass first" on code-review finding L1 —
+  the lattice as measured (core's `BEq` at 500, the undocumented tie),
+  the consumer census, options (a)–(d) and the recommendation the
+  operator adopted.
 
 ## When the front documents were checked
 
@@ -194,6 +208,16 @@ describe a design that is no longer current.
   [backend-hardening record](2026-10-03_backend-hardening-record.md), whose
   gate run is quoted there; README.md was not touched (its claims were
   checked against the change list and none moved).
+- 2026-10-03, BEq-lattice slice: DESIGN.md ("Instance priorities come
+  from one table", the `termination_argument … = automatic` row), TODO.md
+  (46 closed, 45 re-measured, the `src/lean_backend.ml` line references
+  re-derived by grep after the slice's edits), the lattice note's
+  2026-10-03 addendum and this index; the gate run is quoted in the
+  [backend-hardening record](2026-10-03_backend-hardening-record.md),
+  "BEq-lattice slice"; the manual chapter's two matching paragraphs
+  (the `termination_argument … = automatic` limit and the priority table)
+  were updated with them. README.md was checked against the change list;
+  none of its claims moved.
 
 ## Elsewhere
 

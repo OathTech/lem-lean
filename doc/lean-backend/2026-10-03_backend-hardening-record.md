@@ -715,3 +715,467 @@ and `unsupportedNatFrom` finds no use in hand-written consumer Lean
 (Cerberus `lean_frontend/*.lean`, cerberus-sl, linksem handwritten/driver).
 The same names, plus `listSet` and the `Pmap` mirrors, have no use in the
 regenerated consumer trees either.
+
+## BEq-lattice slice: the `[Eq0 a] : BEq a` bridge below core (2026-10-03)
+
+Rulings, verbatim [USER 2026-10-03]: "(a) 450/400 (Recommended)" and
+"Own slice after A and C". The design pass it lands is
+[`2026-10-03_beq-instance-lattice-design.md`](2026-10-03_beq-instance-lattice-design.md)
+(code-review finding L1, TODO item 46). Worked on `arc/backend-hardening`
+from `8666b7f` (packages A and C verified). Every decision below that is
+not one of the rulings is [AGENT]. Lean 4.32.2; every Lean run through
+`cerberus-lean/scripts/capped`; consumer inputs frozen as in packages A
+and C (Cerberus `51a7402ce`, linksem `f54d119`); scratch under
+`.tmp/hardening/beq/` (ephemeral, deleted at slice end).
+
+### 1. The change
+
+`src/lean_backend.ml`: the one priority constant of package C became a
+three-row table beside the lattice comment — `lean_instance_auto_priority
+= 500` (unchanged), `lean_instance_eq0_bridge_priority = 450`,
+`lean_instance_comparator_bridge_priority = 400` — with one keyword
+builder `lean_instance_kw`. The class emitter's two bridge sites use the
+two new rows: the `[Eq0 a] : BEq a` bridge, which was emitted with no
+priority (Lean's default 1000), and the comparator-derived
+`[SetType a]`/`[MapKeyType a] : BEq a` bridges, which were at the auto
+slot. `make` regenerated the library; `git diff lean-lib/` is exactly the
+three priority lines (verbatim):
+
+```
+-instance { a : Type } [Eq0 a] : BEq a where
++instance (priority := 450) { a : Type } [Eq0 a] : BEq a where
+-instance (priority := 500) { a : Type } [SetType a] : BEq a where
++instance (priority := 400) { a : Type } [SetType a] : BEq a where
+-instance (priority := 500) { a : Type } [MapKeyType a] : BEq a where
++instance (priority := 400) { a : Type } [MapKeyType a] : BEq a where
+```
+
+(`Basic_classes.lean:32`, `:184`; `Map.lean:55`.) Both consumer trees
+regenerated with the changed `lem` are byte-identical to the trees from
+`8666b7f`'s `lem` (`diff -rq`: `cerb: 0 differing files`, `linksem: 0
+differing files`; 170 and 194 files).
+
+### 2. The lattice, measured before and after
+
+Against LemLib at `8666b7f` (`#synth`, `pp.explicit`), verbatim:
+
+```
+@instBEqOfEq0 Nat Lem_Num.instEq0Nat_1
+@instBEqOfEq0 Int Lem_Num.instEq0Int_1
+@instBEqOfEq0 String instEq0String
+@instBEqOfEq0 Char instEq0Char
+@instBEqOfEq0 Bool instEq0Bool
+@instBEqOfEq0 Unit instEq0Unit
+@Lem_Map.instBEqOfMapKeyType Int8 (@Lem_Map.instMapKeyTypeOfSetType Int8 (@instSetTypeOfOrd Int8 Int8.instOrd))
+@instBEqOfEq0 Int32 Lem_Num.instEq0Int32
+@instBEqOfEq0 Int64 Lem_Num.instEq0Int64
+@Lem_Map.instBEqOfMapKeyType UInt64 (@Lem_Map.instMapKeyTypeOfSetType UInt64 (@instSetTypeOfOrd UInt64 UInt64.instOrd))
+instBEqLemOrdering
+Lem_Word.instBEqBitSequence
+@List.instBEq Nat (@instBEqOfEq0 Nat Lem_Num.instEq0Nat_1)
+ProbeOld.lean:57:0: error: failed to synthesize
+  @LawfulBEq Nat (@instBEqOfEq0 Nat Lem_Num.instEq0Nat_1)
+```
+
+The Eq0 bridge won at Nat, Int, String, Char, Bool, Unit, Int32, Int64; the
+comparator bridge (`instBEqOfMapKeyType`, the newer of the two tied with
+core at 500) won at Int8, Int16, ISize, UInt8, UInt16, UInt32, UInt64,
+USize, `BitVec n` and core's `Ordering`. Derived (`LemOrdering`,
+`bitSequence`) and specific (`List`, `Option`, `Prod`, `Pset`, `Fmap`,
+`Sum`) instances were not displaced, only their base-type arguments. The
+old base `Eq0` bodies, verbatim `#print` (the Int, Int32, Int64, String,
+Char and Bool instances have the same shape over their `Ord`):
+
+```
+def Lem_Num.instEq0Nat : Eq0 Nat :=
+@Eq0.mk Nat (fun x y => @BEq.beq Nat (@instBEqOfSetType Nat (@instSetTypeOfOrd Nat instOrdNat)) x y) …
+def Lem_Num.instEq0Nat_1 : Eq0 Nat :=
+@Eq0.mk Nat (fun x y => @BEq.beq Nat (@instBEqOfEq0 Nat Lem_Num.instEq0Nat) x y) …
+def instEq0Unit : Eq0 Unit :=
+@Eq0.mk Unit (fun x x_1 => true) fun x x_1 => false
+```
+
+After the change every one of those seventeen types resolves to
+`@instBEqOfDecidableEq T instDecidableEqT` (verbatim for the three the
+probe names: `instBEqOfDecidableEq` ×3; `LawfulBEq`: `Nat.instLawfulBEq`,
+`instLawfulBEqString`, `@instLawfulBEq UInt64 instDecidableEqUInt64`), the
+base `Eq0` bodies re-elaborate to core
+(`instEq0Nat_1 := @Eq0.mk Nat (fun x y => @BEq.beq Nat (@instBEqOfDecidableEq Nat instDecidableEqNat) x y) …`),
+and `@instBEqOfEq0 Nat Lem_Num.instEq0Nat_1 = instBEqOfDecidableEq` holds by
+`rfl` at all seven Eq0-route types. `Std.LawfulEqOrd` exists in core for
+every switched type except `Unit` (LemLib's own `instOrdUnit_lemLib`) and
+`Ordering`.
+
+### 3. Probes, plant-tested
+
+`tests/comprehensive/lean-test/TestInstancePriorityCheck.lean` gained legs
+5 and 6: `#guard_msgs in #synth BEq Nat/String/UInt64` expecting
+`instBEqOfDecidableEq`; `LawfulBEq` at the three types by `inferInstance`;
+the operator's example `(a b : Nat) (h : (a == b) = true) : a = b := by simpa
+using h` (and at `String`); `(a == b) = decide (a = b) := rfl` at `Int`; a
+model-only inductive still resolving to `instBEqOfEq0`; polymorphic
+`[Eq0 a] [SetType a]` code resolving to the Eq0 bridge (`rfl` against
+`isEqual`). Legs 1–4 are unchanged. The plant compiled the file with the
+generated `Test_instance_priority` against the `8666b7f` LemLib in a scratch
+Lake project; every leg-5 line fails, legs 1–4 and 6 pass (verbatim, the
+nine errors):
+
+```
+error: TestInstancePriorityCheck.lean:63:0: ❌️ Docstring on `#guard_msgs` does not match generated message:
+- info: instBEqOfDecidableEq
++ info: instBEqOfEq0
+error: TestInstancePriorityCheck.lean:65:0: ❌️ Docstring on `#guard_msgs` does not match generated message:
+- info: instBEqOfDecidableEq
++ info: instBEqOfEq0
+error: TestInstancePriorityCheck.lean:67:0: ❌️ Docstring on `#guard_msgs` does not match generated message:
+- info: instBEqOfDecidableEq
++ info: Lem_Map.instBEqOfMapKeyType
+error: TestInstancePriorityCheck.lean:68:27: failed to synthesize instance of type class
+  LawfulBEq Nat
+error: TestInstancePriorityCheck.lean:69:30: failed to synthesize instance of type class
+  LawfulBEq String
+error: TestInstancePriorityCheck.lean:70:30: failed to synthesize instance of type class
+  LawfulBEq UInt64
+error: TestInstancePriorityCheck.lean:72:56: Type mismatch: After simplification, term
+  h
+ has type
+  (a == b) = true
+but is expected to have type
+  a = b
+error: TestInstancePriorityCheck.lean:73:59: Type mismatch: After simplification, term
+  h
+ has type
+  (a == b) = true
+but is expected to have type
+  a = b
+error: TestInstancePriorityCheck.lean:74:51: Type mismatch
+  rfl
+has type
+  ?m.7 = ?m.7
+but is expected to have type
+  (a == b) = decide (a = b)
+```
+
+The same project against the changed LemLib: `Build completed successfully
+(36 jobs).` These legs are speedbumps on the elaboration property; the
+trust property, value parity, is §4.
+
+### 4. Agreement theorems (`lean-lib/LemLibTheorems.lean`, namespace `BeqLattice`)
+
+For every type whose winner switched, a kernel theorem states the OLD
+instance term — spelled out, since it no longer wins resolution — equal to
+the NEW one. `cmpBEq_eq_decide` (`[Ord α] [Std.LawfulEqOrd α] [DecidableEq α]`:
+the comparator route `match defaultCompare a b with | .EQ => true | _ =>
+false` equals `decide (a = b)`) and its two instance-form corollaries
+`setTypeBridge_eq_core` (the Eq0 route's old body:
+`@instBEqOfSetType α (@instSetTypeOfOrd α _)`) and `mapKeyBridge_eq_core`
+(`@instBEqOfMapKeyType α (@instMapKeyTypeOfSetType α (@instSetTypeOfOrd α _))`);
+then per type, with the instance names as `#print`/`#synth` gave them:
+`nat_old_eq_new`, `int_`, `string_`, `char_`, `bool_`, `int32_`,
+`int64_old_eq_new` (Eq0 route), `unit_old_eq_new` (old body `true`, by
+cases), `int8_`, `int16_`, `isize_`, `uint8_`, `uint16_`, `uint32_`,
+`uint64_`, `usize_`, `bitVec_old_eq_new` (`∀ n`) and `ordering_old_eq_new`
+(by cases; core has no `LawfulEqOrd Ordering`) for the comparator route. The
+new state is pinned by `rfl`: `isEqual_nat`/`_nat_1`/`_int`/`_int_1`/
+`_int32`/`_int64`/`_string`/`_char`/`_bool` (`Eq0.isEqual a b = decide (a =
+b)`), `isEqual_unit` (by cases) and `bridge_<T>_is_core`
+(`@instBEqOfEq0 T instEq0T = instBEqOfDecidableEq`) for the seven Eq0-route
+types. `#print axioms` (build log, verbatim shape): `cmpBEq_eq_decide`,
+`setTypeBridge_eq_core`, `mapKeyBridge_eq_core`, `bool_old_eq_new`,
+`ordering_old_eq_new` depend on `[propext]`; `unit_old_eq_new` and
+`isEqual_unit` on none; every other `*_old_eq_new` on `[propext,
+Classical.choice, Quot.sound]` (through core's `LawfulEqOrd` instances). No
+`native_decide`, `bv_decide`, `ofReduce*`, `decide`, `sorry`.
+
+Coverage of the census pairs (§5): every `(Nat, Lem_Num.instEq0Nat_1)` site
+and its abbreviations (`aid`, `thread_id`, `thread_id0`, `allocation_id`,
+`loop_id`, `tid`, `reg`, `scope_id`, `provenance_id`; linksem `cfa_*`,
+`address_expr_fn_ref`) → `nat_old_eq_new`; `(Int, instEq0Int_1)` and
+`CerbMem.StorageInstanceId`/`Address`/`SymbolicStorageInstanceId`,
+`cfa_sfoffset`, `integer_value_base` → `int_old_eq_new`; `(String,
+instEq0String)`, `sym`, `cabs_identifier` → `string_old_eq_new`; Bool, Char,
+Int32, Int64 → their theorems; `(Unit, instEq0Unit)` and
+`sdt_unspecified_parameter` → `unit_old_eq_new`; UInt8/UInt32/UInt64 and
+`Ordering` comparator sites → `uint*_old_eq_new`, `ordering_old_eq_new`. The
+two consumer-model pairs: Cerberus `(String, instEq0String_symbol)`, body
+`@BEq.beq Int (@instBEqOfEq0 Int Lem_Num.instEq0Int_1) (digest_compare x y) 0`
+(verbatim `#print`), is `int_old_eq_new` at its one `==` plus Cerberus's own
+`CerbCtypeMeasure.digest_compare_eq_zero_iff`, which rebuilt green in the
+after-census; linksem's `(Nat | uint32 | uint64, instEq0Uint64_elf_types_native_uint_2)`
+and the nine other `instEq0Uint{32,64}_elf_types_native_uint*` are a chain of
+`isEqual := fun x y => x == y` bodies (verbatim `#print`: `_2 → Uint32 _6 →
+_5 → Uint64 _1 → Uint32 _4 → _3 → _2 → Uint64 → Uint32 _1 → Uint32 →
+Lem_Num.instEq0Nat_1`), so every one is `nat_old_eq_new`. In linksem even
+plain `Nat` resolved to that model instance (`#synth BEq Nat ⟶
+@instBEqOfEq0 Nat instEq0Uint64_elf_types_native_uint_2`: `uint64` is a
+reducible abbreviation of `Nat`); it is core now.
+
+### 5. Census
+
+Instrument: `Census3.lean` (scratch; Census2 plus instance normalisation and
+site records). For every constant of the consumer modules it records the
+type/value hashes, the same hashes after replacing every application of
+`instBEqOfEq0`, `instBEqOfSetType`, `instBEqOfMapKeyType` or
+`instBEqOfDecidableEq` by one marker (hygienic names canonicalised by the
+NORMALISED hashes, so a helper whose only change is the switch keeps its
+name), the binder signature, safety, reducibility hints and status,
+instance/projection/inline/extern/matcher flags, and one `SITE` row per
+instance application. A declaration is EXPLAINED when its raw hashes moved
+and its normalised hashes did not. Both consumers were built from scratch
+copies (Cerberus's `lean_frontend` with the frozen generated tree and the 49
+hand-written files of `51a7402ce`; linksem's `lean/` with the frozen
+generated tree, `gen-roots.sh` re-run), with the LemLib dependency pointed by
+path first at a `git archive 8666b7f lean-lib` copy, then at this worktree's
+`lean-lib`.
+
+**Cerberus** (218 `CerberusLean` roots; before 22:26:32–22:29:24 and after
+22:44:47–22:45:06, `Build completed successfully (252 jobs).` both; the
+after-build with the §6 patch). Verbatim census tails:
+`census3: 34087 constants in 218 modules (146 hygienic, 3 rounds, 2587 instance sites)`
+before, `34083 constants … 2587 instance sites` after (122 identical hygienic
+twins collapse to one canonical name in each; 33965/33961 distinct). Derived
+comparison: 33961 common; 4 only-before (the old `natEq0_iff` proof's
+`match_1`, `_sparseCasesOn_1`, `_proof_1_4`, `_proof_1_5`); **675
+declarations changed** (590 `def`, 82 `thm` — statements only, proofs
+unmoved — 1 `opaque` `CabsImport.positionFiles`, the private `CoreParser.ScanSt`
+constructor and recursor, whose types mention `==` at `UInt64`); **675
+explained, 0 not**; 493 in generated modules, 182 in hand-written ones
+(`CerbMem` 53, `CoreParser` 42, `Core_aux_lemMeasureProofs` 28, the other
+measure-proof modules, `CabsImport` 8, …; all compiled unchanged except §6);
+0 in `_auxiliary` modules. 1971 further declarations differ only in their
+reducibility-hint height (`h=regN`), the expected consequence of a different
+instance in the dependency cone. The 2448 instance sites inside the changed
+declarations are all `instBEqOfDecidableEq` after; the 44 polymorphic bridge
+sites (type a bound variable) are unchanged; no bridge site at a named type
+remains. Switched pairs (sites / declarations, derived):
+
+```
+  859 / 335  instBEqOfEq0 @ Nat / Lem_Num.instEq0Nat_1
+  753 / 232  instBEqOfEq0 @ Int / Lem_Num.instEq0Int_1
+  342 / 133  instBEqOfEq0 @ String / instEq0String_symbol
+  162 / 100  instBEqOfEq0 @ Bool / instEq0Bool
+   79 /  23  instBEqOfEq0 @ Char / instEq0Char
+   48 /  19  instBEqOfMapKeyType @ UInt64
+   46 /  19  instBEqOfEq0 @ Unit / instEq0Unit
+  120 /  46  instBEqOfEq0 @ aid, thread_id, allocation_id, loop_id, tid, reg, scope_id, provenance_id, thread_id0 / instEq0Nat_1
+   28 /  16  instBEqOfEq0 @ CerbMem.StorageInstanceId, Address, SymbolicStorageInstanceId / instEq0Int_1
+    7 /   6  instBEqOfEq0 @ String / instEq0String
+    5 /   4  instBEqOfMapKeyType @ UInt8, UInt32
+```
+
+**linksem** (97 generated + 97 `_auxiliary` + 7 hand-written modules; before
+22:31:51–22:32:18, after 22:45:50–22:46:07, `Build completed successfully
+(324 jobs).` for `Linksem LinksemAux HandwrittenTest main_link`). Verbatim:
+`census3: 12074 constants in 201 modules (8 hygienic, 3 rounds, 3972 instance sites)`
+before and after (12070 distinct). **596 declarations changed, all `def`,
+596 explained, 0 not**; 5 in hand-written modules
+(`Byte_sequence_wrapper.find_byte.go` and its `_f`/`_sunfold`/`_unsafe_rec`,
+`Byte_sequence_wrapper.instBEqByte_sequence`, `Filesystem_wrapper.is_abs_path`),
+0 in `_auxiliary`; 839 height-only hint changes; 3923 after-sites all core.
+Pairs: `(Nat, instEq0Uint64_elf_types_native_uint_2)` 3010 / 409, `(String,
+instEq0String)` 256 / 107, `(uint32, …_2)` 193 / 65, `(Nat, instEq0Nat_1)`
+140 / 32, Char 90 / 12, `(uint64, …_2)` 51 / 19, Bool 51 / 24, Int 27 / 21,
+UInt8 (comparator) 25 / 12, `cfa_register`/`cfa_offset`/`cfa_delta`/
+`cfa_address`/`address_expr_fn_ref` 35 / 13, `sym`/`cabs_identifier` (String)
+11 / 7, `cfa_sfoffset`/`integer_value_base` (Int) 6 / 3,
+`sdt_unspecified_parameter` (Unit) 3 / 3, Int32 2 / 2, Int64 2 / 2, the nine
+other `instEq0Uint*` chain members 2 / 1 each, `Ordering` (comparator, in
+`instBEqByte_sequence`) 1 / 1.
+
+The design note's estimates (about 903 and 736) were sums over rows in
+which a declaration can appear more than once; the distinct counts are 675
+and 596. `LinksemAux` (the model's executable assertions) and Cerberus's
+`_auxiliary` modules built green on both sides: no asserted value moved.
+
+### 6. Cerberus: the hand-written proofs
+
+The unpatched after-build failed at exactly one place (verbatim):
+
+```
+error: generated/CerbCtypeMeasure.lean:342:2: 'show' tactic failed, pattern
+  (match defaultCompare n1 n2 with
+      | LemOrdering.EQ => true
+      | x => false) =
+      true ↔
+    n1 = n2
+is not definitionally equal to target
+  Lem_Basic_classes.isEqual n1 n2 = true ↔ n1 = n2
+```
+
+`natEq0_iff` now reads `show (n1 == n2) = true ↔ n1 = n2; exact beq_iff_eq`
+(its docstring updated); `symEq_iff` (`:351`) re-elaborates unchanged and
+keeps using it. The patch is
+[`2026-10-03_beq-lattice-cerberus-repin.patch`](2026-10-03_beq-lattice-cerberus-repin.patch);
+`git apply --check` passes against both the frozen `51a7402ce` and the
+mainline head `d6c548847` (nothing applied — the Cerberus re-pin waits for
+its `_Alignas` and union-twin slices). With it the library built green; no
+other hand-written file broke (the 182 hand-written declarations whose
+terms moved all compiled). Not run here, for the re-pin: the full battery
+per `scripts/LADDER.md`/VALIDATION.md cache-disabled, `check_failure_reach.sh`
+(the kernel closures of `defaultCompare`/`instBEqOfSetType` leave many
+declarations; neither contains a failure site), the axiom gate.
+
+linksem: the hand-written tree needs no change. The default `lake build`
+of the scratch copy failed only in `driver/MainElf.lean:32:45: Unknown
+identifier `usage_text`` (and `:44:45`) on BOTH LemLibs — the primary's
+driver is ahead of the frozen `f54d119` model, a frozen-input skew, not
+this slice — so the after-build targeted `Linksem LinksemAux HandwrittenTest
+main_link`.
+
+### 7. TODO 45 retest (`automatic` on `n - 1` under `lem_if`)
+
+Reproducer `let rec cnt (n : nat) : nat = if n = 0 then 0 else 1 + cnt (n - 1)`
+with `declare {lean} termination_argument cnt = automatic`, generated by the
+changed `lem` (`def cnt (n : Nat) : Nat := lem_if n == 0 then 0 else 1 + cnt
+(n - 1)`) and compiled against the changed LemLib — still fails (verbatim):
+
+```
+error: Test_todo45.lean:17:4: fail to show termination for
+  cnt
+…
+n : Nat
+h✝ : ¬(n == 0) = true
+⊢ n - 1 < n
+```
+
+Plain Lean 4.32.2 with core's `BEq` and no LemLib gives the same failure
+(`T1`), so the default `decreasing_tactic` does not use the hypothesis even
+when `==` is core's. What the slice changes: the same module with
+`decreasing_by all_goals simp_all; omega` appended now builds (`Build
+completed successfully (34 jobs).`), where the record's item 7 measured
+`simp_all`/`omega` failing on the bridge. NOT closed: the remaining fix is a
+design choice — an emitted `decreasing_by` forces well-founded recursion on
+every `automatic` declaration (Cerberus's four list recursions, linksem's
+`unzip3`), so it is for the operator; TODO item 45 carries the options,
+DESIGN's row states the measured limit. No regression test was added.
+
+### 8. cerberus-sl re-pin note (draft; read-only analysis at `12d247c`, no build)
+
+Nine hand-written lemmas spell out the bridge and break or stop matching
+(each becomes a core lemma):
+
+| Site | Today | Replacement |
+|---|---|---|
+| `CerberusIris/Env.lean:30` `lemNatBeq_iff` | statement names `@instBEqOfEq0 Nat Lem_Num.instEq0Nat_1`; proof `show (match defaultCompare a b …)` — BREAKS | restate as `(a == b) = true ↔ a = b`, proof `beq_iff_eq` |
+| `Env.lean:38` `lemNatBeq_eq_decide` | statement names the bridge; proof via `lemNatBeq_iff` | restate as `(a == b) = decide (a = b) := rfl` (uses: `Env.lean:59`, `EvalSubst.lean:47,64`, `SubstE.lean:34`) |
+| `Lang.lean:177` `lem_nat_beq_iff` | `change (match setElemCompare …)` — BREAKS | `beq_iff_eq` (uses: `Env.lean:523`, `RoundCtrl.lean:1716`, `SelectBridge.lean:120,125`, `RulesS.lean:2266-2340`) |
+| `EvalArms.lean:1597` `lem_int_beq_iff` | same shape — BREAKS | `beq_iff_eq` (uses: `EvalArms.lean:1686`, `HeapModelAlloc.lean:65`, `HeapModelKill.lean:59,66,108`, `HeapPtrEq.lean:127`, `Memory/Carrier.lean:223`, `PtrEqModel.lean:87`, `PureEvalS.lean:650,652,717`) |
+| `Repr.lean:30` `int_beq_refl` | `show (match defaultCompare x x …)` — BREAKS | `beq_self_eq_true` (uses: `Repr.lean:209,831`, `HeapModelKill.lean:30,115`, `Memory/Carrier.lean:245`, `Memory/Transitions.lean:56,61`, `Memory/Unspecified.lean:36`, `PtrEqModel.lean:68`, `CerberusSL/IdiomsCall.lean:1664`, `InterfaceS.lean:1720,1761`) |
+| `Repr.lean:411` `lem_nat_beq_self` | statement names the bridge; `change` — BREAKS | `beq_self_eq_true` (uses: `Repr.lean:418,419,422`, `Memory/Unspecified.lean:59,61`, `CerberusSL/StdLibEq.lean:290,708`) |
+| `Call.lean:182` (inside `call_proc_eq`) | `change (match setElemCompare params.length params.length …)` — BREAKS | `beq_self_eq_true _` or `simp` |
+| `CerberusSL/StdLibEq.lean:33` `lem_nat_beq_self` | re-export whose statement names the bridge | restate with `==` |
+| `CerberusSL/RulesS.lean:2266` `lem_nat_beq_iff` | re-export, statement already `==` | unchanged (follows `Lang`) |
+
+60 grep hits for the six lemma names outside `.lake`/`.cerberus-ws`/the quoted
+corpus (definitions, re-exports, comments and uses together; the note's "about
+64" was at `6edb0c4`). Under the new LemLib the two statements that name the
+bridge still typecheck (`bridge_nat_is_core` is `rfl`) but no longer match the
+generated `==` syntactically, so `rw`/`simp only` with them would stop firing:
+restate them. Two `simp only [… beq_iff_eq]` calls were inert on the bridge
+and will fire: `Recon/Admit.lean:742` (`simp only [runOK, Bool.and_eq_true,
+beq_iff_eq] at this`, after which `obtain ⟨hl, hlen⟩ := this` and the `match
+lp, hlen` see `… = …` instead of `(… == …) = true`) and `Recon/Arena.lean:393`
+(`simp only [d11Call, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq]`, then
+`rcases h2 with …`); `Env.lean:26` `digest_compare_eq` uses the same simp set
+and is to be re-checked. `Repr.lean:831` already hedges both forms.
+Unaffected: the `fmapAddBy defaultCompare …` terms in `DriverLoop.lean`,
+`RunBuild.lean` (comparator values, not `==`). The 762/55/3 `decide` closers
+are on concrete facts. A full cerberus-sl build follows its re-pin.
+
+### 9. Docs
+
+Lattice note: the 2026-10-03 addendum (core's 500 row, the 450/400 rows,
+the undocumented tie, deliberate tie 1 retired, the specificity rule, the
+extended invariant and probe). DESIGN.md: "Instance priorities come from one
+table" and the `termination_argument … = automatic` row; the manual
+chapter's two matching paragraphs. TODO.md: 46 closed, 45 re-measured,
+line references re-derived. RECORDS.md: this section and the design note
+indexed.
+
+### Gates (verbatim tails)
+
+LemLib, `cd lean-lib && capped lake build`: `Build completed successfully (39 jobs).`
+(the `#print axioms` lines of §4 are in the same log; the four pre-existing
+unused-variable warnings only).
+
+`scripts/ce make nonlean-regress`:
+```
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+```
+
+`scripts/ce env UPSTREAM_LEM=… LINKSEM=… CERBERUS=… make upstream-drift DRIFT_OUT=<empty dir>`
+(same clients as packages A and C):
+```
+upstream-drift: upstream 3802cb0, fork lean-backend-v0.1.0-alpha.1-57-g8666b7f-dirty; clients compared: linksem cerberus
+upstream-drift: 944 upstream files; 198 differ (list: …/beq/drift/differences.txt)
+     26 backends/tex_all
+     11 lib/coq
+      7 lib/hol
+     26 lib/html
+      1 lib/ident.stdout
+      7 lib/isa
+     26 lib/lem
+      7 lib/ocaml
+     84 lib/tex
+      3 lib/tex_all
+library code files (OCaml/HOL/Isabelle/Coq):
+  comments/whitespace only  lib/coq/lem_basic_classes_auxiliary.v
+  [… 32 such rows, no code row]
+make: *** [Makefile:60: upstream-drift] Error 1
+```
+(`cerberus-ocaml` and `linksem-ocaml` absent from the per-directory counts,
+i.e. byte-identical; the non-zero exit is the script's report of the fork's
+accepted non-code differences, as in every previous record.)
+
+`scripts/ce make -C tests/comprehensive lean` (tail, verbatim):
+```
+test_version: OK (untagged, exact annotated tag, dirty tag, post-tag, archive fallback)
+  OK: missing lean_constants refused; intact library generates
+test_failure_admission: OK (registered probe with compiler failure is red, not XFAIL)
+  OK: test_wide_patterns.lem generated in 2 s
+  OK: refused: cannot create the output directory Makefile/sub: Makefile/sub: Not a directory
+=== Generation: 73 passed, 0 failed, 0 skipped ===
+  OK: equation form for f and len2, match form for g
+Build completed successfully (208 jobs).
+  [lean-compile: 773 PASS lines, no error; lean-panic, lean-untaken-failure, single-evaluation, supply, reader, fuel legs: every OK line as in the package C run]
+  [lean-negative: 115 probes "OK (rejected as declared)"; lean-invariance: 10 witnesses "artifacts byte-identical across ocaml/hol/isa/coq"]
+parity: 49 probes: 38 OK, 11 XFAIL (registered, Lean side pinned), 0 FAIL
+=== No sorry/admit/axiom/native_decide in fuel_measure proofs modules (gate) ===
+  OK: 11 proofs modules scanned; no sorry/admit/axiom/native_decide/bv_decide token
+=== No fuel numerals in LemLib or generated code (gate) ===
+  OK: 325 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+suite exit 0
+```
+
+(Bracketed lines are derived summaries of blocks of identical OK lines;
+every other line is verbatim. Run twice — 22:49–22:58 and, after the two
+probe-comment edits of §3, 22:58–23:06 on the final sources — with
+identical verdicts; the 15 lines containing "error" are the 14 parity
+probes' "ocaml: failed as expected" lines and the negative-probes banner.
+The "FAIL:" lines the parity runner prints inside the registered XFAIL
+probes are its own reporting of the pinned Lean side.)
+
+`make` leaves the tree clean apart from the intended changes (`git status`
+at commit time: the eleven modified files and the patch file listed under
+"Files"; the suite's `tests/comprehensive/invariance/_out/` is removed by
+the phase that creates it).
+
+### Files
+
+`src/lean_backend.ml` (the priority table, the two bridge sites),
+`lean-lib/LemLib/Basic_classes.lean`, `lean-lib/LemLib/Map.lean` (regenerated),
+`lean-lib/LemLibTheorems.lean` (namespace `BeqLattice`),
+`tests/comprehensive/lean-test/TestInstancePriorityCheck.lean` (legs 5, 6; the
+leg-4 comment's bridge priority), `tests/comprehensive/test_instance_priority.lem`
+(the RG2 comment's bridge priority),
+`doc/notes/2026-08-22_arc14-instance-priority-lattice.md` (addendum),
+`doc/lean-backend/DESIGN.md`, `TODO.md`, `RECORDS.md`, `doc/manual/backend_lean.md`,
+`doc/lean-backend/2026-10-03_beq-lattice-cerberus-repin.patch`, this section.
+
+### Provenance
+
+[USER 2026-10-03]: the two rulings quoted at the top. [AGENT] (this worker):
+every measurement, the three-row constant table, the theorem statements and
+the decision to spell the old instance terms out, the probe legs, the census
+instrument and its explanation criterion, the Cerberus patch, the cerberus-sl
+table, the TODO 45 disposition and this record.

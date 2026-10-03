@@ -653,16 +653,28 @@ refused instead. Tests: `tests/comprehensive/test_tyvar_collision.lem`,
 **Instance priorities come from one table.** Every generated or
 library instance takes its priority from a single normative lattice
 (model-provided and derived `BEq`/`Ord` at default, the automatic
-set/map trio and the comparator-derived `BEq` bridges at 500, generic
-defaults and residual failure-bodied instances at `low`) so that a
-model's own instance beats the automatic one *by priority*, never by
-declaration-order accident. The table is
-[`doc/notes/2026-08-22_arc14-instance-priority-lattice.md`](../notes/2026-08-22_arc14-instance-priority-lattice.md);
-its row for priority-50 fallbacks over open type variables is obsolete:
-those instances were deleted with the comparison-binder threading above,
-and the backend emits no priority 50 (checked by grep of
-`src/lean_backend.ml`, 2026-10-03). A build-failing resolution probe,
-`tests/comprehensive/test_instance_priority.lem`, pins the table.
+set/map trio at 500, the `[Eq0 a] : BEq a` bridge at 450, the
+comparator-derived `[SetType a]`/`[MapKeyType a] : BEq a` bridges at 400,
+generic defaults and residual failure-bodied instances at `low`) so that
+a model's own instance beats the automatic one *by priority*, never by
+declaration-order accident, and so that both library bridges sit below
+core's `[DecidableEq a] : BEq a`, which is at 500: `==` at a base type
+(`Nat`, `Int`, `String`, `Char`, `Bool`, `Unit`, the fixed-width integers,
+`BitVec n`) is core's structural equality, with `LawfulBEq` and the core
+simp set, while a type whose only equality is a model `Eq0` still gets
+`==` from the bridge and polymorphic `[Eq0 a] [SetType a]` code still
+takes the finer `isEqual` route over the comparator ([USER 2026-10-03]
+"(a) 450/400"; the values at every switched type are equal by the kernel
+theorems in `lean-lib/LemLibTheorems.lean`, namespace `BeqLattice`). The
+table is
+[`doc/notes/2026-08-22_arc14-instance-priority-lattice.md`](../notes/2026-08-22_arc14-instance-priority-lattice.md)
+with its 2026-10-03 addendum; its row for priority-50 fallbacks over open
+type variables is obsolete: those instances were deleted with the
+comparison-binder threading above, and the backend emits no priority 50
+(checked by grep of `src/lean_backend.ml`, 2026-10-03). A build-failing
+resolution probe, `tests/comprehensive/test_instance_priority.lem` with
+`lean-test/TestInstancePriorityCheck.lean`, pins the table, including
+`#synth BEq Nat ⟶ instBEqOfDecidableEq`.
 
 **Sets and maps translate the OCaml AVL algorithms.** Lem `set`/`map`
 use LemLib's `Pset`/`Pmap`, translated from `ocaml-lib/pset.ml` and
@@ -775,7 +787,7 @@ unaffected:
 | ``declare {lean} fuel_measure val f = `n + 1` assuming `2 ≤ b` `` | the HYPOTHESIS-carrying measure ([USER 2026-09-05]; [record](2026-09-05_measure-hypothesis-record.md)): `H` is a Lean Prop over the same parameters, same scope rules and forbidden names as the measure (plus: a hypothesis mentioning no parameter — `True`, a closed proposition — is refused as vacuous, so the two forms stay distinct; the fuel may not be mentioned). The wrapper is UNCHANGED (fuel-free, hypothesis-free); the obligation gains the binder `lemHyp : H` immediately before `lemFuel` — `theorem f_measure_sufficient (xs…) (lemHyp : (H)) (lemFuel : Nat) (lemMeasureLe : (μ) ≤ lemFuel) : f_lemFuel lemFuel xs… = f xs… := <Module>_lemMeasureProofs.f_measure_sufficient xs… lemHyp lemFuel lemMeasureLe` — i.e. `H → μ ≤ fuel → worker = wrapper`; a consumer gate recognises the conditional form by the binder NAMED `lemHyp` before `lemFuel` (reserved: a fuel'd def's parameter may not be called `lemHyp`). Operationally, outside `H` the wrapper may exhaust (loud sentinel). Whether `H` is a Prop is Lean's build-time check; whether `H` is SATISFIABLE is nobody's check at generation (a contradictory `H` makes the obligation vacuously provable — [pre-merge audit](2026-09-05_measure-hypothesis-audit-premerge.md) F1), so a consumer's gate must report every hypothesis in force (`hyp=<H>`) and a reviewed register must name each with its frontend invariant (Cerberus has both). `assuming` is a contextual keyword |
 | `declare {lean} structural val f` | emit the recursive `f` as an ordinary `def` with `termination_by structural <param>` (the parameter designated by the backend's analysis; Lean's checker is the build-time backstop; the well-founded fallback is forbidden, so the kernel computes through `f`). Refused with `fuel`, with `termination_argument`, on a rep'd val, on a non-recursive or multi-clause def, on part of a mutual block |
 | (emission rule, no declare) point-free tails | for a `fuel_measure`d or `structural` definition whose clause body ends in lambdas with plain-variable binders — a trailing `function` (after lem's pattern compilation `fun x -> match x with …`), a user `fun k ->` with or without a `function` beneath it, possibly under the single-arm match of a destructuring parameter — the Lean emission hoists EVERY such trailing binder into the head — a `function` scrutinee as `lemTail` (deterministic, nameable from the `.lem` measure), user binders under their names — so the measure renderer and the structural analysis see named parameters (the generated def's arity grows by the hoisted binders; extensionally the same function); the fuel sentinel is applied to the hoisted binders (`((payload) lemTail)`). Hygiene, fail-closed: refused if `lemTail` is a parameter, a body binder, a free variable or a referenced constant's name, if a hoisted user binder would shadow a parameter / be captured by the destructuring pattern, or if any constant the body references RENDERS on Lean as a reserved synthesized name (the generic capture check `lean_reserved_capture_check`, also run for every fuel'd/reader/supply def and for mutual-record updates: `lemFuel`, `lemMeasureLe`, `LemFuel`, `lemTail`, `lemRecBase`, `_lemReader_*`, `_lemSupply*`); refused on a supply-lifted def. The `.lem` and every non-Lean emitter are untouched ([USER 2026-09-04] "we don't change the lem structure for ocaml"; [record](2026-09-05_tails-and-pmap-laws-record.md)) |
-| `declare {lean} termination_argument f = automatic` | lem's upstream termination vocabulary, honoured: a plain `def` with no clause, so Lean tries structural recursion, then well-founded recursion with its default `decreasing_tactic`. Lean's checker is the build-time backstop and it is NOT a totality promise: the recursion `if n = 0 then … else f (n - 1)` fails it (the condition is a Bool `lem_if`, whose hypothesis `¬(n == 0) = true` goes through LemLib's `Eq0`→`BEq` bridge and is opaque to `omega`/`simp`; the same program with core's `BEq`, or with a Prop condition, passes — measured on 4.32.2), while structural list/tree recursions pass. A failure is a loud Lean build error, never silent. For a nat recursion use `fuel`/`fuel_measure` or, where Lean's structural checker applies, `structural`; a general fix waits on the `BEq` bridge design pass (TODO item 45). Kernel computability is not promised either |
+| `declare {lean} termination_argument f = automatic` | lem's upstream termination vocabulary, honoured: a plain `def` with no clause, so Lean tries structural recursion, then well-founded recursion with its default `decreasing_tactic`. Lean's checker is the build-time backstop and it is NOT a totality promise: the recursion `if n = 0 then … else f (n - 1)` fails it (the condition is a Bool `lem_if`, so the hypothesis is `¬(n == 0) = true`, which Lean's default `decreasing_tactic` does not turn into `n ≠ 0` — measured on 4.32.2 with core's `BEq`, which `==` at `Nat` now is; a Prop condition passes without help, and `decreasing_by all_goals simp_all; omega` closes the `lem_if` form), while structural list/tree recursions pass. A failure is a loud Lean build error, never silent. For a nat recursion use `fuel`/`fuel_measure` or, where Lean's structural checker applies, `structural`; whether the backend should emit a `decreasing_by` for `automatic` is TODO item 45 (an emitted `decreasing_by` forces well-founded recursion on every `automatic` declaration, including the consumers' structural ones). Kernel computability is not promised either |
 | `declare {lean} effectful val f` | refused fail-closed with an error naming supply lifting as the migration path; the annotation stays in the grammar for other targets' potential use |
 | `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
 | `declare {lean} reader_seed val f` | do not lift `f`; with N declared readers its first N arguments are the seeds — one per reader, positionally in the GLOBAL SORTED reader order (the binder order of every lifted def and consumer stub; one order everywhere) — and supply the reader values to lifted callees and consumer calls in its body ([record](2026-09-19_nary-reader-seed-record.md); the seeds are referenced by name, so the seed positions must be simple variables). Refused fail-closed: no reader declared (nothing to seed), fewer than N arguments (the error names N and the order), a seed position that is not a simple variable, a multi-clause or mutual def, an instance, combination with `fuel` |
