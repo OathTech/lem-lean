@@ -385,7 +385,7 @@ let output1 env (out_dir : string option) (targ : Target.target) avoid m =
                 let (o, ext_o) = open_output_with_check dir main_file in
                   Printf.fprintf o "/- %s -/\n\n" (generated_line m.filename);
                   Printf.fprintf o "import LemLib\n\n";
-                  Printf.fprintf o "%s" (Ulib.Text.to_string r);
+                  Printf.fprintf o "%s" (Lean_backend.normalize_layout (Ulib.Text.to_string r));
                   close_output_with_check ext_o
               end
             in
@@ -396,7 +396,7 @@ let output1 env (out_dir : string option) (targ : Target.target) avoid m =
                   Printf.fprintf o "/- %s -/\n\n" (generated_line m.filename);
                   Printf.fprintf o "import LemLib\n";
                   Printf.fprintf o "import %s\n\n" module_name;
-                  Printf.fprintf o "%s" (Ulib.Text.to_string r_extra);
+                  Printf.fprintf o "%s" (Lean_backend.normalize_layout (Ulib.Text.to_string r_extra));
                   close_output_with_check ext_o
               end in ()
           end

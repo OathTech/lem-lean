@@ -6,28 +6,37 @@ import LemLib.Bool
 import LemLib.Basic_classes
 
 namespace Lem_Tuple
- 
+ /- **************************************************************************** -/
+/- Tuples                                                                     -/
+/- **************************************************************************** -/
+/- The type for tuples (pairs) is hard-coded, so here only a few functions are used -/
 
 open Lem_Bool
 open Lem_Basic_classes
 
-/- removed value specification -/
+/- ----------------------- -/
+/- fst                     -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 def  fst  {a : Type} {b : Type}   ((v1 : a), (v2 : b))  : a :=  v1 -/
-/- removed value specification -/
+/- ----------------------- -/
+/- snd                     -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 def  snd  {a : Type} {b : Type}   ((v1 : a), (v2 : b))  : b :=  v2 -/
-/- removed value specification -/
+/- ----------------------- -/
+/- curry                   -/
+/- ----------------------- -/
 
+/- ----------------------- -/
+/- uncurry                 -/
+/- ----------------------- -/
 
-/- removed value specification -/
- 
+/- ----------------------- -/
+/- swap                    -/
+/- ----------------------- -/
 
-/- removed value specification -/
- 
-def  swap  {a : Type} {b : Type}  (p : (a ×b))  : (b ×a) := match p with |  (v1,  v2) =>  (v2, v1) 
+def  swap  {a : Type} {b : Type}  (p : (a ×b))  : (b ×a) := match p with |  (v1,  v2) =>  (v2, v1)
 end Lem_Tuple
-
-

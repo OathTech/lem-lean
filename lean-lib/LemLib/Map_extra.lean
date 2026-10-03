@@ -13,7 +13,12 @@ import LemLib.Set
 import LemLib.Map
 
 namespace Lem_Map_extra
-
+ /- **************************************************************************** -/
+/- A library for finite maps                                                  -/
+/- **************************************************************************** -/
+/- ========================================================================== -/
+/- Header                                                                     -/
+/- ========================================================================== -/
 
 open Lem_Bool
 open Lem_Basic_classes
@@ -25,25 +30,38 @@ open Lem_Num
 open Lem_Set
 open Lem_Map
 
-/- removed value specification -/
+/- -------------------------------------------------------------------------- -/
+/- find                                                                       -/
+/- -------------------------------------------------------------------------- -/
 
-def  find0  {k : Type} {v : Type} [MapKeyType k] [Inhabited v]  (k1 : k) (m : Fmap k v)  : v :=  match  ((fmapLookupBy  (@mapKeyCompare (k) _)  k1  m)) with |  some  x =>  x |  none => (failwithI  "Map_extra.find" : v) 
-/- removed value specification -/
+def  find0  {k : Type} {v : Type} [MapKeyType k] [Inhabited v]  (k1 : k) (m : Fmap k v)  : v :=  match  ((fmapLookupBy  (@mapKeyCompare (k) _)  k1  m)) with |  some  x =>  x |  none => (failwithI  "Map_extra.find" : v)
+/- -------------------------------------------------------------------------- -/
+/- from sets / domain / range                                                 -/
+/- -------------------------------------------------------------------------- -/
 
 def  fromSet  {k : Type} {v : Type} [MapKeyType k]  (f : k → v) (s : Pset k)  : Fmap k v :=  setFold  (fun (k1 : k) (m : Fmap k v) =>  (fmapAddBy  (@mapKeyCompare (k) _)  k1  (f  k1)  m))  s  fmapEmpty
-/- removed value specification -/
+/-
+assert fromSet_0: (fromSet succ (Set.empty : set nat) = Map.empty)
+assert fromSet_1: (fromSet succ {(2:nat); 3; 4}) = Map.fromList [(2,3); (3, 4); (4, 5)]
+-/
+/- -------------------------------------------------------------------------- -/
+/- fold                                                                       -/
+/- -------------------------------------------------------------------------- -/
 
 def  fold  {k : Type} {r : Type} {v : Type} [MapKeyType k] [SetType k] [SetType v]  (f : k → v → r → r) (m : Fmap k v) (v1 : r)  : r :=  setFold  (fun (p : (k ×v)) (r1 : r) =>  match p, r1 with |  (k1,  v1),  r1 =>  f  k1  v1  r1 )  ((fmapToSetBy  (pairCompare  (@setElemCompare (k) _)  (@setElemCompare (v) _))  m))  v1
-/- removed value specification -/
+/-
+assert fold_1: (fold (fun k v a -> (a+k)) (Map.fromList [((2:nat),(3:nat)); (3, 4); (4, 5)]) 0 = 9)
+assert fold_2: (fold (fun k v a -> (a+v)) (Map.fromList [((2:nat),(3:nat)); (3, 4); (4, 5)]) 0 = 12)
+-/
+ /- TODO -/
+/- declare compile_message toList = "Map_extra.toList is only defined for the ocaml, isabelle and coq backend" -/
+/- more 'map' functions -/
+/- TODO: this function is in map_extra rather than map just for implementation reasons -/
 
-/- removed value specification -/
-
-/-  OLD: TODO: mapMaybe depends on toList that is not defined for hol and isabelle  -/
-def  mapMaybe0  {a : Type} {b : Type} {c : Type} [MapKeyType a]  (f : a → b → Option c) (m : Fmap a b)  : Fmap a c := 
-  List.foldl 
-    (fun (m' : Fmap a c) (p : (a ×b)) =>  match m', p with |  m',  (k,  v) => (       match  f  k  v with  |  none =>  m' |  some  v' =>  (fmapAddBy  (@mapKeyCompare (a) _)  k  v'  m')       ) ) 
-    fmapEmpty 
+/- OLD: TODO: mapMaybe depends on toList that is not defined for hol and isabelle -/
+def  mapMaybe0  {a : Type} {b : Type} {c : Type} [MapKeyType a]  (f : a → b → Option c) (m : Fmap a b)  : Fmap a c :=
+  List.foldl
+    (fun (m' : Fmap a c) (p : (a ×b)) =>  match m', p with |  m',  (k,  v) => (       match  f  k  v with  |  none =>  m' |  some  v' =>  (fmapAddBy  (@mapKeyCompare (a) _)  k  v'  m')       ) )
+    fmapEmpty
     (fmapElements  m)
 end Lem_Map_extra
-
-

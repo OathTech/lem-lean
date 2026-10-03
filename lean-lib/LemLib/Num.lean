@@ -6,227 +6,225 @@ import LemLib.Bool
 import LemLib.Basic_classes
 
 namespace Lem_Num
-
+ /- **************************************************************************** -/
+/- A library for numbers                                                      -/
+/-                                                                            -/
+/- It mainly follows the Haskell Maybe-library                                -/
+/- **************************************************************************** -/
+/- rename module to clash with existing list modules of targets
+   problem: renaming from inside the module itself! -/
 
 open Lem_Bool
 open Lem_Basic_classes
 
+/- ========================================================================== -/
+/- Numerals                                                                   -/
+/- ========================================================================== -/
+/- Numerals like 0, 1, 2, 42, 4543 are built-in. That's the only use
+   of numerals. The following type-class is used to convert numerals into
+   verious number types. The type of numerals differs form backend to backend.
+   Essentially they are just printed as "0", "1", ... and the backend decides
+   then. For Ocaml, they are big integers. For HOL of type "num". Isabelle thinks
+   they are polymorphic. ...
+-/
 
-
-
-/- 
+/- lem: replaced by its target representation: 
 
  -/
 
-/-  ==========================================================================  -/
-/-  Syntactic type-classes for common operations                                -/
-/-  ==========================================================================  -/
+/- ========================================================================== -/
+/- Syntactic type-classes for common operations                               -/
+/- ========================================================================== -/
 
-/-  Typeclasses can be used as a mean to overload constants like "+", "-", etc  -/
+/- Typeclasses can be used as a mean to overload constants like "+", "-", etc -/
 
-class NumNegate (a : Type) where 
- 
-  numNegate :  a →  a 
+class NumNegate (a : Type) where
 
+  numNegate :  a →  a
 
 export NumNegate (numNegate)
 
+class NumAbs (a : Type) where
 
-class NumAbs (a : Type) where 
- 
-  abs :  a →  a 
-
+  abs :  a →  a
 
 export NumAbs (abs)
 
+class NumAdd (a : Type) where
 
-class NumAdd (a : Type) where 
- 
   numAdd :  a →  a →  a
-
 
 export NumAdd (numAdd)
 
+class NumMinus (a : Type) where
 
-class NumMinus (a : Type) where 
- 
   numMinus :  a →  a →  a
-
 
 export NumMinus (numMinus)
 
+class NumMult (a : Type) where
 
-class NumMult (a : Type) where 
- 
   numMult :  a →  a →  a
-
 
 export NumMult (numMult)
 
+class NumPow (a : Type) where
 
-class NumPow (a : Type) where 
- 
   numPow :  a →  Nat →  a
-
 
 export NumPow (numPow)
 
+class NumDivision (a : Type) where
 
-class NumDivision (a : Type) where 
- 
   numDivision :  a →  a →  a
-
 
 export NumDivision (numDivision)
 
+class NumIntegerDivision (a : Type) where
 
-class NumIntegerDivision (a : Type) where 
- 
   numIntegerDivision :  a →  a →  a
-
 
 export NumIntegerDivision (numIntegerDivision)
 
+class NumRemainder (a : Type) where
 
-
-class NumRemainder (a : Type) where 
- 
   numRemainder :  a →  a →  a
-
 
 export NumRemainder (numRemainder)
 
+class NumSucc (a : Type) where
 
-class NumSucc (a : Type) where 
- 
   succ :  a →  a
-
 
 export NumSucc (succ)
 
+class NumPred (a : Type) where
 
-class NumPred (a : Type) where 
- 
   pred :  a →  a
-
 
 export NumPred (pred)
 
-/- 
+/- ========================================================================== -/
+/- Basic number types                                                         -/
+/- ========================================================================== -/
+/- ----------------------- -/
+/- nat                     -/
+/- ----------------------- -/
+/- bounded size natural numbers, i.e. positive integers -/
+/- "nat" is the old type "num". It represents natural numbers. 
+   These numbers might be bounded, however no checks of the boundedness are
+   provided. The theorem prover backends map nat to unbounded size 
+   natural numbers. However, OCaml uses the type "int", which is bounded.
+   Using "int" allows using many functions like "List.length" without wrappers.
+   This leeds to nice readable code, but a slightly fuzzy concept what
+   "nat" represents. If you want to use unbounded natural numbers, use "natural"
+   instead. -/
+
+/- lem: replaced by its target representation: 
 
 
-/-  -----------------------  -/
-/-  natural                  -/
-/-  -----------------------  -/
+/- ----------------------- -/
+/- natural                 -/
+/- ----------------------- -/
 
-/-  unbounded size natural numbers  -/
+/- unbounded size natural numbers -/
 abbrev  natural := Nat
  -/
-/- 
+/- lem: replaced by its target representation: 
 
 
-/-  -----------------------  -/
-/-  int                      -/
-/-  -----------------------  -/
+/- ----------------------- -/
+/- int                     -/
+/- ----------------------- -/
 
-/-  bounded size integers with uncertain length  -/
+/- bounded size integers with uncertain length -/
 
 abbrev  int := Int
  -/
-/- 
+/- lem: replaced by its target representation: 
 
 
-/-  -----------------------  -/
-/-  integer                  -/
-/-  -----------------------  -/
+/- ----------------------- -/
+/- integer                 -/
+/- ----------------------- -/
 
-/-  unbounded size integers  -/
+/- unbounded size integers -/
 
 abbrev  integer := Int
  -/
-/- 
+/- lem: replaced by its target representation: 
 
-/-  -----------------------  -/
-/-  bint                     -/
-/-  -----------------------  -/
+/- ----------------------- -/
+/- bint                    -/
+/- ----------------------- -/
 
-/-  TODO the bounded ints are only partially implemented, use with care.  -/
+/- TODO the bounded ints are only partially implemented, use with care. -/
 
-/-  32 bit integers  -/
+/- 32 bit integers -/
 abbrev  int32 := Int32
- -/
-/-  /-  newtype wrapper â distinct from Int  -/
+ -/ /- ???: better type for this in Coq? -/
+/- lem: replaced by its target representation:  /- newtype wrapper â distinct from Int -/
 
-/-  64 bit integers  -/
+/- 64 bit integers -/
 abbrev  int64 := Int64
- -/
-/-  /-  newtype wrapper â distinct from Int  -/
+ -/ /- ???: better type for this in Coq? -/
+/- lem: replaced by its target representation:  /- newtype wrapper â distinct from Int -/
 
 
-/-  -----------------------  -/
-/-  rational                 -/
-/-  -----------------------  -/
+/- ----------------------- -/
+/- rational                -/
+/- ----------------------- -/
 
-/-  unbounded size and precision rational numbers  -/
+/- unbounded size and precision rational numbers -/
 
 abbrev  rational := LemUnsupported.rational
- -/
-/-  /-  ???: better type for this in HOL?  -/
+ -/ /- ???: better type for this in Coq? -/ /- panics on use â needs Mathlib Rat -/
+/- lem: replaced by its target representation:  /- ???: better type for this in HOL? -/
 
 
-/-  -----------------------  -/
-/-  real                     -/
-/-  -----------------------  -/
+/- ----------------------- -/
+/- real                    -/
+/- ----------------------- -/
 
-/-  real numbers  -/
-/-  Note that for OCaml, this is mapped to floats with 64 bits.  -/
+/- real numbers -/
+/- Note that for OCaml, this is mapped to floats with 64 bits. -/
 
 abbrev  real := LemUnsupported.real
- -/
-/-  /-  ???: better type for this in HOL?  -/
+ -/ /- ???: better type for this in Coq? -/ /- panics on use â needs Mathlib Real -/
+/- lem: replaced by its target representation:  /- ???: better type for this in HOL? -/
 
 
-/-  -----------------------  -/
-/-  double                   -/
-/-  -----------------------  -/
+/- ----------------------- -/
+/- double                  -/
+/- ----------------------- -/
 
-/-  double precision floating point (64 bits)  -/
+/- double precision floating point (64 bits) -/
 
 abbrev  float64 := LemUnsupported.float64
- -/
-/-  /-  ???: better type for this in HOL?  -/
+ -/ /- ???: better type for this in Coq? -/ /- panics on use â needs IEEE 754 -/ /- ???: better type for this in Isa? -/
+/- lem: replaced by its target representation:  /- ???: better type for this in HOL? -/
 
 abbrev  float32 := LemUnsupported.float32
- -/
-/- removed value specification -/
+ -/ /- ???: better type for this in Coq? -/ /- panics on use â needs IEEE 754 -/ /- ???: better type for this in Isa? -/ /- ???: better type for this in HOL? -/
+/- ========================================================================== -/
+/- Binding the standard operations for the number types                       -/
+/- ========================================================================== -/
+/- ----------------------- -/
+/- nat                     -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 
 instance   : Numeral Nat where
 
     fromNumeral   n  :=    n
  -/
-/- removed value specification -/
-
 
 instance   : Eq0 Nat where
 
     isEqual   :=  (fun x y => x == y)
 
     isInequal   n1  n2  :=  not  (n1  ==  n2)
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
 
 instance   : Ord0 Nat where
 
@@ -240,125 +238,79 @@ instance   : Ord0 Nat where
 
     isGreaterEqual   :=  natGteb
 
-
 instance   : SetType Nat where
 
     setElemCompare   :=  defaultCompare
-
-/- removed value specification -/
-
 
 instance   : NumAdd Nat where
 
     numAdd   :=  (fun x y => x + y)
 
-/- removed value specification -/
-
-
 instance   : NumMinus Nat where
 
     numMinus   :=  (fun x y => x - y)
 
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  natSucc  (n : Nat)  : Nat :=  n  +  1 -/
 instance   : NumSucc Nat where
 
     succ   :=  Nat.succ
 
-/- removed value specification -/
-
-
 instance   : NumPred Nat where
 
     pred   :=  Nat.pred
-
-/- removed value specification -/
-
 
 instance   : NumMult Nat where
 
     numMult   :=  (fun x y => x * y)
 
-/- removed value specification -/
-
-
 instance   : NumIntegerDivision Nat where
- 
+
     numIntegerDivision   :=  lemNatDiv
 
-
 instance   : NumDivision Nat where
- 
+
     numDivision   :=  lemNatDiv
 
-/- removed value specification -/
-
-
 instance   : NumRemainder Nat where
- 
+
     numRemainder   :=  lemNatMod
 
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
  def  gen_pow_aux  {a : Type}   (mul  : a →  a →  a)  (a  : a)  (b  : a)  (e  : Nat)  : a := 
-   match  e with  |  0 =>  a |  1 =>  mul  a  b | (  (e' + 2)) => ( let  e''  := /  e  2;                     let  a'   := (lem_if  (mod  e  2)  =  0 then  a  else  mul  a  b);                     gen_pow_aux  mul  a'  (mul  b  b)  e'')
+   match  e with  |  0 =>  a /- cannot happen, call discipline guarentees e >= 1 -/ |  1 =>  mul  a  b | (  (e' + 2)) => ( let  e''  := /  e  2;                     let  a'   := (lem_if  (mod  e  2)  =  0 then  a  else  mul  a  b);                     gen_pow_aux  mul  a'  (mul  b  b)  e'')
     -/
-       
-def  gen_pow  {a : Type}   (one  : a)  (mul  : a →  a →  a)  (b  : a)  (e  : Nat)   :  a :=  
-  lem_if  natLtb  e (  0) then  one  else  
-  lem_if  (e  ==   0) then  one  else  gen_pow_aux  mul  one  b  e
-/- removed value specification -/
 
+def  gen_pow  {a : Type}   (one  : a)  (mul  : a →  a →  a)  (b  : a)  (e  : Nat)   :  a :=
+  lem_if  natLtb  e (  0) then  one  else
+  lem_if  (e  ==   0) then  one  else  gen_pow_aux  mul  one  b  e
 
 instance   : NumPow Nat where
- 
+
     numPow   :=  natPower
 
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-
-
 instance   : OrdMaxMin Nat where
- 
+
     max   :=  natMax
 
     min   :=  natMin
 
-/- removed value specification -/
+/- ----------------------- -/
+/- natural                 -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 
 instance   : Numeral Nat where
 
     fromNumeral   n  :=    n
  -/
-/- removed value specification -/
-
 
 instance   : Eq0 Nat where
 
     isEqual   :=  (fun x y => x == y)
 
     isInequal   n1  n2  :=  not  (n1  ==  n2)
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
 
 instance   : Ord0 Nat where
 
@@ -372,115 +324,70 @@ instance   : Ord0 Nat where
 
     isGreaterEqual   :=  natGteb
 
-
 instance   : SetType Nat where
 
     setElemCompare   :=  defaultCompare
-
-/- removed value specification -/
-
 
 instance   : NumAdd Nat where
 
     numAdd   :=  (fun x y => x + y)
 
-/- removed value specification -/
-
-
 instance   : NumMinus Nat where
 
     numMinus   :=  (fun x y => x - y)
 
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  naturalSucc  (n : Nat)  : Nat :=  n  +  1 -/
 instance   : NumSucc Nat where
 
     succ   :=  Nat.succ
 
-/- removed value specification -/
-
-
 instance   : NumPred Nat where
 
     pred   :=  Nat.pred
-
-/- removed value specification -/
-
 
 instance   : NumMult Nat where
 
     numMult   :=  (fun x y => x * y)
 
-/- removed value specification -/
-
-
 instance   : NumPow Nat where
- 
+
     numPow   :=  natPower
 
-/- removed value specification -/
-
-
 instance   : NumIntegerDivision Nat where
- 
+
     numIntegerDivision   :=  lemNatDiv
 
-
 instance   : NumDivision Nat where
- 
+
     numDivision   :=  lemNatDiv
 
-/- removed value specification -/
-
-
 instance   : NumRemainder Nat where
- 
+
     numRemainder   :=  lemNatMod
 
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-
-
 instance   : OrdMaxMin Nat where
- 
+
     max   :=  natMax
 
     min   :=  natMin
 
-/- removed value specification -/
+/- ----------------------- -/
+/- int                     -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 
 instance   : Numeral Int where
 
     fromNumeral   n  :=  ( n :  Int)
  -/
-/- removed value specification -/
-
 
 instance   : Eq0 Int where
 
     isEqual   :=  (fun x y => x == y)
 
     isInequal   n1  n2  :=  not  (n1  ==  n2)
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
 
 instance   : Ord0 Int where
 
@@ -494,110 +401,71 @@ instance   : Ord0 Int where
 
     isGreaterEqual   :=  intGteb
 
-
 instance   : SetType Int where
 
     setElemCompare   :=  defaultCompare
 
-/- removed value specification -/
-
-
 instance   : NumNegate Int where
 
     numNegate   :=  (fun  i=> (Int.neg  i))
-
-/- removed value specification -/
-
+ /- TODO: check -/
 
 instance   : NumAbs Int where
 
     abs   :=  intAbs
 
-/- removed value specification -/
-
-
 instance   : NumAdd Int where
 
     numAdd   :=  (fun x y => x + y)
-
-/- removed value specification -/
-
 
 instance   : NumMinus Int where
 
     numMinus   :=  (fun x y => x - y)
 
-/- removed value specification -/
-
-
 instance   : NumSucc Int where
 
     succ   :=  (fun  n=> n  + ( 1 :  Int))
-
-/- removed value specification -/
-
 
 instance   : NumPred Int where
 
     pred   :=  (fun  n=> n  - ( 1 :  Int))
 
-/- removed value specification -/
-
-
 instance   : NumMult Int where
 
     numMult   :=  (fun x y => x * y)
 
-/- removed value specification -/
-
-
 instance   : NumPow Int where
- 
+
     numPow   :=  (fun x y => x ^ y)
 
-/- removed value specification -/
-
-
 instance   : NumIntegerDivision Int where
- 
+
     numIntegerDivision   :=  lemIntDiv
 
-
 instance   : NumDivision Int where
- 
+
     numDivision   :=  lemIntDiv
 
-/- removed value specification -/
-
-
 instance   : NumRemainder Int where
- 
+
     numRemainder   :=  lemIntMod
 
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-
-
 instance   : OrdMaxMin Int where
- 
+
     max   :=  max
 
     min   :=  min
 
-/- removed value specification -/
-
-/- 
+/- ----------------------- -/
+/- int32                   -/
+/- ----------------------- -/
+ /- TODO: check -/
+/- lem: replaced by its target representation: 
 
 instance   : Numeral Int32 where
 
     fromNumeral   n  :=  lemInt32FromNumeral  n
  -/
-/- removed value specification -/
-
-
 
 instance   : Eq0 Int32 where
 
@@ -605,20 +473,13 @@ instance   : Eq0 Int32 where
 
     isInequal   n1  n2  :=  not  (n1  ==  n2)
 
-/- removed value specification -/
+/- TODO: Implement the following correctly. -/
 
-/- removed value specification -/
+/- TODO: Implement the following correctly. -/
 
-/- removed value specification -/
+/- TODO: Implement the following correctly. -/
 
-/- removed value specification -/
-
-
-
-/- removed value specification -/
-
-
-
+/- TODO: Implement the following correctly. -/
 
 instance   : Ord0 Int32 where
 
@@ -632,113 +493,91 @@ instance   : Ord0 Int32 where
 
     isGreaterEqual   :=  lemInt32Gteb
 
-
 instance   : SetType Int32 where
 
     setElemCompare   :=  defaultCompare
 
-/- removed value specification -/
-
+/- TODO: Implement the following correctly. -/
 
 instance   : NumNegate Int32 where
 
     numNegate   :=  Neg.neg
 
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  int32Abs  (i : Int32)  : Int32 :=  (lem_if  <=  0  i then  i  else  ~ i) -/
 
 instance   : NumAbs Int32 where
 
     abs   :=  Int32.abs
 
-/- removed value specification -/
-
+/- TODO: Implement the following two correctly. -/
 
 instance   : NumAdd Int32 where
 
     numAdd   :=  (fun x y => x + y)
 
-/- removed value specification -/
-
+/- TODO: Implement the following two correctly. -/
 
 instance   : NumMinus Int32 where
 
     numMinus   :=  (fun x y => x - y)
 
-/- removed value specification -/
-
-
-
 instance   : NumSucc Int32 where
 
     succ   :=  (fun  n=> n  + lemInt32FromNumeral  1)
-
-/- removed value specification -/
-
 
 instance   : NumPred Int32 where
 
     pred   :=  (fun  n=> n  - lemInt32FromNumeral  1)
 
-/- removed value specification -/
-
+/- TODO: Implement the following correctly. -/
 
 instance   : NumMult Int32 where
 
     numMult   :=  (fun x y => x * y)
 
-/- removed value specification -/
-
+/- TODO: Implement the following two correctly. -/
 
 instance   : NumPow Int32 where
- 
+
     numPow   :=  (fun x y => x ^ y)
 
-/- removed value specification -/
-
+/- TODO: Implement the following correctly. -/
 
 instance   : NumIntegerDivision Int32 where
- 
+
     numIntegerDivision   :=  lemInt32Div
 
-
 instance   : NumDivision Int32 where
- 
+
     numDivision   :=  lemInt32Div
 
-/- removed value specification -/
-
+/- TODO: Implement the following correctly. -/
 
 instance   : NumRemainder Int32 where
- 
+
     numRemainder   :=  lemInt32Mod
 
-/- removed value specification -/
+/- TODO: Implement the following correctly. -/
 
-
-/- removed value specification -/
-
-
+/- TODO: Implement the following correctly. -/
 
 instance   : OrdMaxMin Int32 where
- 
+
     max   :=  max
 
     min   :=  min
 
-/- removed value specification -/
-
-/- 
+/- ----------------------- -/
+/- int64                   -/
+/- ----------------------- -/
+ /- TODO: check -/
+/- lem: replaced by its target representation: 
 
 instance   : Numeral Int64 where
 
     fromNumeral   n  :=  lemInt64FromNumeral  n
  -/
-/- removed value specification -/
-
-
 
 instance   : Eq0 Int64 where
 
@@ -746,20 +585,13 @@ instance   : Eq0 Int64 where
 
     isInequal   n1  n2  :=  not  (n1  ==  n2)
 
-/- removed value specification -/
+/- TODO: Implement the following correctly. -/
 
-/- removed value specification -/
+/- TODO: Implement the following correctly. -/
 
-/- removed value specification -/
+/- TODO: Implement the following correctly. -/
 
-/- removed value specification -/
-
-
-
-/- removed value specification -/
-
-
-
+/- TODO: Implement the following correctly. -/
 
 instance   : Ord0 Int64 where
 
@@ -773,133 +605,97 @@ instance   : Ord0 Int64 where
 
     isGreaterEqual   :=  lemInt64Gteb
 
-
 instance   : SetType Int64 where
 
     setElemCompare   :=  defaultCompare
 
-/- removed value specification -/
-
+/- TODO: Implement the following one correctly. -/
 
 instance   : NumNegate Int64 where
 
     numNegate   :=  Neg.neg
 
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  int64Abs  (i : Int64)  : Int64 :=  (lem_if  <=  0  i then  i  else  ~ i) -/
 
 instance   : NumAbs Int64 where
 
     abs   :=  Int64.abs
 
-/- removed value specification -/
-
+/- TODO: Implement the following one correctly. -/
 
 instance   : NumAdd Int64 where
 
     numAdd   :=  (fun x y => x + y)
 
-/- removed value specification -/
-
+/- TODO: Implement the following one correctly. -/
 
 instance   : NumMinus Int64 where
 
     numMinus   :=  (fun x y => x - y)
 
-/- removed value specification -/
-
-
-
 instance   : NumSucc Int64 where
 
     succ   :=  (fun  n=> n  + lemInt64FromNumeral  1)
-
-/- removed value specification -/
-
 
 instance   : NumPred Int64 where
 
     pred   :=  (fun  n=> n  - lemInt64FromNumeral  1)
 
-/- removed value specification -/
-
+/- TODO: Implement the following one correctly. -/
 
 instance   : NumMult Int64 where
 
     numMult   :=  (fun x y => x * y)
 
-/- removed value specification -/
-
+/- TODO: Implement the following one correctly. -/
 
 instance   : NumPow Int64 where
- 
+
     numPow   :=  (fun x y => x ^ y)
 
-/- removed value specification -/
-
+/- TODO: Implement the following two correctly. -/
 
 instance   : NumIntegerDivision Int64 where
- 
+
     numIntegerDivision   :=  lemInt64Div
 
-
 instance   : NumDivision Int64 where
- 
+
     numDivision   :=  lemInt64Div
 
-/- removed value specification -/
-
+/- TODO: Implement the following two correctly. -/
 
 instance   : NumRemainder Int64 where
- 
+
     numRemainder   :=  lemInt64Mod
 
-/- removed value specification -/
+/- TODO: Implement the following one correctly. -/
 
-
-/- removed value specification -/
-
-
+/- TODO: Implement the following one correctly. -/
 
 instance   : OrdMaxMin Int64 where
- 
+
     max   :=  max
 
     min   :=  min
 
-/- removed value specification -/
+/- ----------------------- -/
+/- integer                 -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 
 instance   : Numeral Int where
 
     fromNumeral   n  :=  ( n :  Int)
- -/
-/- removed value specification -/
-
-/- removed value specification -/
-
+ -/ /- TODO: check -/
 
 instance   : Eq0 Int where
 
     isEqual   :=  (fun x y => x == y)
 
     isInequal   n1  n2  :=  not  (n1  ==  n2)
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
 
 instance   : Ord0 Int where
 
@@ -913,132 +709,77 @@ instance   : Ord0 Int where
 
     isGreaterEqual   :=  intGteb
 
-
 instance   : SetType Int where
 
     setElemCompare   :=  defaultCompare
 
-/- removed value specification -/
-
-
 instance   : NumNegate Int where
 
     numNegate   :=  (fun  i=> (Int.neg  i))
-
-/- removed value specification -/
-
+ /- TODO: check -/
 
 instance   : NumAbs Int where
 
     abs   :=  intAbs
 
-/- removed value specification -/
-
-
 instance   : NumAdd Int where
 
     numAdd   :=  (fun x y => x + y)
-
-/- removed value specification -/
-
 
 instance   : NumMinus Int where
 
     numMinus   :=  (fun x y => x - y)
 
-/- removed value specification -/
-
-
 instance   : NumSucc Int where
 
     succ   :=  (fun  n=> n  + ( 1 :  Int))
-
-/- removed value specification -/
-
 
 instance   : NumPred Int where
 
     pred   :=  (fun  n=> n  - ( 1 :  Int))
 
-/- removed value specification -/
-
-
 instance   : NumMult Int where
 
     numMult   :=  (fun x y => x * y)
 
-/- removed value specification -/
-
-
 instance   : NumPow Int where
- 
+
     numPow   :=  (fun x y => x ^ y)
 
-/- removed value specification -/
-
-
 instance   : NumIntegerDivision Int where
- 
+
     numIntegerDivision   :=  lemIntegerDiv
 
-
 instance   : NumDivision Int where
- 
+
     numDivision   :=  lemIntegerDiv
 
-/- removed value specification -/
-
-
 instance   : NumRemainder Int where
- 
+
     numRemainder   :=  lemIntegerMod
 
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-
-
 instance   : OrdMaxMin Int where
- 
+
     max   :=  max
 
     min   :=  min
 
-/- removed value specification -/
+/- ----------------------- -/
+/- rational                -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 
 instance   : Numeral LemUnsupported.rational where
 
     fromNumeral   n  :=  LemUnsupported.rationalFromNumeral  n
  -/
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
 
 instance   : Eq0 LemUnsupported.rational where
 
     isEqual   :=  (fun x y => x == y)
 
     isInequal   n1  n2  :=  not  (n1  ==  n2)
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
 
 instance   : Ord0 LemUnsupported.rational where
 
@@ -1052,99 +793,55 @@ instance   : Ord0 LemUnsupported.rational where
 
     isGreaterEqual   :=  unsupportedRationalGreaterEq
 
-
 instance   : SetType LemUnsupported.rational where
 
     setElemCompare   :=  defaultCompare
-
-/- removed value specification -/
-
 
 instance   : NumAdd LemUnsupported.rational where
 
     numAdd   :=  (fun x y => x + y)
 
-/- removed value specification -/
-
-
 instance   : NumMinus LemUnsupported.rational where
 
     numMinus   :=  (fun x y => x - y)
-
-/- removed value specification -/
-
-
 
 instance   : NumNegate LemUnsupported.rational where
 
     numNegate   :=  (fun  n=> LemUnsupported.rationalFromNumeral  0  -  n)
 
-/- removed value specification -/
-
-
-
 instance   : NumAbs LemUnsupported.rational where
 
     abs   :=  (fun  n=> (lem_if  unsupportedRationalGreater  n (LemUnsupported.rationalFromNumeral  0) then  n  else LemUnsupported.rationalFromNumeral  0  -  n))
-
-/- removed value specification -/
-
 
 instance   : NumSucc LemUnsupported.rational where
 
     succ   :=  (fun  n=> n  + LemUnsupported.rationalFromNumeral  1)
 
-/- removed value specification -/
-
-
 instance   : NumPred LemUnsupported.rational where
 
     pred   :=  (fun  n=> n  - LemUnsupported.rationalFromNumeral  1)
-
-/- removed value specification -/
-
 
 instance   : NumMult LemUnsupported.rational where
 
     numMult   :=  (fun x y => x * y)
 
-/- removed value specification -/
-
-
 instance   : NumDivision LemUnsupported.rational where
 
     numDivision   :=  (fun x y => x / y)
 
-/- removed value specification -/
-
-/- 
-def  rationalFromFrac  (n : Int) (d : Int)  : LemUnsupported.rational :=  (LemUnsupported.rationalFromInt  n)  /  (LemUnsupported.rationalFromInt  d) -/
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
+def  rationalFromFrac  (n : Int) (d : Int)  : LemUnsupported.rational :=  (LemUnsupported.rationalFromInt  n)  /  (LemUnsupported.rationalFromInt  d) -/ /- TODO: test -/ /- TODO: test -/
+/- lem: replaced by its target representation: 
  partial def  rationalPowInteger  (b : LemUnsupported.rational) (e : Int)  : LemUnsupported.rational := 
   lem_if  e  =  0 then  1  else 
   lem_if  >  e  0 then  b  ^  (e  -  1)  *  b  else 
   b  ^  (e  +  1)  /  b -/
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  rationalPowNat  (r : LemUnsupported.rational) (e : Nat)  : LemUnsupported.rational :=  r  ^  (Int.ofNat  e) -/
 
 instance   : NumPow LemUnsupported.rational where
 
     numPow   :=  (fun x y => x ^ y)
-
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-
 
 instance   : OrdMaxMin LemUnsupported.rational where
 
@@ -1152,37 +849,22 @@ instance   : OrdMaxMin LemUnsupported.rational where
 
     min   :=  min
 
-/- removed value specification -/
+/- ----------------------- -/
+/- real                    -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 
 instance   : Numeral LemUnsupported.real where
 
     fromNumeral   n  :=  LemUnsupported.realFromNumeral  n
  -/
-/- removed value specification -/
-
-/- removed value specification -/
-
 
 instance   : Eq0 LemUnsupported.real where
 
     isEqual   :=  (fun x y => x == y)
 
     isInequal   n1  n2  :=  not  (n1  ==  n2)
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
 
 instance   : Ord0 LemUnsupported.real where
 
@@ -1196,97 +878,55 @@ instance   : Ord0 LemUnsupported.real where
 
     isGreaterEqual   :=  unsupportedRealGreaterEq
 
-
 instance   : SetType LemUnsupported.real where
 
     setElemCompare   :=  defaultCompare
-
-/- removed value specification -/
-
 
 instance   : NumAdd LemUnsupported.real where
 
     numAdd   :=  (fun x y => x + y)
 
-/- removed value specification -/
-
-
 instance   : NumMinus LemUnsupported.real where
 
     numMinus   :=  (fun x y => x - y)
-
-/- removed value specification -/
-
-
 
 instance   : NumNegate LemUnsupported.real where
 
     numNegate   :=  Neg.neg
 
-/- removed value specification -/
-
-
-
 instance   : NumAbs LemUnsupported.real where
 
     abs   :=  unsupportedRealAbs
-
-/- removed value specification -/
-
 
 instance   : NumSucc LemUnsupported.real where
 
     succ   :=  (fun  n=> n  + LemUnsupported.realFromNumeral  1)
 
-/- removed value specification -/
-
-
 instance   : NumPred LemUnsupported.real where
 
     pred   :=  (fun  n=> n  - LemUnsupported.realFromNumeral  1)
-
-/- removed value specification -/
-
 
 instance   : NumMult LemUnsupported.real where
 
     numMult   :=  (fun x y => x * y)
 
-/- removed value specification -/
-
-
 instance   : NumDivision LemUnsupported.real where
 
     numDivision   :=  (fun x y => x / y)
 
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  realFromFrac  (n : Int) (d : Int)  : LemUnsupported.real :=  (LemUnsupported.realFromInt  n)  /  (LemUnsupported.realFromInt  d) -/
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
  partial def  realPowInteger  (b : LemUnsupported.real) (e : Int)  : LemUnsupported.real := 
   lem_if  e  =  0 then  1  else 
   lem_if  >  e  0 then  b  ^  (e  -  1)  *  b  else 
   b  ^  (e  +  1)  /  b -/
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  realPowNat  (r : LemUnsupported.real) (e : Nat)  : LemUnsupported.real :=  r  ^  (Int.ofNat  e) -/
 
 instance   : NumPow LemUnsupported.real where
 
     numPow   :=  (fun x y => x ^ y)
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-
 
 instance   : OrdMaxMin LemUnsupported.real where
 
@@ -1294,101 +934,55 @@ instance   : OrdMaxMin LemUnsupported.real where
 
     min   :=  min
 
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  integerSqrt  (i : Int)  : Int :=  realFloor  (realSqrt  (LemUnsupported.realFromInt  i)) -/
-/- removed value specification -/
+/- ========================================================================== -/
+/- Translation between number types                                           -/
+/- ========================================================================== -/
+/- **************** -/
+/- integerFrom... -/
+/- **************** -/
+ /- remove natFromNumeral, as it is the identify function -/ /- TODO: check -/
+/- **************** -/
+/- naturalFrom... -/
+/- **************** -/
 
-/- removed value specification -/
+/- **************** -/
+/- intFrom ...    -/
+/- **************** -/
+ /- remove natFromNumeral, as it is the identify function -/
+/- **************** -/
+/- natFrom ...    -/
+/- **************** -/
 
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- 
+/- **************** -/
+/- int32From ...  -/
+/- **************** -/
+ /- TODO check -/ /- TODO check -/
+/- lem: replaced by its target representation: 
 def  int32FromInteger  (i : Int)  : Int32 :=  (
   let  abs_int32  := lemInt32OfNat  (Int.natAbs  i); 
   lem_if  (<  i  0) then  (~  abs_int32)  else  abs_int32 
 ) -/
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  int32FromInt  (i : Int)  : Int32 :=  lemInt32OfInt  (  i) -/
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  int32FromInt64  (i : Int64)  : Int32 :=  lemInt32OfInt  (lemInt64ToInt  i) -/
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- 
+/- **************** -/
+/- int64From ...  -/
+/- **************** -/
+ /- TODO check -/ /- TODO check -/
+/- lem: replaced by its target representation: 
 def  int64FromInteger  (i : Int)  : Int64 :=  (
   let  abs_int64  := lemInt64OfNat  (Int.natAbs  i); 
   lem_if  (<  i  0) then  (~  abs_int64)  else  abs_int64 
 ) -/
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  int64FromInt  (i : Int)  : Int64 :=  lemInt64OfInt  (  i) -/
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  int64FromInt32  (i : Int32)  : Int64 :=  lemInt64OfInt  (lemInt32ToInt  i) -/
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-
+/- **************** -/
+/- what's missing -/
+/- **************** -/
 
 end Lem_Num
-

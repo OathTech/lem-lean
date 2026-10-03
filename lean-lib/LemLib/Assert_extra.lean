@@ -4,22 +4,28 @@ import LemLib
 
 
 namespace Lem_Assert_extra
+ /- ------------------------------------ -/
+/- impure functions for signalling      -/
+/- catastrophic failure, or function    -/
+/- preconditions.                       -/
+/- ------------------------------------ -/
 
+/- ------------------------------------ -/
+/- failing with a proper error message  -/
+/- ------------------------------------ -/
 
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
+/- ------------------------------------ -/
+/- failing without an error message     -/
+/- ------------------------------------ -/
 
 @[never_extract] def  fail  {a : Type} [Inhabited a]   : a := (failwithI  "fail" : a)
-/- removed value specification -/
+/- ------------------------------------- -/
+/- assertions                            -/
+/- ------------------------------------- -/
 
-def  ensure  (test : Bool) (msg : String)  : Unit := 
-  lem_if  test then 
+def  ensure  (test : Bool) (msg : String)  : Unit :=
+  lem_if  test then
     ()
    else (failwithI  msg : Unit)
 
 end Lem_Assert_extra
-

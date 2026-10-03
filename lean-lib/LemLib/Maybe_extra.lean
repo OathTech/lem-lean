@@ -7,15 +7,23 @@ import LemLib.Maybe
 import LemLib.Assert_extra
 
 namespace Lem_Maybe_extra
- 
+ /- **************************************************************************** -/
+/- extra functions for maybe / option                                         -/
+/-                                                                            -/
+/- **************************************************************************** -/
 
 open Lem_Basic_classes
 open Lem_Maybe
 open Lem_Assert_extra
 
-/- removed value specification -/
+/- ----------------------- -/
+/- fromJust                -/
+/- ----------------------- -/
 
-def  fromJust  {a : Type} [Inhabited a]  (op : Option a)  : a :=  match  op with  |  some  v =>  v |  none => (failwithI  "fromJust of Nothing" : a) 
+def  fromJust  {a : Type} [Inhabited a]  (op : Option a)  : a :=  match  op with  |  some  v =>  v |  none => (failwithI  "fromJust of Nothing" : a)
+/- Lean: at call sites with a ground result type, emit the
+   [Inhabited]-bounded LemLib.fromJustI instead (axiom-free failure leaf;
+   success equation still holds by rfl). Type-variable sites keep this
+   generated fromJust â no constraint propagation. -/
+
 end Lem_Maybe_extra
-
-

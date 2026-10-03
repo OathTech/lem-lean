@@ -10,32 +10,36 @@ import LemLib.Num
 
 namespace Lem_Set_helpers
 /- **************************************************************************** -/
-/-  Helper functions for sets                                                   -/
+/- Helper functions for sets                                                  -/
 /- **************************************************************************** -/
 
-/-  Usually there is a something.lem file containing the main definitions and a 
+/- Usually there is a something.lem file containing the main definitions and a 
    something_extra.lem one containing functions that might cause problems for
    some backends or are just seldomly used.
 
    For sets the situation is different. folding is not well defined, since it
    is only sensibly defined for finite sets and the traversal 
-   order is underspecified.  -/ 
+   order is underspecified. -/
 
-/-  ==========================================================================  -/
-/-  Header                                                                      -/
-/-  ==========================================================================  -/
+/- ========================================================================== -/
+/- Header                                                                     -/
+/- ========================================================================== -/
 
 open Lem_Bool
 open Lem_Basic_classes
 open Lem_Maybe
 open Lem_Function
 open Lem_Num
- 
 
+/- ------------------------ -/
+/- fold                     -/
+/- ------------------------ -/
+/- fold is suspicious, because if given a function, for which
+   the order, in which the arguments are given, matters, its
+   results are undefined. On the other hand, it is very handy to
+   define other - non suspicious functions. 
 
-/- removed value specification -/
+   Moreover, fold is central for OCaml, since it is used to
+   compile set comprehensions -/
 
 end Lem_Set_helpers
-
-
-

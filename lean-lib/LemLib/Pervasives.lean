@@ -19,7 +19,6 @@ import LemLib.Word
 import LemLib.Show
 
 namespace Lem_Pervasives
- 
 
 open Lem_Basic_classes
 open Lem_Bool
@@ -35,10 +34,7 @@ open Lem_String
 open Lem_Word
 open Lem_Show
 
-
 open Lem_Sorting
 open Lem_Relation
 
 end Lem_Pervasives
-
-

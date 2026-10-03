@@ -10,7 +10,7 @@ import LemLib.Basic_classes
 
 namespace Lem_String_extra
 /- **************************************************************************** -/
-/-  String functions                                                            -/
+/- String functions                                                           -/
 /- **************************************************************************** -/
 
 open Lem_Basic_classes
@@ -23,64 +23,59 @@ open Lem_String
 
 open Lem_List_extra
 
+/- **************************************************************************** -/
+/- Character's to numbers                                                     -/
+/- **************************************************************************** -/
 
+/- TODO: The Isabelle and Coq representations are taken from a quick Google
+   search, they might not be the best options -/
 
-/- removed value specification -/
+/- TODO: The Isabelle and Coq representations are taken from a quick Google
+   search, they might not be the best options -/
 
-/- removed value specification -/
+/- **************************************************************************** -/
+/- Converting to strings                                                      -/
+/- **************************************************************************** -/
 
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
  partial def  stringFromNatHelper  (n : Nat) (acc : List (Char))  : List (Char) := 
   lem_if  n  =  0 then 
     acc
    else 
     lemStringFromNatHelper  (/  n  10)  (lemChr  (mod  n  10  +  48)  ::  acc) -/
-/- removed value specification -/
-
-def  stringFromNat  (n : Nat)  : String :=  
+def  stringFromNat  (n : Nat)  : String :=
   lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNatHelper  n  ([] : List (Char)))
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
  partial def  stringFromNaturalHelper  (n : Nat) (acc : List (Char))  : List (Char) := 
   lem_if  n  =  0 then 
     acc
    else 
     lemStringFromNaturalHelper  (/  n  10)  (lemChr  (lemNatFromNatural  (mod  n  10  +  48))  ::  acc) -/
-/- removed value specification -/
-
-def  stringFromNatural  (n : Nat)  : String :=  
+def  stringFromNatural  (n : Nat)  : String :=
   lem_if  n  ==   0 then  "0"  else  String.ofList  (lemStringFromNaturalHelper  n  ([] : List (Char)))
-/- removed value specification -/
-
-def  stringFromInt  (i : Int)  : String :=  
-  lem_if  intLtb  i (( 0 :  Int)) then   
+def  stringFromInt  (i : Int)  : String :=
+  lem_if  intLtb  i (( 0 :  Int)) then
     String.append "-"  (stringFromNat  (Int.natAbs  i))
-   else 
+   else
     stringFromNat  (Int.natAbs  i)
-/- removed value specification -/
-
-def  stringFromInteger  (i : Int)  : String :=  
-  lem_if  intLtb  i (( 0 :  Int)) then   
+def  stringFromInteger  (i : Int)  : String :=
+  lem_if  intLtb  i (( 0 :  Int)) then
     String.append "-"  (stringFromNatural  (Int.natAbs  i))
-   else 
+   else
     stringFromNatural  (Int.natAbs  i)
-/- removed value specification -/
+/- **************************************************************************** -/
+/- List-like operations                                                       -/
+/- **************************************************************************** -/
 
 def  nth  (s : String) (n : Nat)  : Char :=  listGetBang  (String.toList  s)  n
-/- removed value specification -/
-
-def  stringConcat  (s : List (String))  : String := 
+def  stringConcat  (s : List (String))  : String :=
   lemListFoldr  String.append  ""  s
-/- removed value specification -/
+/- **************************************************************************** -/
+/- String comparison                                                          -/
+/- **************************************************************************** -/
 
-
-/-  TODO:  -/
- /-  XXX: broken  -/
-
-
+/- TODO: -/
+ /- XXX: broken -/
 
 def  stringLess  (x : String) (y : String)  : Bool :=  orderingIsLess  (defaultCompare  x  y)
 def  stringLessEq  (x : String) (y : String)  : Bool :=  not  (orderingIsGreater  (defaultCompare  x  y))
@@ -100,5 +95,3 @@ instance   : Ord0 String where
     isGreaterEqual   :=  stringGreaterEq
 
 end Lem_String_extra
-
- 

@@ -16,10 +16,9 @@ import LemLib.Machine_word
 import LemLib.Pervasives
 
 namespace Lem_Pervasives_extra
- 
 
 open Lem_Pervasives
- 
+
 open Lem_Function_extra
 open Lem_Maybe_extra
 open Lem_Map_extra
@@ -33,4 +32,3 @@ open Lem_Show_extra
 open Lem_Machine_word
 
 end Lem_Pervasives_extra
-

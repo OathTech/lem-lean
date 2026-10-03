@@ -9,7 +9,12 @@ import LemLib.Set
 import LemLib.Num
 
 namespace Lem_Relation
-
+ /- **************************************************************************** -/
+/- A library for binary relations                                             -/
+/- **************************************************************************** -/
+/- ========================================================================== -/
+/- Header                                                                     -/
+/- ========================================================================== -/
 
 open Lem_Bool
 open Lem_Basic_classes
@@ -17,191 +22,213 @@ open Lem_Tuple
 open Lem_Set
 open Lem_Num
 
-
-
-/-  ==========================================================================  -/
-/-  The type of relations                                                       -/
-/-  ==========================================================================  -/
+/- ========================================================================== -/
+/- The type of relations                                                      -/
+/- ========================================================================== -/
 
 abbrev rel_pred  (a : Type) (b : Type)  :=  a →  b →  Bool
 
 abbrev rel_set  (a : Type) (b : Type)  :=  Pset  ((a  × b))
 
-
-/-  Binary relations are usually represented as either
+/- Binary relations are usually represented as either
    sets of pairs (rel_set) or as curried functions (rel_pred). 
    
    The choice depends on taste and the backend. Lem should not take a 
    decision, but supports both representations. There is an abstract type
    pred, which can be converted to both representations. The representation
    of pred itself then depends on the backend. However, for the time beeing,
-   let's implement relations as sets to get them working more quickly.  -/
+   let's implement relations as sets to get them working more quickly. -/
 
 abbrev rel  (a : Type) (b : Type)  :=  rel_set  a  b
 
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-
-/- removed value specification -/
-
 def  relEq  {a : Type} {b : Type} [SetType a] [SetType b]  (r1 : Pset ((a ×b))) (r2 : Pset ((a ×b)))  : Bool :=  ( (setEqualBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (b) _)) r1  r2))
-/- removed value specification -/
-
-/- removed value specification -/
-
 
 def  relToPred  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a] [Eq0 b]  (r : Pset ((a ×b)))  : a → b → Bool :=  (fun (x : a) (y : b) =>  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (b) _))  (x, y)  r))
 def  relFromPred  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a] [Eq0 b]  (xs : Pset a) (ys : Pset b) (p : a → b → Bool)  : Pset ((a ×b)) :=  setFilterBy  setElemCompare  (fun (p0 : (a ×b)) =>  match p0 with |  (x, y) =>  p  x  y )  ((setCrossBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (b) _))  xs  ys))
-/- removed value specification -/
+/- ========================================================================== -/
+/- Basic Operations                                                           -/
+/- ========================================================================== -/
+/- ----------------------- -/
+/- membership test         -/
+/- ----------------------- -/
 
+/- ----------------------- -/
+/- empty relation          -/
+/- ----------------------- -/
 
-/- removed value specification -/
+/- ----------------------- -/
+/- Insertion               -/
+/- ----------------------- -/
 
-
-/- removed value specification -/
-
-
-/- removed value specification -/
+/- ----------------------- -/
+/- Identity relation       -/
+/- ----------------------- -/
 
 def  relIdOn  {a : Type} [SetType a] [Eq0 a]  (s : Pset a)  : Pset ((a ×a)) :=  relFromPred  s  s  (fun x y => x == y)
-/- removed value specification -/
+/- ----------------------- -/
+/- relation union          -/
+/- ----------------------- -/
 
-/- removed value specification -/
+/- ----------------------- -/
+/- relation intersection   -/
+/- ----------------------- -/
 
-
-/- removed value specification -/
-
-
-/- removed value specification -/
+/- ----------------------- -/
+/- Relation Composition    -/
+/- ----------------------- -/
 
 def  relComp  {a : Type} {b : Type} {c : Type} [SetType a] [SetType b] [SetType c] [Eq0 a] [Eq0 b]  (r1 : Pset ((a ×b))) (r2 : Pset ((b ×c)))  : Pset ((a ×c)) :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : Pset ((a ×c))) =>  match p, x2 with | (e1, e2),  x2 =>  setFold  (fun (p : (b ×c)) (x2 : Pset ((a ×c))) =>  match p, x2 with | (e2', e3),  x2 => ( lem_if  e2  ==  e2' then setAddBy  setElemCompare  (e1, e3)  x2  else  x2) )  (r2)  x2 )  (r1)  x2
-/- removed value specification -/
+/- ----------------------- -/
+/- restrict                -/
+/- ----------------------- -/
 
 def  relRestrict  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Pset ((a ×a)) :=  (let  x2   := (setEmpty);  setFold  (fun (a1 : a) (x2 : Pset ((a ×a))) =>  setFold  (fun (b : a) (x2 : Pset ((a ×a))) =>  lem_if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (a1, b)  r) then setAddBy  setElemCompare  (a1, b)  x2  else  x2)  s  x2)  s  x2)
-/- removed value specification -/
+/- ----------------------- -/
+/- Converse                -/
+/- ----------------------- -/
 
 def  relConverse  {a : Type} {b : Type} [SetType a] [SetType b]  (r : Pset ((a ×b)))  : Pset ((b ×a)) :=  ((setMapBy  (pairCompare  (@setElemCompare (b) _)  (@setElemCompare (a) _))  swap  (r)))
-/- removed value specification -/
+/- ----------------------- -/
+/- domain                  -/
+/- ----------------------- -/
 
 def  relDomain  {a : Type} {b : Type} [SetType a] [SetType b]  (r : Pset ((a ×b)))  : Pset a :=  (setMapBy  (@setElemCompare (a) _)  (fun (x : (a ×b)) =>  Prod.fst  x)  (r))
-/- removed value specification -/
+/- ----------------------- -/
+/- range                   -/
+/- ----------------------- -/
 
 def  relRange  {a : Type} {b : Type} [SetType a] [SetType b]  (r : Pset ((a ×b)))  : Pset b :=  (setMapBy  (@setElemCompare (b) _)  (fun (x : (a ×b)) =>  Prod.snd  x)  (r))
-/- removed value specification -/
+/- ----------------------- -/
+/- field / definedOn       -/
+/-                         -/
+/- avoid the keyword field -/
+/- ----------------------- -/
 
-
-/- removed value specification -/
+/- ----------------------- -/
+/- relOver                 -/
+/-                         -/
+/- avoid the keyword field -/
+/- ----------------------- -/
 
 def  relOver  {a : Type} [SetType a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  ( (setSubsetBy  (@setElemCompare (a) _) (( (setUnionBy  (@setElemCompare (a) _) (relDomain  r)  (relRange  r))))  s))
-/- removed value specification -/
+/- ----------------------- -/
+/- apply a relation        -/
+/- ----------------------- -/
+/- Given a relation r and a set s, relApply r s applies s to r, i.e.
+   it returns the set of all value reachable via r from a value in s.
+   This operation can be seen as a generalisation of function application. -/
 
 def  relApply  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a]  (r : Pset ((a ×b))) (s : Pset a)  : Pset b :=  let  x2   := (setEmpty);  setFold  (fun (p : (a ×b)) (x2 : Pset b) =>  match p, x2 with | (x,  y),  x2 => ( lem_if  (setMemberBy  (@setElemCompare (a) _)  x  s) then setAddBy  setElemCompare  y  x2  else  x2) )  (r)  x2
-/- removed value specification -/
+/- ========================================================================== -/
+/- Properties                                                                 -/
+/- ========================================================================== -/
+/- ----------------------- -/
+/- subrel                  -/
+/- ----------------------- -/
 
-
-/- removed value specification -/
+/- ----------------------- -/
+/- reflexivity             -/
+/- ----------------------- -/
 
 def  isReflexiveOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  (setForAll  (fun (e : a) =>  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (e, e)  r))  s)
-/- removed value specification -/
-
-/- removed value specification -/
+/- ----------------------- -/
+/- irreflexivity           -/
+/- ----------------------- -/
 
 def  isIrreflexiveOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  (setForAll  (fun (e : a) =>  not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e, e)  r)))  s)
-/- removed value specification -/
-
 def  isIrreflexive  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a)))  : Bool :=  (setForAll  (fun (p : (a ×a)) =>  match p with |  (e1,  e2) =>  not  (e1  ==  e2) )  (r))
-/- removed value specification -/
+/- ----------------------- -/
+/- symmetry                -/
+/- ----------------------- -/
 
 def  isSymmetricOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  (setForAll  (fun (e1 : a) =>  setForAll  (fun (e2 : a) =>  ((not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e1, e2)  r)))  ||  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e2, e1)  r))))  s)  s)
-/- removed value specification -/
-
 def  isSymmetric  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a)))  : Bool :=  (setForAll  (fun (p : (a ×a)) =>  match p with |  (e1,  e2) =>  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (e2, e1)  r) )  r)
-/- removed value specification -/
+/- ----------------------- -/
+/- antisymmetry            -/
+/- ----------------------- -/
 
 def  isAntisymmetricOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  (setForAll  (fun (e1 : a) =>  setForAll  (fun (e2 : a) =>  ((not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e1, e2)  r)))  ||  ((not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e2, e1)  r)))  ||  (e1  ==  e2))))  s)  s)
-/- removed value specification -/
-
 def  isAntisymmetric  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a)))  : Bool :=  (setForAll  (fun (p : (a ×a)) =>  match p with |  (e1,  e2) =>  ((not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e2, e1)  r)))  ||  (e1  ==  e2)) )  r)
-/- removed value specification -/
+/- ----------------------- -/
+/- transitivity            -/
+/- ----------------------- -/
 
 def  isTransitiveOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  (setForAll  (fun (e1 : a) =>  setForAll  (fun (e2 : a) =>  setForAll  (fun (e3 : a) =>  ((not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e1, e2)  r)))  ||  ((not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e2, e3)  r)))  ||  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e1, e3)  r)))))  s)  s)  s)
-/- removed value specification -/
-
 def  isTransitive  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a)))  : Bool :=  (setForAll  (fun (p : (a ×a)) =>  match p with |  (e1,  e2) =>  setForAll  (fun (e3 : a) =>  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (e1, e3)  r))  (relApply  r  (setFromListBy setElemCompare [e2])) )  r)
-/- removed value specification -/
+/- ----------------------- -/
+/- total                   -/
+/- ----------------------- -/
 
 def  isTotalOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  (setForAll  (fun (e1 : a) =>  setForAll  (fun (e2 : a) =>  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e1, e2)  r))  ||  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e2, e1)  r)))  s)  s)
-/- removed value specification -/
-
-/- removed value specification -/
-
 def  isTrichotomousOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  (setForAll  (fun (e1 : a) =>  setForAll  (fun (e2 : a) =>  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e1, e2)  r))  ||  ((e1  ==  e2)  ||  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (e2, e1)  r))))  s)  s)
-/- removed value specification -/
-
-/- removed value specification -/
+/- ----------------------- -/
+/- is_single_valued        -/
+/- ----------------------- -/
 
 def  isSingleValued  {a : Type} {b : Type} [SetType a] [SetType b] [Eq0 a] [Eq0 b]  (r : Pset ((a ×b)))  : Bool :=  (setForAll  (fun (p : (a ×b)) =>  match p with |  (e1,  e2a) =>  setForAll  (fun (e2b : b) =>  e2a  ==  e2b)  (relApply  r  (setFromListBy setElemCompare [e1])) )  r)
-/- removed value specification -/
+/- ----------------------- -/
+/- equivalence relation    -/
+/- ----------------------- -/
 
 def  isEquivalenceOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  isReflexiveOn  r  s  &&  (isSymmetricOn  r  s  &&  isTransitiveOn  r  s)
-/- removed value specification -/
+/- ----------------------- -/
+/- well founded            -/
+/- ----------------------- -/
 
-/- removed value specification -/
-
-/- removed value specification -/
+/- ========================================================================== -/
+/- Orders                                                                     -/
+/- ========================================================================== -/
+/- ----------------------- -/
+/- pre- or quasiorders     -/
+/- ----------------------- -/
 
 def  isPreorderOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  isReflexiveOn  r  s  &&  isTransitiveOn  r  s
-/- removed value specification -/
-
-/- removed value specification -/
+/- ----------------------- -/
+/- partial orders          -/
+/- ----------------------- -/
 
 def  isPartialOrderOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  isReflexiveOn  r  s  &&  (isTransitiveOn  r  s  &&  isAntisymmetricOn  r  s)
-/- removed value specification -/
-
 def  isStrictPartialOrderOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  isIrreflexiveOn  r  s  &&  isTransitiveOn  r  s
-/- removed value specification -/
-
 def  isStrictPartialOrder  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a)))  : Bool :=  isIrreflexive  r  &&  isTransitive  r
-/- removed value specification -/
-
-/- removed value specification -/
+/- ----------------------- -/
+/- total / linear orders   -/
+/- ----------------------- -/
 
 def  isTotalOrderOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  isPartialOrderOn  r  s  &&  isTotalOn  r  s
-/- removed value specification -/
-
 def  isStrictTotalOrderOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Bool :=  isStrictPartialOrderOn  r  s  &&  isTrichotomousOn  r  s
-/- removed value specification -/
+/- ========================================================================== -/
+/- closures                                                                   -/
+/- ========================================================================== -/
+/- ----------------------- -/
+/- transitive closure      -/
+/- ----------------------- -/
 
-/- removed value specification -/
+/- lean: no rep for transitiveClosureByEq â the OCaml target has none either
+   (unbound for both targets; parity-fix slice 2026-09-03) -/
+/- arc-14 re-mark R1 (the be:G4 class): the lean transitiveClosure inline
+   routes through the COMPARATOR form, mirroring the ocaml inline â the
+   ByEq route joined/deduped by lem (=) (BEq), which with a BEq finer
+   than the set comparator diverges from the comparator-keyed Pset.tc. -/
 
-/- removed value specification -/
+/- ----------------------- -/
+/- transitive closure step -/
+/- ----------------------- -/
 
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-
-
-/- removed value specification -/
-
-
-def  transitiveClosureAdd  {a : Type} [SetType a] [Eq0 a]  (x : a) (y : a) (r : Pset ((a ×a)))  : Pset ((a ×a)) :=  
+def  transitiveClosureAdd  {a : Type} [SetType a] [Eq0 a]  (x : a) (y : a) (r : Pset ((a ×a)))  : Pset ((a ×a)) :=
   (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (((setAddBy  setElemCompare  (x,y)  (r))))  ((( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : Pset ((a ×a))) =>  lem_if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (y, z)  r) then setAddBy  setElemCompare  (x, z)  x2  else  x2)  (relRange  r)  x2))  ((let  x2   := (setEmpty);  setFold  (fun (z : a) (x2 : Pset ((a ×a))) =>  lem_if  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (z, x)  r) then setAddBy  setElemCompare  (z, y)  x2  else  x2)  (relDomain  r)  x2)))))))))
-/- removed value specification -/
+/- ========================================================================== -/
+/- reflexive closure                                                          -/
+/- ========================================================================== -/
 
 def  reflexiveTransitiveClosureOn  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a))) (s : Pset a)  : Pset ((a ×a)) :=  (set_tcByCmp  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (( (setUnionBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (r)  ((relIdOn  s))))))
-/- removed value specification -/
+/- ========================================================================== -/
+/- inverse of closures                                                        -/
+/- ========================================================================== -/
+/- ----------------------- -/
+/- without transitve edges -/
+/- ----------------------- -/
 
-/- removed value specification -/
-
-def  withoutTransitiveEdges  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a)))  : Pset ((a ×a)) := 
-  let  tc   := (set_tcByCmp  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  r); 
+def  withoutTransitiveEdges  {a : Type} [SetType a] [Eq0 a]  (r : Pset ((a ×a)))  : Pset ((a ×a)) :=
+  let  tc   := (set_tcByCmp  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  r);
   let  x2   := (setEmpty);  setFold  (fun (p : (a ×a)) (x2 : Pset ((a ×a))) =>  match p, x2 with | (a1,  c),  x2 => ( lem_if  setForAll  (fun (b : a) =>  ((not  ((a1  !=  b)  &&  (b  !=  c)))  ||  not  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) (a1, b)  tc)  &&  (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _))  (b, c)  tc))))  (relRange  r) then setAddBy  setElemCompare  (a1, c)  x2  else  x2) )  r  x2
 end Lem_Relation
-

@@ -12,12 +12,12 @@ import LemLib.Set_helpers
 
 namespace Lem_Set
 /- **************************************************************************** -/
-/-  A library for sets                                                          -/
-/-                                                                              -/
-/-  It mainly follows the Haskell Set-library                                   -/
+/- A library for sets                                                         -/
+/-                                                                            -/
+/- It mainly follows the Haskell Set-library                                  -/
 /- **************************************************************************** -/
 
-/-  Sets in Lem are a bit tricky. On the one hand, we want efficiently executable sets.
+/- Sets in Lem are a bit tricky. On the one hand, we want efficiently executable sets.
    OCaml and Haskell both represent sets by some kind of balancing trees. This means
    that sets are finite and an order on the element type is required. 
    Such sets are constructed by simple, executable operations like inserting or
@@ -32,12 +32,11 @@ namespace Lem_Set
    run be represented by a separate type. Since this would require some significant
    changes to Lem, for the moment also infinite sets are represented using this
    class. However, a run-time exception might occour when using these sets. 
-   This problem needs adressing in the future.  -/
-   
+   This problem needs adressing in the future. -/
 
-/-  ==========================================================================  -/
-/-  Header                                                                      -/
-/-  ==========================================================================  -/
+/- ========================================================================== -/
+/- Header                                                                     -/
+/- ========================================================================== -/
 
 open Lem_Bool
 open Lem_Basic_classes
@@ -47,20 +46,15 @@ open Lem_Num
 open Lem_List
 open Lem_Set_helpers
 
-
-/-  DPM: sets currently implemented as lists due to mismatch between Coq type
+/- DPM: sets currently implemented as lists due to mismatch between Coq type
  * class hierarchy and the hierarchy implemented in Lem.
-  -/
+ -/
 
+/- Type of sets and set comprehensions are hard-coded -/
 
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-
+/- ----------------------- -/
+/- Equality check          -/
+/- ----------------------- -/
 
 instance (a : Type) [SetType a] : Eq0 (Pset  a) where
 
@@ -68,163 +62,178 @@ instance (a : Type) [SetType a] : Eq0 (Pset  a) where
 
     isInequal   s1  s2  :=  not  ((setEqualBy  (@setElemCompare (a) _)  s1  s2))
 
-/- removed value specification -/
+/- ----------------------- -/
+/- Empty set               -/
+/- ----------------------- -/
 
-/- removed value specification -/
+/- ----------------------- -/
+/- any / all               -/
+/- ----------------------- -/
 
+/- ----------------------- -/
+/- (IN)                    -/
+/- ----------------------- -/
 
-/- removed value specification -/
- 
+/- ----------------------- -/
+/- not (IN)                -/
+/- ----------------------- -/
 
-/- removed value specification -/
+/- ----------------------- -/
+/- Emptyness check         -/
+/- ----------------------- -/
+ /- before is_empty -/
 
+/- ------------------------ -/
+/- singleton                -/
+/- ------------------------ -/
 
-/- removed value specification -/
+/- ----------------------- -/
+/- size                    -/
+/- ----------------------- -/
 
-/- removed value specification -/
+/- ---------------------------- -/
+/- setting up pattern matching -/
+/- --------------------------- -/
 
+/- please provide target bindings, since choose is defined only in extra 
+   and not the right thing to use here anyhow. 
 
+let set_case s c_empty c_sing c_else =
+  if (null s) then c_empty else
+  if (size s = 1) then c_sing (choose s)
+  else c_else
+-/
 
-/- removed value specification -/
- 
+/- ------------------------ -/
+/- union                    -/
+/- ------------------------ -/
 
-/- removed value specification -/
- /-  before is_empty  -/
+/- ----------------------- -/
+/- insert                  -/
+/- ----------------------- -/
+ /- before add -/
+/- arc-14 S2 B3 (be:G4): comparator-keyed insert â dedupe by the SetType
+   comparator (OCaml Pset.add parity), never by BEq. The args form
+   splices the setElemCompare dictionary method at each call site (the
+   leastFixedPoint precedent below); insert's lem type carries
+   SetType 'a, so the instance always resolves. -/
 
-/- removed value specification -/
+/- ----------------------- -/
+/- filter                  -/
+/- ----------------------- -/
 
-/- removed value specification -/
-
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/-  
+/- lem: replaced by its target representation:  
 def  filter  {a : Type} [SetType a]  (P : a → Bool) (s : Pset a)  : Pset a := (sorry /- Lean backend: set comprehension binding not supported -/) -/
-/- removed value specification -/
+/- ----------------------- -/
+/- partition               -/
+/- ----------------------- -/
 
 def  partition0  {a : Type} [SetType a]  (P : a → Bool) (s : Pset a)  : (Pset a ×Pset a) :=  (setFilterBy  setElemCompare  P  s, setFilterBy  setElemCompare  (fun (e : a) =>  not  (P  e))  s)
-/- removed value specification -/
+/- ----------------------- -/
+/- split                   -/
+/- ----------------------- -/
 
 def  split  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : Pset a)  : (Pset a ×Pset a) :=  (setFilterBy  setElemCompare  (isGreater  p)  s, setFilterBy  setElemCompare  (isLess  p)  s)
-/- removed value specification -/
-
 def  splitMember  {a : Type} [SetType a] [Ord0 a]  (p : a) (s : Pset a)  : (Pset a ×Bool ×Pset a) :=  (setFilterBy  setElemCompare  (isLess  p)  s, (setMemberBy  (@setElemCompare (a) _)  p  s), setFilterBy  setElemCompare  (isGreater  p)  s)
-/- removed value specification -/
+/- ------------------------ -/
+/- subset and proper subset -/
+/- ------------------------ -/
 
-/- removed value specification -/
+/- ------------------------ -/
+/- delete                   -/
+/- ------------------------ -/
 
-/- removed value specification -/
+/- ------------------------ -/
+/- bigunion                 -/
+/- ------------------------ -/
 
-/- removed value specification -/
-
-
-
-
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 
 def  bigunion  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a := (sorry /- Lean backend: set comprehension binding not supported -/) -/
-/- removed value specification -/
+/- ------------------------ -/
+/- big intersection         -/
+/- ------------------------ -/
+/- Shaked's addition, for which he is now forever responsible as a de facto
+ * Lem maintainer...
+ -/
 
 def  bigintersection  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a :=  let  x2   := (setEmpty);  setFold  (fun (x : a) (x2 : Pset a) =>  lem_if  setForAll  (fun (s : Pset a) =>  (setMemberBy  (@setElemCompare (a) _)  x  s))  bs then setAddBy  setElemCompare  x  x2  else  x2)  ((setBigunionBy  (@setElemCompare (a) _)  bs))  x2
-/- removed value specification -/
+/- ------------------------ -/
+/- difference               -/
+/- ------------------------ -/
 
-/- removed value specification -/
+/- ------------------------ -/
+/- intersection             -/
+/- ------------------------ -/
 
+/- ------------------------ -/
+/- map                      -/
+/- ------------------------ -/
 
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-
-/- removed value specification -/
-
-/-  /-  before image  -/
+/- lem: replaced by its target representation:  /- before image -/
 def  map  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → b) (s : Pset a)  : Pset b := (sorry /- Lean backend: set comprehension binding not supported -/) -/
-/- removed value specification -/
+/- ------------------------ -/
+/- bigunionMap              -/
+/- ------------------------ -/
+/- In order to avoid providing an comparison function for sets of sets,
+   it might be better to combine bigunion and map sometimes into a single operation. -/
 
-/- removed value specification -/
+/- ------------------------ -/
+/- mapMaybe and fromMaybe   -/
+/- ------------------------ -/
+/- If the mapping function returns Just x, x is added to the result
+   set. If it returns Nothing, no element is added. -/
 
-/- removed value specification -/
-
-
-
-
-/- removed value specification -/
-
-def  setMapMaybe  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → Option b) (s : Pset a)  : Pset b :=  
+def  setMapMaybe  {a : Type} {b : Type} [SetType a] [SetType b]  (f : a → Option b) (s : Pset a)  : Pset b :=
   (setBigunionMapBy  (@setElemCompare (b) _)  (fun (x : a) =>  match  f  x with  |  some  y =>  setSingleton  y |  none =>  setEmpty
-                        ) 
+                        )
               s)
-/- removed value specification -/
+/- The name mapMaybe is already being used in the list.lem -/
 
 def  removeMaybe  {a : Type} [SetType a]  (s : Pset (Option a))  : Pset a :=  setMapMaybe  (fun (x : Option a) =>  x)  s
-/- removed value specification -/
+/- ------------------------ -/
+/- min and max              -/
+/- ------------------------ -/
 
-/- removed value specification -/
+/- Informal, since THE is not supported by all backends
+val findMinBy : forall 'a.  ('a -> 'a -> bool) -> ('a -> 'a -> bool) -> set 'a -> maybe 'a 
+let findMinBy le eq s = THE (fun e -> ((memberBy eq e s) && (forall (e2 IN s). le e e2)))
 
-/- removed value specification -/
+let inline findMin = findMinBy (<=) (=)
+let inline findMax = findMinBy (>=) (=)
+-/
 
-/- removed value specification -/
- 
+/- XXX: move into Lem libraries... -/
 
+/- ------------------------ -/
+/- fromList                 -/
+/- ------------------------ -/
+ /- before from_list -/
 
+/- ------------------------ -/
+/- Sigma                    -/
+/- ------------------------ -/
 
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 
 def  sigma  {a : Type} {b : Type} [SetType a] [SetType b]  (sa : Pset a) (sb : a → Pset b)  : Pset ((a ×b)) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
-/- removed value specification -/
+/- ------------------------ -/
+/- cross product            -/
+/- ------------------------ -/
 
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 
 def  cross  {a : Type} {b : Type} [SetType a] [SetType b]  (s1 : Pset a) (s2 : Pset b)  : Pset ((a ×b)) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
-/- removed value specification -/
+/- ------------------------ -/
+/- finite                   -/
+/- ------------------------ -/
 
+/- ---------------------------- -/
+/- fixed point                 -/
+/- --------------------------- -/
 
-
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
  partial def  leastFixedPoint  {a : Type} [SetType a]  (bound : Nat) (f : Pset a → Pset a) (x : Pset a)  : Pset a := 
   match  bound with  |  0 =>  x | (bound' + 1) => ( let  fx   := f  x;                    lem_if  subset  fx  x then  x                    else  lemLeastFixedPoint  setElemCompare  bound'  f  (union  fx  x))
    -/
 end Lem_Set
- 

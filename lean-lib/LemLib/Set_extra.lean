@@ -13,14 +13,14 @@ import LemLib.Set
 
 namespace Lem_Set_extra
 /- **************************************************************************** -/
-/-  A library for sets                                                          -/
-/-                                                                              -/
-/-  It mainly follows the Haskell Set-library                                   -/
+/- A library for sets                                                         -/
+/-                                                                            -/
+/- It mainly follows the Haskell Set-library                                  -/
 /- **************************************************************************** -/
 
-/-  ==========================================================================  -/
-/-  Header                                                                      -/
-/-  ==========================================================================  -/
+/- ========================================================================== -/
+/- Header                                                                     -/
+/- ========================================================================== -/
 
 open Lem_Bool
 open Lem_Basic_classes
@@ -31,23 +31,47 @@ open Lem_List
 open Lem_Sorting
 open Lem_Set
 
-/- removed value specification -/
+/- ---------------------------- -/
+/- set choose (be careful !)   -/
+/- --------------------------- -/
 
-/- removed value specification -/
+/- ------------------------ -/
+/- chooseAndSplit           -/
+/- ------------------------ -/
+/- The idea here is to provide a simple primitive that Lem code can use
+ * to perform its own custom searches within the set -- likely using a
+ * search criterion related to the element ordering, but not necessarily).
+ * For example, sometimes we don't necessarily want to search for a specific
+ * element, but want to search for elements greater than or less than some other.
+ * Someties we'd like to use "split" but don't know a good value to "split" at.
+ * This function lets the set implementation decide that value.
+ *
+ * The contract of chooseAndSplit is simply to select an element nondeterministically
+ * and return that element, together with the subsets of elements less than and
+ * greater than it. In this way, we can recursively traverse the set with any
+ * search criterion, and we avoid baking in the tree representation (although that
+ * is the obvious choice).
+ -/
 
-/- removed value specification -/
+/- ---------------------------- -/
+/- universal set               -/
+/- --------------------------- -/
 
-/- removed value specification -/
+/- ---------------------------- -/
+/- toList                      -/
+/- --------------------------- -/
 
-/- removed value specification -/
+/- ---------------------------- -/
+/- toOrderedList               -/
+/- --------------------------- -/
+/- "toOrderedList" returns a sorted list. Therefore the result is (given a suitable order) deterministic.
+   Therefore, it is much preferred to "toList". However, it still is only defined for finite sets. So, please
+   use carefully and consider using set-operations instead of translating sets to lists, performing list manipulations
+   and then transforming back to sets. -/
 
-/- removed value specification -/
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
+/- ----------------------- -/
+/- compare                 -/
+/- ----------------------- -/
 
 def  setCompare  {a : Type} [SetType a] [Ord0 a]   : Pset a → Pset a → LemOrdering :=  setCompareBy  Ord0.compare
 
@@ -55,11 +79,13 @@ instance (a : Type) [SetType a] : SetType (Pset  a) where
 
     setElemCompare   :=  setCompareBy  (@setElemCompare (a) _)
 
-/- removed value specification -/
+/- ---------------------------- -/
+/- unbounded fixed point       -/
+/- --------------------------- -/
+/- Is NOT supported by the coq backend! -/
 
- partial def  leastFixedPointUnbounded  {a : Type} [SetType a]  (f : Pset a → Pset a) (x : Pset a)  : Pset a := 
-   let  fx   := f  x; 
+ partial def  leastFixedPointUnbounded  {a : Type} [SetType a]  (f : Pset a → Pset a) (x : Pset a)  : Pset a :=
+   let  fx   := f  x;
    lem_if  (setSubsetBy  (@setElemCompare (a) _)  fx  x) then  x
     else  leastFixedPointUnbounded  f  ( (setUnionBy  (@setElemCompare (a) _) fx  x))
 end Lem_Set_extra
-

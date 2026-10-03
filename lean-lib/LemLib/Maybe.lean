@@ -7,51 +7,41 @@ import LemLib.Basic_classes
 import LemLib.Function
 
 namespace Lem_Maybe
- 
+ /- **************************************************************************** -/
+/- A library for option                                                       -/
+/-                                                                            -/
+/- It mainly follows the Haskell Maybe-library                                -/
+/- **************************************************************************** -/
 
 open Lem_Bool
 open Lem_Basic_classes
 open Lem_Function
 
-/- 
+/- lem: replaced by its target representation: 
 
-/-  ==========================================================================  -/
-/-  Basic stuff                                                                 -/
-/-  ==========================================================================  -/
+/- ========================================================================== -/
+/- Basic stuff                                                                -/
+/- ========================================================================== -/
 
-inductive  maybe (a : Type) : Type where 
- 
-  
+inductive  maybe (a : Type) : Type where
   |  Nothing : maybe a
-  
   |  Just :  a →  maybe a
   deriving BEq, Ord
  -/
-/- removed value specification -/
-
-/- removed value specification -/
-
 
 def  maybeEqualBy  {a : Type}  (eq : a → a → Bool) (x : Option a) (y : Option a)  : Bool :=  match x, y with  | none,  none =>  true | none,  some  _ =>  false | some  _,  none =>  false | some  x',  some  y' =>  (eq  x'  y')
-
-
-
 
 instance (a : Type) [Eq0 a] : Eq0 (Option  a) where
 
     isEqual   :=  (maybeEqualBy  (fun x y => x == y))
 
     isInequal   x  y  :=  not  ((maybeEqualBy  (fun x y => x == y)  x  y))
-  
-
 
 def  maybeCompare  {a : Type} {b : Type}  (cmp : b → a → LemOrdering) (x : Option b) (y : Option a)  : LemOrdering :=  match x, y with  | none,  none =>  LemOrdering.EQ | none,  some  _ =>  LemOrdering.LT | some  _,  none =>  LemOrdering.GT | some  x',  some  y' =>  cmp  x'  y'
-
 
 instance (a : Type) [SetType a] : SetType (Option  a) where
 
     setElemCompare   :=  maybeCompare  (@setElemCompare (a) _)
-
 
 instance (a : Type) [Ord0 a] : Ord0 (Option  a) where
 
@@ -65,30 +55,37 @@ instance (a : Type) [Ord0 a] : Ord0 (Option  a) where
 
       isGreaterEqual   :=  fun  m1 =>  (fun  m2 =>  (let  r  := maybeCompare  Ord0.compare  m1  m2;  (r  ==  LemOrdering.GT)  ||  (r  ==  LemOrdering.EQ)))
 
-/- removed value specification -/
+/- ----------------------- -/
+/- maybe                   -/
+/- ----------------------- -/
 
 def  maybe0  {a : Type} {b : Type}  (d : b) (f : a → b) (mb : Option a)  : b :=  match  mb with  |  some  a1 =>  f  a1 |  none =>  d
 
-/- removed value specification -/
+/- ----------------------- -/
+/- isJust / isNothing      -/
+/- ----------------------- -/
 
 def  isJust  {a : Type}  (mb : Option a)  : Bool :=  match  mb with  |  some  _ =>  true |  none =>  false
 
-/- removed value specification -/
-
 def  isNothing  {a : Type}  (mb : Option a)  : Bool :=  match  mb with  |  some  _ =>  false |  none =>  true
 
-/- removed value specification -/
+/- ----------------------- -/
+/- fromMaybe               -/
+/- ----------------------- -/
 
 def  fromMaybe  {a : Type}  (d : a) (mb : Option a)  : a :=  match  mb with  |  some  v =>  v |  none =>  d
 
-/- removed value specification -/
+/- ----------------------- -/
+/- map                     -/
+/- ----------------------- -/
 
-/-  
+/- lem: replaced by its target representation:  
 def  map  {a : Type} {b : Type}  (f : a → b)  : Option a → Option b :=  maybe0  none  (fun (v : a) =>  some  (f  v)) -/
-/- removed value specification -/
- 
+/- ----------------------- -/
+/- bind                    -/
+/- ----------------------- -/
+
 def  bind0  {a : Type} {b : Type}  (mb : Option a) (f : a → Option b)  : Option b :=  maybe0  none  f  mb
 abbrev  maybe (a : Type) := Option  a
 
 end Lem_Maybe
-

@@ -7,41 +7,47 @@ import LemLib.Basic_classes
 
 namespace Lem_Function
 /- **************************************************************************** -/
-/-  A library for common operations on functions                                -/
+/- A library for common operations on functions                               -/
 /- **************************************************************************** -/
 
 open Lem_Bool
 open Lem_Basic_classes
 
+/- ----------------------- -/
+/- identity function       -/
+/- ----------------------- -/
 
-
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  id  {a : Type}  (x : a)  : a :=  x -/
-/- removed value specification -/
+/- ----------------------- -/
+/- constant function       -/
+/- ----------------------- -/
 
+/- No Lean target_rep: Lean's Function.const has different argument conventions
+   (first explicit param is a type, not a value). The universal inline on line 29
+   handles Lean correctly by inlining const x y = x at call sites. -/
 
-/- removed value specification -/
+/- ----------------------- -/
+/- function composition    -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 def  comb  {a : Type} {b : Type} {c : Type}  (f : b → c) (g : a → b)  : a → c :=  (fun (x : a) =>  f  (g  x)) -/
-/- removed value specification -/
+/- ----------------------- -/
+/- function application    -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 def  apply  {a : Type} {b : Type}  (f : a → b)  : a → b :=  (fun (x : a) =>  f  x) -/
-/- removed value specification -/
-
 def  rev_apply  {a : Type} {b : Type}  (x : a) (f : a → b)  : b :=  f  x
-/- removed value specification -/
+/- ----------------------- -/
+/- flipping argument order -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 def  flip  {a : Type} {b : Type} {c : Type}  (f : a → b → c)  : b → a → c :=  (fun (x : b) (y : a) =>  f  y  x) -/
-/- removed value specification -/
+/- currying / uncurrying -/
 
 def  curry  {a : Type} {b : Type} {c : Type}  (f : (a ×b) → c)  : a → b → c :=  (fun (a1 : a) (b1 : b) =>  f  (a1, b1))
-/- removed value specification -/
-
-def  uncurry  {a : Type} {b : Type} {c : Type}  (f : a → b → c) (p : (a ×b))  : c := match f, p with |  f,  (a1, b1) =>  f  a1  b1 
+def  uncurry  {a : Type} {b : Type} {c : Type}  (f : a → b → c) (p : (a ×b))  : c := match f, p with |  f,  (a1, b1) =>  f  a1  b1
 end Lem_Function
-

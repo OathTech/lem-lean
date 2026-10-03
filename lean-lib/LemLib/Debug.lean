@@ -5,9 +5,16 @@ import LemLib
 
 namespace Lem_Debug
 
-/- removed value specification -/
+/- debugging functions; these should *not* be used in production code,
+   but are invaluable in debugging the OCaml extraction, as long as
+   one pays attention to the interaction with monads;
+   the typical use pattern is:
+     let _ = Debug.print_string "..." in
+     ...
 
-/- removed value specification -/
+   With monads, the "let _" should be out of the monad, not wrapped
+   inside the monad (otherwise, the evaluation order is that of the
+   monad).
+-/
 
 end Lem_Debug
-

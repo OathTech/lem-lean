@@ -12,7 +12,12 @@ import LemLib.Set
 import LemLib.Num
 
 namespace Lem_Map
-
+ /- **************************************************************************** -/
+/- A library for finite maps                                                  -/
+/- **************************************************************************** -/
+/- ========================================================================== -/
+/- Header                                                                     -/
+/- ========================================================================== -/
 
 open Lem_Bool
 open Lem_Basic_classes
@@ -23,17 +28,13 @@ open Lem_Tuple
 open Lem_Set
 open Lem_Num
 
-
-/- 
+/- lem: replaced by its target representation: 
 
 abbrev  map  (k : Type) (v : Type) := Fmap
  -/
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
+/- -------------------------------------------------------------------------- -/
+/- Map equality.                                                              -/
+/- -------------------------------------------------------------------------- -/
 
 instance (k v : Type) [Eq0 k] [Eq0 v] : Eq0 (Fmap  k  v) where
 
@@ -41,115 +42,96 @@ instance (k v : Type) [Eq0 k] [Eq0 v] : Eq0 (Fmap  k  v) where
 
     isInequal   m1  m2  :=  not  ((fmapEqualBy  (fun x y => x == y)  (fun x y => x == y)  m1  m2))
 
+/- -------------------------------------------------------------------------- -/
+/- Map type class                                                             -/
+/- -------------------------------------------------------------------------- -/
 
-
-/-  --------------------------------------------------------------------------  -/
-/-  Map type class                                                              -/
-/-  --------------------------------------------------------------------------  -/
-
-class MapKeyType (a : Type) where 
+class MapKeyType (a : Type) where
 
   mapKeyCompare :  a →  a →  LemOrdering
-
 
 export MapKeyType (mapKeyCompare)
 
 instance (priority := 500) {a : Type} [MapKeyType a] : BEq a where
   beq x y := match mapKeyCompare x y with | .EQ => true | _ => false
 
-
 instance (priority := low) (a : Type) [SetType a] : MapKeyType a where
 
     mapKeyCompare   :=  (@setElemCompare (a) _)
- 
-/- removed value specification -/
 
-/- removed value specification -/
+/- -------------------------------------------------------------------------- -/
+/- Empty maps                                                                 -/
+/- -------------------------------------------------------------------------- -/
 
+/- -------------------------------------------------------------------------- -/
+/- Insertion                                                                  -/
+/- -------------------------------------------------------------------------- -/
 
+/- named mapInsertBy, not insertBy: a Map.insertBy shares its name with Sorting.insertBy, and Coq's
+   top-level renaming then emits Sorting's as insertBy0 (upstream-drift check, lem TODO 25) -/
 
-/- removed value specification -/
+/- lean: the keyed Fmap representation needs the comparator at insert time
+   (arc-6 S3); same By+inline pattern as lookup/delete below -/
 
-/- removed value specification -/
+/- declare hol      target_rep function insert k v m = `FUPDATE` m (k,v) -/
 
+/- -------------------------------------------------------------------------- -/
+/- Singleton                                                                  -/
+/- -------------------------------------------------------------------------- -/
 
-/- removed value specification -/
+/- -------------------------------------------------------------------------- -/
+/- Emptyness check                                                            -/
+/- -------------------------------------------------------------------------- -/
 
+/- -------------------------------------------------------------------------- -/
+/- lookup                                                                     -/
+/- -------------------------------------------------------------------------- -/
 
-/- removed value specification -/
+/- -------------------------------------------------------------------------- -/
+/- findWithDefault                                                            -/
+/- -------------------------------------------------------------------------- -/
 
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-/- removed value specification -/
-
-
-/- removed value specification -/
+/- -------------------------------------------------------------------------- -/
+/- from lists                                                                 -/
+/- -------------------------------------------------------------------------- -/
 
 def  fromList  {k : Type} {v : Type} [MapKeyType k]  (l : List ((k ×v)))  : Fmap k v :=  List.foldl  (fun (m : Fmap k v) (p : (k ×v)) =>  match m, p with |  m,  (k1, v1) =>  (fmapAddBy  (@mapKeyCompare (k) _)  k1  v1  m) )  fmapEmpty  l
-/- removed value specification -/
+/- -------------------------------------------------------------------------- -/
+/- to sets / domain / range                                                   -/
+/- -------------------------------------------------------------------------- -/
 
-/- removed value specification -/
+/- -------------------------------------------------------------------------- -/
+/- member                                                                     -/
+/- -------------------------------------------------------------------------- -/
 
+/- -------------------------------------------------------------------------- -/
+/- Quantification                                                             -/
+/- -------------------------------------------------------------------------- -/
 
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/-  
+/- lem: replaced by its target representation:  
 
 def  all  {k : Type} {v : Type} [MapKeyType k] [Eq0 v]  (P : k → v → Bool) (m : Fmap k v)  : Bool :=  (∀  k  v, ( (P  k  v  &&  (=  lookup  k  m  some  v)) : Prop)) -/
 
-/- removed value specification -/
+/- -------------------------------------------------------------------------- -/
+/- Set-like operations.                                                       -/
+/- -------------------------------------------------------------------------- -/
 
-/- removed value specification -/
+/- named mapUnionBy, not unionBy: Set.unionBy already exists (the same collision class as mapInsertBy) -/
 
-/- removed value specification -/
+/- lean: comparator needed at insert time (arc-6 S3) -/
 
+/- -------------------------------------------------------------------------- -/
+/- Maps (in the functor sense).                                               -/
+/- -------------------------------------------------------------------------- -/
 
+/- TODO: add Coq -/
 
+/- -------------------------------------------------------------------------- -/
+/- Cardinality                                                                -/
+/- -------------------------------------------------------------------------- -/
 
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-/-  instance of SetType  -/
-def  map_setElemCompare  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [SetType a] [SetType b] [SetType c] [SetType d] [MapKeyType b] [MapKeyType d]  (cmp : Pset ((d ×c)) → Pset ((b ×a)) → e) (x : Fmap d c) (y : Fmap b a)  : e := 
+/- instance of SetType -/
+def  map_setElemCompare  {a : Type} {b : Type} {c : Type} {d : Type} {e : Type} [SetType a] [SetType b] [SetType c] [SetType d] [MapKeyType b] [MapKeyType d]  (cmp : Pset ((d ×c)) → Pset ((b ×a)) → e) (x : Fmap d c) (y : Fmap b a)  : e :=
   cmp  ((fmapToSetBy  (pairCompare  (@setElemCompare (d) _)  (@setElemCompare (c) _))  x))  ((fmapToSetBy  (pairCompare  (@setElemCompare (b) _)  (@setElemCompare (a) _))  y))
 
 instance (a b : Type) [SetType a] [SetType b] [MapKeyType a] : SetType (Fmap  a  b) where
@@ -157,4 +139,3 @@ instance (a b : Type) [SetType a] [SetType b] [MapKeyType a] : SetType (Fmap  a 
     setElemCompare   x  y  :=  map_setElemCompare  (setCompareBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (b) _)))  x  y
 
 end Lem_Map
-

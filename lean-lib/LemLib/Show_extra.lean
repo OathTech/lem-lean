@@ -14,7 +14,6 @@ import LemLib.Show
 
 namespace Lem_Show_extra
 
-
 open Lem_String
 open Lem_Maybe
 open Lem_Num
@@ -22,45 +21,39 @@ open Lem_Basic_classes
 open Lem_Set
 open Lem_Relation
 open Lem_Show
- 
+
 open Lem_Set_extra
 open Lem_String_extra
-
 
 instance   : Show Nat where
 
     show0   :=  Lem_String_extra.stringFromNat
 
-
 instance   : Show Nat where
 
     show0   :=  Lem_String_extra.stringFromNatural
-
 
 instance   : Show Int where
 
     show0   :=  Lem_String_extra.stringFromInt
 
-
 instance   : Show Int where
 
     show0   :=  Lem_String_extra.stringFromInteger
 
-
-def  stringFromSet  {a : Type} [SetType a]  (showX : a → String) (xs : Pset a)  : String :=  
+def  stringFromSet  {a : Type} [SetType a]  (showX : a → String) (xs : Pset a)  : String :=
   String.append "{"   (String.append (lemShowListAux  showX  (setToList  xs))  "}")
 
-/-  Abbreviates the representation if the relation is transitive.  -/
-def  stringFromRelation  {a : Type} [Eq0 a] [SetType a]  (showX : (a ×a) → String) (rel1 : Pset ((a ×a)))  : String := 
-  lem_if  isTransitive  rel1 then 
-    let  pruned_rel   := withoutTransitiveEdges  rel1; 
-    lem_if  (setForAll  (fun (e : (a ×a)) =>  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) e  pruned_rel)))  rel1) then 
-      /-  The relations are the same (there are no transitive edges),
-         so we can just as well print the original one.  -/
+/- Abbreviates the representation if the relation is transitive. -/
+def  stringFromRelation  {a : Type} [Eq0 a] [SetType a]  (showX : (a ×a) → String) (rel1 : Pset ((a ×a)))  : String :=
+  lem_if  isTransitive  rel1 then
+    let  pruned_rel   := withoutTransitiveEdges  rel1;
+    lem_if  (setForAll  (fun (e : (a ×a)) =>  ( (setMemberBy  (pairCompare  (@setElemCompare (a) _)  (@setElemCompare (a) _)) e  pruned_rel)))  rel1) then /- The relations are the same (there are no transitive edges),          so we can just as well print the original one. -/
+
       stringFromSet  showX  rel1
-     else  
+     else
       String.append "trancl of "  (stringFromSet  showX  pruned_rel)
-   else 
+   else
     stringFromSet  showX  rel1
 
 instance (a : Type) [Show a] [SetType a] : Show (Pset  a) where
@@ -68,4 +61,3 @@ instance (a : Type) [Show a] [SetType a] : Show (Pset  a) where
     show0   xs  :=  stringFromSet  (@show0 (a) _)  xs
 
 end Lem_Show_extra
-

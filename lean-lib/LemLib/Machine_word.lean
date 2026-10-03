@@ -9,7 +9,10 @@ import LemLib.Show
 import LemLib.Function
 
 namespace Lem_Machine_word
-
+ /- ***************************************************************** -/
+/- A new machine word library, suitable for targetting from Sail,  -/
+/- and a thin wrapper around the HOL and Isabelle word libraries.  -/
+/- ***************************************************************** -/
 
 open Lem_Bool
 open Lem_Num
@@ -17,10 +20,7 @@ open Lem_Basic_classes
 open Lem_Show
 open Lem_Function
 
-
-
-
-/- 
+/- lem: replaced by its target representation: 
 
 inductive  mword (a : Type) : Type where
 open mword
@@ -30,38 +30,26 @@ class Size (a : Type) where
 
   size :  Nat
 
-
 export Size (size)
 
-/- removed value specification -/
-
-
-
-/- removed value specification -/
-
-
-/-  A singleton type family that can be used to carry a size as the type parameter  -/
+/- A singleton type family that can be used to carry a size as the type parameter -/
 
 inductive  itself (a : Type) : Type where
 open itself
 
-/- removed value specification -/
-
-/- removed value specification -/
-
 def  size_itself  {a : Type} [Size a]  (x : itself a)  : Nat :=  (@size (a) _)
 
 /- ***************************************************************** -/
-/-  Fixed bitwidths extracted from Anthony's models.                 -/
-/-                                                                   -/
-/-  If you need a size N that is not included here, put the lines    -/
-/-                                                                   -/
-/-  type tyN                                                         -/
-/-  instance (Size tyN) let size = N end                             -/
-/-  declare isabelle target_rep type tyN = `N`                       -/
-/-  declare hol target_rep type tyN = `N`                            -/
-/-                                                                   -/
-/-  in your project, replacing N in each line.                       -/
+/- Fixed bitwidths extracted from Anthony's models.                -/
+/-                                                                 -/
+/- If you need a size N that is not included here, put the lines   -/
+/-                                                                 -/
+/- type tyN                                                        -/
+/- instance (Size tyN) let size = N end                            -/
+/- declare isabelle target_rep type tyN = `N`                      -/
+/- declare hol target_rep type tyN = `N`                           -/
+/-                                                                 -/
+/- in your project, replacing N in each line.                      -/
 /- ***************************************************************** -/
 
 inductive  ty1 : Type where
@@ -1000,666 +988,647 @@ open ty131072
 inductive  ty262144 : Type where
 open ty262144
 
-
 instance   : Size ty1 where
-   size   :=   1 
+   size   :=   1
 instance   : Size ty2 where
-   size   :=   2 
+   size   :=   2
 instance   : Size ty3 where
-   size   :=   3 
+   size   :=   3
 instance   : Size ty4 where
-   size   :=   4 
+   size   :=   4
 instance   : Size ty5 where
-   size   :=   5 
+   size   :=   5
 instance   : Size ty6 where
-   size   :=   6 
+   size   :=   6
 instance   : Size ty7 where
-   size   :=   7 
+   size   :=   7
 instance   : Size ty8 where
-   size   :=   8 
+   size   :=   8
 instance   : Size ty9 where
-   size   :=   9 
+   size   :=   9
 instance   : Size ty10 where
-   size   :=   10 
+   size   :=   10
 instance   : Size ty11 where
-   size   :=   11 
+   size   :=   11
 instance   : Size ty12 where
-   size   :=   12 
+   size   :=   12
 instance   : Size ty13 where
-   size   :=   13 
+   size   :=   13
 instance   : Size ty14 where
-   size   :=   14 
+   size   :=   14
 instance   : Size ty15 where
-   size   :=   15 
+   size   :=   15
 instance   : Size ty16 where
-   size   :=   16 
+   size   :=   16
 instance   : Size ty17 where
-   size   :=   17 
+   size   :=   17
 instance   : Size ty18 where
-   size   :=   18 
+   size   :=   18
 instance   : Size ty19 where
-   size   :=   19 
+   size   :=   19
 instance   : Size ty20 where
-   size   :=   20 
+   size   :=   20
 instance   : Size ty21 where
-   size   :=   21 
+   size   :=   21
 instance   : Size ty22 where
-   size   :=   22 
+   size   :=   22
 instance   : Size ty23 where
-   size   :=   23 
+   size   :=   23
 instance   : Size ty24 where
-   size   :=   24 
+   size   :=   24
 instance   : Size ty25 where
-   size   :=   25 
+   size   :=   25
 instance   : Size ty26 where
-   size   :=   26 
+   size   :=   26
 instance   : Size ty27 where
-   size   :=   27 
+   size   :=   27
 instance   : Size ty28 where
-   size   :=   28 
+   size   :=   28
 instance   : Size ty29 where
-   size   :=   29 
+   size   :=   29
 instance   : Size ty30 where
-   size   :=   30 
+   size   :=   30
 instance   : Size ty31 where
-   size   :=   31 
+   size   :=   31
 instance   : Size ty32 where
-   size   :=   32 
+   size   :=   32
 instance   : Size ty33 where
-   size   :=   33 
+   size   :=   33
 instance   : Size ty34 where
-   size   :=   34 
+   size   :=   34
 instance   : Size ty35 where
-   size   :=   35 
+   size   :=   35
 instance   : Size ty36 where
-   size   :=   36 
+   size   :=   36
 instance   : Size ty37 where
-   size   :=   37 
+   size   :=   37
 instance   : Size ty38 where
-   size   :=   38 
+   size   :=   38
 instance   : Size ty39 where
-   size   :=   39 
+   size   :=   39
 instance   : Size ty40 where
-   size   :=   40 
+   size   :=   40
 instance   : Size ty41 where
-   size   :=   41 
+   size   :=   41
 instance   : Size ty42 where
-   size   :=   42 
+   size   :=   42
 instance   : Size ty43 where
-   size   :=   43 
+   size   :=   43
 instance   : Size ty44 where
-   size   :=   44 
+   size   :=   44
 instance   : Size ty45 where
-   size   :=   45 
+   size   :=   45
 instance   : Size ty46 where
-   size   :=   46 
+   size   :=   46
 instance   : Size ty47 where
-   size   :=   47 
+   size   :=   47
 instance   : Size ty48 where
-   size   :=   48 
+   size   :=   48
 instance   : Size ty49 where
-   size   :=   49 
+   size   :=   49
 instance   : Size ty50 where
-   size   :=   50 
+   size   :=   50
 instance   : Size ty51 where
-   size   :=   51 
+   size   :=   51
 instance   : Size ty52 where
-   size   :=   52 
+   size   :=   52
 instance   : Size ty53 where
-   size   :=   53 
+   size   :=   53
 instance   : Size ty54 where
-   size   :=   54 
+   size   :=   54
 instance   : Size ty55 where
-   size   :=   55 
+   size   :=   55
 instance   : Size ty56 where
-   size   :=   56 
+   size   :=   56
 instance   : Size ty57 where
-   size   :=   57 
+   size   :=   57
 instance   : Size ty58 where
-   size   :=   58 
+   size   :=   58
 instance   : Size ty59 where
-   size   :=   59 
+   size   :=   59
 instance   : Size ty60 where
-   size   :=   60 
+   size   :=   60
 instance   : Size ty61 where
-   size   :=   61 
+   size   :=   61
 instance   : Size ty62 where
-   size   :=   62 
+   size   :=   62
 instance   : Size ty63 where
-   size   :=   63 
+   size   :=   63
 instance   : Size ty64 where
-   size   :=   64 
+   size   :=   64
 instance   : Size ty65 where
-   size   :=   65 
+   size   :=   65
 instance   : Size ty66 where
-   size   :=   66 
+   size   :=   66
 instance   : Size ty67 where
-   size   :=   67 
+   size   :=   67
 instance   : Size ty68 where
-   size   :=   68 
+   size   :=   68
 instance   : Size ty69 where
-   size   :=   69 
+   size   :=   69
 instance   : Size ty70 where
-   size   :=   70 
+   size   :=   70
 instance   : Size ty71 where
-   size   :=   71 
+   size   :=   71
 instance   : Size ty72 where
-   size   :=   72 
+   size   :=   72
 instance   : Size ty73 where
-   size   :=   73 
+   size   :=   73
 instance   : Size ty74 where
-   size   :=   74 
+   size   :=   74
 instance   : Size ty75 where
-   size   :=   75 
+   size   :=   75
 instance   : Size ty76 where
-   size   :=   76 
+   size   :=   76
 instance   : Size ty77 where
-   size   :=   77 
+   size   :=   77
 instance   : Size ty78 where
-   size   :=   78 
+   size   :=   78
 instance   : Size ty79 where
-   size   :=   79 
+   size   :=   79
 instance   : Size ty80 where
-   size   :=   80 
+   size   :=   80
 instance   : Size ty81 where
-   size   :=   81 
+   size   :=   81
 instance   : Size ty82 where
-   size   :=   82 
+   size   :=   82
 instance   : Size ty83 where
-   size   :=   83 
+   size   :=   83
 instance   : Size ty84 where
-   size   :=   84 
+   size   :=   84
 instance   : Size ty85 where
-   size   :=   85 
+   size   :=   85
 instance   : Size ty86 where
-   size   :=   86 
+   size   :=   86
 instance   : Size ty87 where
-   size   :=   87 
+   size   :=   87
 instance   : Size ty88 where
-   size   :=   88 
+   size   :=   88
 instance   : Size ty89 where
-   size   :=   89 
+   size   :=   89
 instance   : Size ty90 where
-   size   :=   90 
+   size   :=   90
 instance   : Size ty91 where
-   size   :=   91 
+   size   :=   91
 instance   : Size ty92 where
-   size   :=   92 
+   size   :=   92
 instance   : Size ty93 where
-   size   :=   93 
+   size   :=   93
 instance   : Size ty94 where
-   size   :=   94 
+   size   :=   94
 instance   : Size ty95 where
-   size   :=   95 
+   size   :=   95
 instance   : Size ty96 where
-   size   :=   96 
+   size   :=   96
 instance   : Size ty97 where
-   size   :=   97 
+   size   :=   97
 instance   : Size ty98 where
-   size   :=   98 
+   size   :=   98
 instance   : Size ty99 where
-   size   :=   99 
+   size   :=   99
 instance   : Size ty100 where
-   size   :=   100 
+   size   :=   100
 instance   : Size ty101 where
-   size   :=   101 
+   size   :=   101
 instance   : Size ty102 where
-   size   :=   102 
+   size   :=   102
 instance   : Size ty103 where
-   size   :=   103 
+   size   :=   103
 instance   : Size ty104 where
-   size   :=   104 
+   size   :=   104
 instance   : Size ty105 where
-   size   :=   105 
+   size   :=   105
 instance   : Size ty106 where
-   size   :=   106 
+   size   :=   106
 instance   : Size ty107 where
-   size   :=   107 
+   size   :=   107
 instance   : Size ty108 where
-   size   :=   108 
+   size   :=   108
 instance   : Size ty109 where
-   size   :=   109 
+   size   :=   109
 instance   : Size ty110 where
-   size   :=   110 
+   size   :=   110
 instance   : Size ty111 where
-   size   :=   111 
+   size   :=   111
 instance   : Size ty112 where
-   size   :=   112 
+   size   :=   112
 instance   : Size ty113 where
-   size   :=   113 
+   size   :=   113
 instance   : Size ty114 where
-   size   :=   114 
+   size   :=   114
 instance   : Size ty115 where
-   size   :=   115 
+   size   :=   115
 instance   : Size ty116 where
-   size   :=   116 
+   size   :=   116
 instance   : Size ty117 where
-   size   :=   117 
+   size   :=   117
 instance   : Size ty118 where
-   size   :=   118 
+   size   :=   118
 instance   : Size ty119 where
-   size   :=   119 
+   size   :=   119
 instance   : Size ty120 where
-   size   :=   120 
+   size   :=   120
 instance   : Size ty121 where
-   size   :=   121 
+   size   :=   121
 instance   : Size ty122 where
-   size   :=   122 
+   size   :=   122
 instance   : Size ty123 where
-   size   :=   123 
+   size   :=   123
 instance   : Size ty124 where
-   size   :=   124 
+   size   :=   124
 instance   : Size ty125 where
-   size   :=   125 
+   size   :=   125
 instance   : Size ty126 where
-   size   :=   126 
+   size   :=   126
 instance   : Size ty127 where
-   size   :=   127 
+   size   :=   127
 instance   : Size ty128 where
-   size   :=   128 
+   size   :=   128
 instance   : Size ty129 where
-   size   :=   129 
+   size   :=   129
 instance   : Size ty130 where
-   size   :=   130 
+   size   :=   130
 instance   : Size ty131 where
-   size   :=   131 
+   size   :=   131
 instance   : Size ty132 where
-   size   :=   132 
+   size   :=   132
 instance   : Size ty133 where
-   size   :=   133 
+   size   :=   133
 instance   : Size ty134 where
-   size   :=   134 
+   size   :=   134
 instance   : Size ty135 where
-   size   :=   135 
+   size   :=   135
 instance   : Size ty136 where
-   size   :=   136 
+   size   :=   136
 instance   : Size ty137 where
-   size   :=   137 
+   size   :=   137
 instance   : Size ty138 where
-   size   :=   138 
+   size   :=   138
 instance   : Size ty139 where
-   size   :=   139 
+   size   :=   139
 instance   : Size ty140 where
-   size   :=   140 
+   size   :=   140
 instance   : Size ty141 where
-   size   :=   141 
+   size   :=   141
 instance   : Size ty142 where
-   size   :=   142 
+   size   :=   142
 instance   : Size ty143 where
-   size   :=   143 
+   size   :=   143
 instance   : Size ty144 where
-   size   :=   144 
+   size   :=   144
 instance   : Size ty145 where
-   size   :=   145 
+   size   :=   145
 instance   : Size ty146 where
-   size   :=   146 
+   size   :=   146
 instance   : Size ty147 where
-   size   :=   147 
+   size   :=   147
 instance   : Size ty148 where
-   size   :=   148 
+   size   :=   148
 instance   : Size ty149 where
-   size   :=   149 
+   size   :=   149
 instance   : Size ty150 where
-   size   :=   150 
+   size   :=   150
 instance   : Size ty151 where
-   size   :=   151 
+   size   :=   151
 instance   : Size ty152 where
-   size   :=   152 
+   size   :=   152
 instance   : Size ty153 where
-   size   :=   153 
+   size   :=   153
 instance   : Size ty154 where
-   size   :=   154 
+   size   :=   154
 instance   : Size ty155 where
-   size   :=   155 
+   size   :=   155
 instance   : Size ty156 where
-   size   :=   156 
+   size   :=   156
 instance   : Size ty157 where
-   size   :=   157 
+   size   :=   157
 instance   : Size ty158 where
-   size   :=   158 
+   size   :=   158
 instance   : Size ty159 where
-   size   :=   159 
+   size   :=   159
 instance   : Size ty160 where
-   size   :=   160 
+   size   :=   160
 instance   : Size ty161 where
-   size   :=   161 
+   size   :=   161
 instance   : Size ty162 where
-   size   :=   162 
+   size   :=   162
 instance   : Size ty163 where
-   size   :=   163 
+   size   :=   163
 instance   : Size ty164 where
-   size   :=   164 
+   size   :=   164
 instance   : Size ty165 where
-   size   :=   165 
+   size   :=   165
 instance   : Size ty166 where
-   size   :=   166 
+   size   :=   166
 instance   : Size ty167 where
-   size   :=   167 
+   size   :=   167
 instance   : Size ty168 where
-   size   :=   168 
+   size   :=   168
 instance   : Size ty169 where
-   size   :=   169 
+   size   :=   169
 instance   : Size ty170 where
-   size   :=   170 
+   size   :=   170
 instance   : Size ty171 where
-   size   :=   171 
+   size   :=   171
 instance   : Size ty172 where
-   size   :=   172 
+   size   :=   172
 instance   : Size ty173 where
-   size   :=   173 
+   size   :=   173
 instance   : Size ty174 where
-   size   :=   174 
+   size   :=   174
 instance   : Size ty175 where
-   size   :=   175 
+   size   :=   175
 instance   : Size ty176 where
-   size   :=   176 
+   size   :=   176
 instance   : Size ty177 where
-   size   :=   177 
+   size   :=   177
 instance   : Size ty178 where
-   size   :=   178 
+   size   :=   178
 instance   : Size ty179 where
-   size   :=   179 
+   size   :=   179
 instance   : Size ty180 where
-   size   :=   180 
+   size   :=   180
 instance   : Size ty181 where
-   size   :=   181 
+   size   :=   181
 instance   : Size ty182 where
-   size   :=   182 
+   size   :=   182
 instance   : Size ty183 where
-   size   :=   183 
+   size   :=   183
 instance   : Size ty184 where
-   size   :=   184 
+   size   :=   184
 instance   : Size ty185 where
-   size   :=   185 
+   size   :=   185
 instance   : Size ty186 where
-   size   :=   186 
+   size   :=   186
 instance   : Size ty187 where
-   size   :=   187 
+   size   :=   187
 instance   : Size ty188 where
-   size   :=   188 
+   size   :=   188
 instance   : Size ty189 where
-   size   :=   189 
+   size   :=   189
 instance   : Size ty190 where
-   size   :=   190 
+   size   :=   190
 instance   : Size ty191 where
-   size   :=   191 
+   size   :=   191
 instance   : Size ty192 where
-   size   :=   192 
+   size   :=   192
 instance   : Size ty193 where
-   size   :=   193 
+   size   :=   193
 instance   : Size ty194 where
-   size   :=   194 
+   size   :=   194
 instance   : Size ty195 where
-   size   :=   195 
+   size   :=   195
 instance   : Size ty196 where
-   size   :=   196 
+   size   :=   196
 instance   : Size ty197 where
-   size   :=   197 
+   size   :=   197
 instance   : Size ty198 where
-   size   :=   198 
+   size   :=   198
 instance   : Size ty199 where
-   size   :=   199 
+   size   :=   199
 instance   : Size ty200 where
-   size   :=   200 
+   size   :=   200
 instance   : Size ty201 where
-   size   :=   201 
+   size   :=   201
 instance   : Size ty202 where
-   size   :=   202 
+   size   :=   202
 instance   : Size ty203 where
-   size   :=   203 
+   size   :=   203
 instance   : Size ty204 where
-   size   :=   204 
+   size   :=   204
 instance   : Size ty205 where
-   size   :=   205 
+   size   :=   205
 instance   : Size ty206 where
-   size   :=   206 
+   size   :=   206
 instance   : Size ty207 where
-   size   :=   207 
+   size   :=   207
 instance   : Size ty208 where
-   size   :=   208 
+   size   :=   208
 instance   : Size ty209 where
-   size   :=   209 
+   size   :=   209
 instance   : Size ty210 where
-   size   :=   210 
+   size   :=   210
 instance   : Size ty211 where
-   size   :=   211 
+   size   :=   211
 instance   : Size ty212 where
-   size   :=   212 
+   size   :=   212
 instance   : Size ty213 where
-   size   :=   213 
+   size   :=   213
 instance   : Size ty214 where
-   size   :=   214 
+   size   :=   214
 instance   : Size ty215 where
-   size   :=   215 
+   size   :=   215
 instance   : Size ty216 where
-   size   :=   216 
+   size   :=   216
 instance   : Size ty217 where
-   size   :=   217 
+   size   :=   217
 instance   : Size ty218 where
-   size   :=   218 
+   size   :=   218
 instance   : Size ty219 where
-   size   :=   219 
+   size   :=   219
 instance   : Size ty220 where
-   size   :=   220 
+   size   :=   220
 instance   : Size ty221 where
-   size   :=   221 
+   size   :=   221
 instance   : Size ty222 where
-   size   :=   222 
+   size   :=   222
 instance   : Size ty223 where
-   size   :=   223 
+   size   :=   223
 instance   : Size ty224 where
-   size   :=   224 
+   size   :=   224
 instance   : Size ty225 where
-   size   :=   225 
+   size   :=   225
 instance   : Size ty226 where
-   size   :=   226 
+   size   :=   226
 instance   : Size ty227 where
-   size   :=   227 
+   size   :=   227
 instance   : Size ty228 where
-   size   :=   228 
+   size   :=   228
 instance   : Size ty229 where
-   size   :=   229 
+   size   :=   229
 instance   : Size ty230 where
-   size   :=   230 
+   size   :=   230
 instance   : Size ty231 where
-   size   :=   231 
+   size   :=   231
 instance   : Size ty232 where
-   size   :=   232 
+   size   :=   232
 instance   : Size ty233 where
-   size   :=   233 
+   size   :=   233
 instance   : Size ty234 where
-   size   :=   234 
+   size   :=   234
 instance   : Size ty235 where
-   size   :=   235 
+   size   :=   235
 instance   : Size ty236 where
-   size   :=   236 
+   size   :=   236
 instance   : Size ty237 where
-   size   :=   237 
+   size   :=   237
 instance   : Size ty238 where
-   size   :=   238 
+   size   :=   238
 instance   : Size ty239 where
-   size   :=   239 
+   size   :=   239
 instance   : Size ty240 where
-   size   :=   240 
+   size   :=   240
 instance   : Size ty241 where
-   size   :=   241 
+   size   :=   241
 instance   : Size ty242 where
-   size   :=   242 
+   size   :=   242
 instance   : Size ty243 where
-   size   :=   243 
+   size   :=   243
 instance   : Size ty244 where
-   size   :=   244 
+   size   :=   244
 instance   : Size ty245 where
-   size   :=   245 
+   size   :=   245
 instance   : Size ty246 where
-   size   :=   246 
+   size   :=   246
 instance   : Size ty247 where
-   size   :=   247 
+   size   :=   247
 instance   : Size ty248 where
-   size   :=   248 
+   size   :=   248
 instance   : Size ty249 where
-   size   :=   249 
+   size   :=   249
 instance   : Size ty250 where
-   size   :=   250 
+   size   :=   250
 instance   : Size ty251 where
-   size   :=   251 
+   size   :=   251
 instance   : Size ty252 where
-   size   :=   252 
+   size   :=   252
 instance   : Size ty253 where
-   size   :=   253 
+   size   :=   253
 instance   : Size ty254 where
-   size   :=   254 
+   size   :=   254
 instance   : Size ty255 where
-   size   :=   255 
+   size   :=   255
 instance   : Size ty256 where
-   size   :=   256 
+   size   :=   256
 instance   : Size ty257 where
-   size   :=   257 
+   size   :=   257
 instance   : Size ty288 where
-   size   :=   288 
+   size   :=   288
 instance   : Size ty320 where
-   size   :=   320 
+   size   :=   320
 instance   : Size ty352 where
-   size   :=   352 
+   size   :=   352
 instance   : Size ty384 where
-   size   :=   384 
+   size   :=   384
 instance   : Size ty416 where
-   size   :=   416 
+   size   :=   416
 instance   : Size ty448 where
-   size   :=   448 
+   size   :=   448
 instance   : Size ty480 where
-   size   :=   480 
+   size   :=   480
 instance   : Size ty512 where
-   size   :=   512 
+   size   :=   512
 instance   : Size ty640 where
-   size   :=   640 
+   size   :=   640
 instance   : Size ty768 where
-   size   :=   768 
+   size   :=   768
 instance   : Size ty896 where
-   size   :=   896 
+   size   :=   896
 instance   : Size ty1024 where
-   size   :=   1024 
+   size   :=   1024
 instance   : Size ty1152 where
-   size   :=   1152 
+   size   :=   1152
 instance   : Size ty1280 where
-   size   :=   1280 
+   size   :=   1280
 instance   : Size ty1408 where
-   size   :=   1408 
+   size   :=   1408
 instance   : Size ty1536 where
-   size   :=   1536 
+   size   :=   1536
 instance   : Size ty1664 where
-   size   :=   1664 
+   size   :=   1664
 instance   : Size ty1792 where
-   size   :=   1792 
+   size   :=   1792
 instance   : Size ty1920 where
-   size   :=   1920 
+   size   :=   1920
 instance   : Size ty2048 where
-   size   :=   2048 
+   size   :=   2048
 instance   : Size ty2304 where
-   size   :=   2304 
+   size   :=   2304
 instance   : Size ty2560 where
-   size   :=   2560 
+   size   :=   2560
 instance   : Size ty2816 where
-   size   :=   2816 
+   size   :=   2816
 instance   : Size ty3072 where
-   size   :=   3072 
+   size   :=   3072
 instance   : Size ty3328 where
-   size   :=   3328 
+   size   :=   3328
 instance   : Size ty3584 where
-   size   :=   3584 
+   size   :=   3584
 instance   : Size ty3840 where
-   size   :=   3840 
+   size   :=   3840
 instance   : Size ty4096 where
-   size   :=   4096 
+   size   :=   4096
 instance   : Size ty4608 where
-   size   :=   4608 
+   size   :=   4608
 instance   : Size ty6400 where
-   size   :=   6400 
+   size   :=   6400
 instance   : Size ty8192 where
-   size   :=   8192 
+   size   :=   8192
 instance   : Size ty9216 where
-   size   :=   9216 
+   size   :=   9216
 instance   : Size ty12800 where
-   size   :=   12800 
+   size   :=   12800
 instance   : Size ty12544 where
-   size   :=   12544 
+   size   :=   12544
 instance   : Size ty16384 where
-   size   :=   16384 
+   size   :=   16384
 instance   : Size ty18432 where
-   size   :=   18432 
+   size   :=   18432
 instance   : Size ty20736 where
-   size   :=   20736 
+   size   :=   20736
 instance   : Size ty25088 where
-   size   :=   25088 
+   size   :=   25088
 instance   : Size ty25600 where
-   size   :=   25600 
+   size   :=   25600
 instance   : Size ty30976 where
-   size   :=   30976 
+   size   :=   30976
 instance   : Size ty32768 where
-   size   :=   32768 
+   size   :=   32768
 instance   : Size ty36864 where
-   size   :=   36864 
+   size   :=   36864
 instance   : Size ty41472 where
-   size   :=   41472 
+   size   :=   41472
 instance   : Size ty43264 where
-   size   :=   43264 
+   size   :=   43264
 instance   : Size ty50176 where
-   size   :=   50176 
+   size   :=   50176
 instance   : Size ty51200 where
-   size   :=   51200 
+   size   :=   51200
 instance   : Size ty57600 where
-   size   :=   57600 
+   size   :=   57600
 instance   : Size ty61952 where
-   size   :=   61952 
+   size   :=   61952
 instance   : Size ty65536 where
-   size   :=   65536 
+   size   :=   65536
 instance   : Size ty73728 where
-   size   :=   73728 
+   size   :=   73728
 instance   : Size ty86528 where
-   size   :=   86528 
+   size   :=   86528
 instance   : Size ty100352 where
-   size   :=   100352 
+   size   :=   100352
 instance   : Size ty115200 where
-   size   :=   115200 
+   size   :=   115200
 instance   : Size ty131072 where
-   size   :=   131072 
+   size   :=   131072
 instance   : Size ty262144 where
-   size   :=   262144 
-/- removed value specification -/
+   size   :=   262144
+/- **************************************************************** -/
+/- Conversions                                                    -/
+/- **************************************************************** -/
 
-/- removed value specification -/
+/- Version without typeclass constraint so that we can derive operations
+   in Lem for one of the theorem provers without requiring it. -/
 
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-
-/- removed value specification -/
-
+/- The OCaml version is defined after the arithmetic operations, below. -/
 
 instance (a : Type)  [Size a] : Show (BitVec  (@Size.size  a  _)) where
 
     show0   :=  mwordToHex
 
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
 def  size_test_fn  {a : Type} [Size a]  ( _ : BitVec  (@Size.size a  _))  : Nat :=  (@size (a) _)
-/- removed value specification -/
-
-
+/- **************************************************************** -/
+/- Comparisons                                                    -/
+/- **************************************************************** -/
 
 instance (a : Type)  [Size a] : Eq0 (BitVec  (@Size.size  a  _)) where
 
@@ -1667,68 +1636,28 @@ instance (a : Type)  [Size a] : Eq0 (BitVec  (@Size.size  a  _)) where
 
     isInequal   w1  w2  :=  not  (mwordEq  w1  w2)
 
-/- removed value specification -/
+/- Comparison tests are below, after the definition of wordFromInteger -/
+/- **************************************************************** -/
+/- Appending, splitting and probing words                         -/
+/- **************************************************************** -/
 
-/- removed value specification -/
+/- Note that we assume the result type has the correct size, especially
+   for Isabelle. -/
 
-/- removed value specification -/
+/-  Needs to be in the prover because we'd end up with unknown sizes in the
+   types in Lem.
+-/
 
-/- removed value specification -/
+/- **************************************************************** -/
+/- Bitwise operations, shifts, etc.                               -/
+/- **************************************************************** -/
 
-/- removed value specification -/
+/- Sign extension tests are below, after the definition of wordFromInteger -/
+/- *************************************************************** -/
+/- Arithmetic                                                    -/
+/- *************************************************************** -/
 
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-
-/- 
+/- lem: replaced by its target representation: 
 
 instance (a : Type) [Size a] : Numeral (BitVec  (@Size.size  a  _)) where
 
@@ -1737,4 +1666,3 @@ instance (a : Type) [Size a] : Numeral (BitVec  (@Size.size  a  _)) where
 abbrev  mword (a : Type)[Size a]  := BitVec  (@Size.size  a  _)
 
 end Lem_Machine_word
-

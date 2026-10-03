@@ -429,6 +429,11 @@ module St = struct
   let failwith_threaded : (int list * string list) Types.Cdmap.t ref = ref Types.Cdmap.empty
   (* [invocation] Synthesized-name counter (generate_fresh_name: x<n>). *)
   let fresh_name_counter = ref 0
+  (* [file] The source comments already emitted, by physical identity.
+     Transformations (pattern compilation above all) copy a skip list into
+     several generated nodes; the comment is the same value in each copy,
+     and is emitted once, at its first position. *)
+  let emitted_comments : Ast.ml_comment list ref = ref []
 
   (* Reset the [file]-lifetime fields — called at every lean_defs entry.
      (current_module_name and local_modules are not cleared here: both
@@ -442,7 +447,8 @@ module St = struct
     pending_abbrevs := [];
     deferred_opens := [];
     measure_obligations := [];
-    tail_hoisted := []
+    tail_hoisted := [];
+    emitted_comments := []
 
   (* Full reset — the reentrancy hook (be:G3): a second lem invocation in
      one process starts from a fresh backend. Not called on the normal
@@ -3252,7 +3258,191 @@ let lean_analysis_prepass_all env (mods : checked_module list) =
     mods;
   St.current_module_name := saved
 
-let wrap_lean_comment x = Ulib.Text.(^^^) (Ulib.Text.(^^^) (r"/- ") x) (r" -/")
+(* A Lem comment `(* x *)` becomes `/- x -/`, keeping the source text,
+   including its own spacing. The text is escaped so it cannot end the
+   Lean comment early (`-/`) or open a nested one that never closes (`/-`),
+   and padded so it cannot form `/--` (doc comment) or `/-!` (module doc). *)
+let wrap_lean_comment x =
+  let s = Ulib.Text.to_string x in
+  let b = Buffer.create (String.length s + 8) in
+  String.iteri (fun i c ->
+      Buffer.add_char b c;
+      let next = if i + 1 < String.length s then s.[i + 1] else ' ' in
+      if (c = '/' && next = '-') || (c = '-' && next = '/') then Buffer.add_char b ' ')
+    s;
+  let body = Buffer.contents b in
+  let is_space c = c = ' ' || c = '\n' || c = '\r' in
+  let pre = if body <> "" && is_space body.[0] then "/-" else "/- " in
+  let post = if body <> "" && is_space body.[String.length body - 1] then "-/" else " -/" in
+  Ulib.Text.of_string (String.concat "" [pre; body; post])
+
+(* Comments the backend writes itself start with `lem: ` (`/- lem: … -/`),
+   so a reader can tell them from the author's comments. *)
+
+(* Normalise the layout of a generated Lean file. Outside string literals and
+   comments: trailing spaces are removed and runs of blank lines become one
+   blank line. Blank lines carry no meaning in Lean (only the indentation of
+   non-blank lines does), so this changes no declaration. *)
+let normalize_layout (s : string) : string =
+  let n = String.length s in
+  let b = Buffer.create n in
+  let pending_spaces = Buffer.create 16 in
+  let newlines = ref 0 in
+  let flush_ws () =
+    if !newlines > 0 then begin
+      Buffer.add_string b (if !newlines >= 2 then "\n\n" else "\n");
+      newlines := 0
+    end;
+    Buffer.add_buffer b pending_spaces;
+    Buffer.clear pending_spaces
+  in
+  let is_ident_char c =
+    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+    || c = '_' || c = '\'' || c = '.' || Char.code c >= 128
+  in
+  let rec copy_until_string_end i =
+    (* s.[i-1] was the opening quote *)
+    if i >= n then i
+    else begin
+      Buffer.add_char b s.[i];
+      if s.[i] = '\\' && i + 1 < n then (Buffer.add_char b s.[i + 1]; copy_until_string_end (i + 2))
+      else if s.[i] = '"' then i + 1
+      else copy_until_string_end (i + 1)
+    end
+  in
+  let rec copy_comment i depth =
+    if i >= n then i
+    else if depth = 0 then i
+    else if i + 1 < n && s.[i] = '/' && s.[i + 1] = '-' then
+      (Buffer.add_string b "/-"; copy_comment (i + 2) (depth + 1))
+    else if i + 1 < n && s.[i] = '-' && s.[i + 1] = '/' then
+      (Buffer.add_string b "-/"; copy_comment (i + 2) (depth - 1))
+    else (Buffer.add_char b s.[i]; copy_comment (i + 1) depth)
+  in
+  let rec go i =
+    if i >= n then ()
+    else match s.[i] with
+      | ' ' -> Buffer.add_char pending_spaces ' '; go (i + 1)
+      | '\n' -> Buffer.clear pending_spaces; incr newlines; go (i + 1)
+      | '"' -> flush_ws (); Buffer.add_char b '"'; go (copy_until_string_end (i + 1))
+      | '/' when i + 1 < n && s.[i + 1] = '-' ->
+          flush_ws (); Buffer.add_string b "/-"; go (copy_comment (i + 2) 1)
+      | '-' when i + 1 < n && s.[i + 1] = '-' ->
+          flush_ws ();
+          let j = try String.index_from s i '\n' with Not_found -> n in
+          let line = String.sub s i (j - i) in
+          let k = ref (String.length line) in
+          while !k > 0 && line.[!k - 1] = ' ' do decr k done;
+          Buffer.add_string b (String.sub line 0 !k); go j
+      | '\'' when (i = 0 || not (is_ident_char s.[i - 1]))
+                  && i + 2 < n && (s.[i + 1] = '\\' || s.[i + 2] = '\'') ->
+          flush_ws ();
+          let j = try String.index_from s (if s.[i + 1] = '\\' then i + 3 else i + 2) '\'' with Not_found -> n - 1 in
+          Buffer.add_string b (String.sub s i (j - i + 1)); go (j + 1)
+      | c -> flush_ws (); Buffer.add_char b c; go (i + 1)
+  in
+  go 0;
+  if !newlines > 0 then Buffer.add_char b '\n';
+  Buffer.contents b
+
+(* Split a skip list at its first line break (in source order). The comments before it trail
+   the previous item (same line); the comments after it lead the next item
+   (one per line). The source whitespace itself is dropped: the backend owns
+   the layout, the author owns the comments. *)
+let split_skip_comments (s : Ast.lex_skips) : Ast.ml_comment list * Ast.ml_comment list =
+  match s with
+  | None -> ([], [])
+  | Some ts ->
+    let has_nl = function
+      | Ast.Nl -> true
+      | Ast.Ws r -> String.contains (Ulib.Text.to_string r) '\n'
+      | Ast.Com _ -> false
+    in
+    let rec walk seen_nl trail lead = function
+      | [] -> (List.rev trail, List.rev lead)
+      | Ast.Com c :: rest ->
+        if seen_nl then walk seen_nl trail (c :: lead) rest
+        else walk seen_nl (c :: trail) lead rest
+      | t :: rest -> walk (seen_nl || has_nl t) trail lead rest
+    in
+    (* Lem stores skips last-first (Output.ws renders them reversed). *)
+    walk false [] [] (List.rev ts)
+
+let comment_out c =
+  if List.memq c !St.emitted_comments then Output.emp
+  else begin
+    St.emitted_comments := c :: !St.emitted_comments;
+    Output.ws (Some [Ast.Com c])
+  end
+
+(* ` /- c -/` for each trailing comment. *)
+let fresh_comments cs = List.filter (fun c -> not (List.memq c !St.emitted_comments)) cs
+
+let trailing_comments cs =
+  Output.flat (List.map (fun c -> Output.(^) (meta_utf8 " ") (comment_out c)) (fresh_comments cs))
+
+(* `indent/- c -/\n` for each leading comment. *)
+let leading_comments ~indent cs =
+  Output.flat (List.map (fun c ->
+      Output.flat [meta_utf8 indent; comment_out c; meta_utf8 "\n"]) (fresh_comments cs))
+
+(* For alter_init_lskips: split a skip list into (whitespace, comments). *)
+let take_comments (s : Ast.lex_skips) : Ast.lex_skips * Ast.lex_skips =
+  match s with
+  | None -> (None, None)
+  | Some ts ->
+    let (cs, ws_) = List.partition (function Ast.Com _ -> true | _ -> false) ts in
+    if cs = [] then (s, None) else (Some ws_, Some cs)
+
+(* The comments of a skip list inside an expression printed on one line:
+   `/- c -/ ` for each (Lean accepts a comment between any two tokens). *)
+let inline_comments (s : Ast.lex_skips) =
+  (* A line break inside such a comment would put the next token at the
+     comment's last column, and Lean's layout is column-sensitive (a `|` at
+     a low column ends the enclosing match). So the comment's line breaks,
+     with the indentation after them, become single spaces: every word is
+     kept, on one line. *)
+  let rec one_line = function
+    | Ast.Chars r ->
+      Ast.Chars (Ulib.Text.of_string
+                   (Str.global_replace (Str.regexp "[ \t]*\n[ \t]*") " " (Ulib.Text.to_string r)))
+    | Ast.Comment cs -> Ast.Comment (List.map one_line cs)
+  in
+  let (t, l) = split_skip_comments s in
+  Output.flat (List.map (fun c ->
+      St.emitted_comments := c :: !St.emitted_comments;
+      Output.flat [Output.ws (Some [Ast.Com (one_line c)]); meta_utf8 " "])
+      (fresh_comments (t @ l)))
+
+(* Every comment of a skip list, laid out as at a top-level position: the
+   trailing ones on the current line, the leading ones on their own lines. *)
+let skip_comments_toplevel (s : Ast.lex_skips) =
+  let (t, l) = split_skip_comments s in
+  Output.flat [trailing_comments t;
+               (if l = [] then Output.emp else meta_utf8 "\n");
+               leading_comments ~indent:"" l]
+
+(* Every skip list inside a source type, in source order. *)
+let rec src_t_skips (t : Types.src_t) : Ast.lex_skips list =
+  let id_skips (id : _ Types.id) = match id.Types.id_path with
+    | Types.Id_none sk -> sk
+    | Types.Id_some i -> Ident.get_lskip i
+  in
+  match t.Types.term with
+  | Types.Typ_wild sk | Types.Typ_var (sk, _) -> [sk]
+  | Types.Typ_len _ -> []
+  | Types.Typ_fn (a, sk, b) -> src_t_skips a @ [sk] @ src_t_skips b
+  | Types.Typ_tup ts ->
+    let (_, pairs) = Seplist.to_pair_list None ts in
+    List.concat_map (fun (t1, sk) -> src_t_skips t1 @ [sk]) pairs
+  | Types.Typ_app (id, ts) | Types.Typ_backend (id, ts) ->
+    id_skips id :: List.concat_map src_t_skips ts
+  | Types.Typ_paren (s1, t1, s2) -> [s1] @ src_t_skips t1 @ [s2]
+  | Types.Typ_with_sort (t1, _) -> src_t_skips t1
+
+let init_comments (d : Typed_ast.def_aux) =
+  let (_, s) = Typed_ast.def_aux_alter_init_lskips (fun s -> (s, s)) d in
+  skip_comments_toplevel s
 
 let sanitize_tabs r =
   let s = Ulib.Text.to_string r in
@@ -4030,8 +4220,8 @@ type pat_style = FunParam | MatchArm
                  position is the fail-closed fuel_scope_check error
                  (negative/neg_fuel_scope_assert.lem). *)
               Output.flat [
-                ws skips; from_string "/- removed assert "; name_out;
-                from_string ": references a fuel'd definition; a library assert has no [LemFuel] instance to supply (fuel-parameter arc) -/"
+                ws skips; from_string "/- lem: removed assert "; name_out;
+                from_string ": it uses a fuel'd definition, and a library assert has no [LemFuel] instance to supply -/"
               ]
             | Ast.Lemma_assert _ ->
               Output.flat [
@@ -4046,10 +4236,10 @@ type pat_style = FunParam | MatchArm
                  correctness but contain complex expressions (match, forall) that
                  cause parsing issues, and the proof is by sorry anyway. *)
               Output.flat [
-                ws skips; from_string "/- removed theorem "; name_out; from_string " -/"
+                ws skips; from_string "/- lem: theorem "; name_out; from_string " not translated -/"
               ]
           else
-            from_string "/- removed lemma intended for another backend -/"
+            from_string "/- lem: removed a lemma for another backend -/"
         (* All non-Lemma defs are handled by def, not def_extra.
            Exhaustive match so new def_aux variants trigger a compiler warning. *)
         | Type_def _ | Val_def _ | Module _ | Rename _ | OpenImport _
@@ -4165,8 +4355,14 @@ type pat_style = FunParam | MatchArm
             let c = Seplist.to_list cs in
               clauses inside_instance c
           else
-            ws skips ^ from_string "\n/- removed inductive relation intended for another target -/"
-      | Val_spec val_spec -> from_string "\n/- removed value specification -/\n"
+            ws skips ^ from_string "\n/- lem: removed an inductive relation for another backend -/"
+      | Val_spec (_, (n, _), _, _, s2, (_, t)) ->
+          (* No Lean counterpart (the def carries the type); its comments
+             stay: those in front of it, then those inside its type, one
+             per line. *)
+          let inner = List.concat_map (fun sk -> let (a, b) = split_skip_comments sk in a @ b)
+              (Name.get_lskip n :: s2 :: src_t_skips t) in
+          Output.flat [init_comments m; leading_comments ~indent:"" inner]
       | Class (Ast.Class_inline_decl (skips, _), _, _, _, _,_, _, _) -> ws skips
       | Class (Ast.Class_decl skips, skips', (name, l), tv, p, skips'', body, skips''') ->
           let name_str = Name.to_string (B.class_path_to_name p) in
@@ -4430,7 +4626,7 @@ type pat_style = FunParam | MatchArm
           St.rendering_comment := true;
           Fun.protect ~finally:(fun () -> St.rendering_comment := saved) @@ fun () ->
           Output.flat [
-            skips; from_string "/- "; def inside_instance callback inside_module def_aux; from_string " -/"
+            skips; from_string "/- lem: replaced by its target representation: "; def inside_instance callback inside_module def_aux; from_string " -/"
           ] in
         begin match abbrev_for_target_rep with
         | Some abbrev_out ->
@@ -4442,8 +4638,8 @@ type pat_style = FunParam | MatchArm
           (* Add user-requested import to this file's import list *)
           if not (List.mem mod_name !St.collected_imports) then
             St.collected_imports := mod_name :: !St.collected_imports;
-          emp
-      | Declaration _ -> emp  (* Other declarations processed earlier *)
+          init_comments m
+      | Declaration _ -> init_comments m  (* processed earlier; its comments stay *)
       | Lemma _ -> emp  (* Lemmas are handled by def_extra, not def *)
     and val_def inside_instance i_ref_opt is_recursive try_term def tv_set class_constraints =
       begin
@@ -4652,7 +4848,7 @@ type pat_style = FunParam | MatchArm
                   | Some (_, rhs_def) -> rhs_def :: defs in
                 Output.flat (ws skips :: defs)
               else
-                ws skips ^ from_string "/- removed value definition intended for another target -/"
+                ws skips ^ from_string "/- lem: removed a definition for another backend -/"
           | Fun_def (skips, rec_flag, targets, funcl_skips_seplist) ->
               if in_target targets then
                 let skips' = match rec_flag with FR_non_rec -> None | FR_rec sk -> sk in
@@ -5381,7 +5577,7 @@ type pat_style = FunParam | MatchArm
                             String.concat "" [!St.current_module_name; "_lemMeasureProofs"] in
                           let thm = String.concat "" [base_name; "_measure_sufficient"] in
                           let obligation = Output.flat ([
-                            from_string "\n/- fuel_measure obligation for `"; from_string base_name;
+                            from_string "\n/- lem: fuel_measure obligation for `"; from_string base_name;
                             from_string "` (generated; declare {lean} fuel_measure val "; from_string base_name;
                             from_string " = `"; from_string (String.trim measure);
                             (match hyp_opt with
@@ -5416,7 +5612,7 @@ type pat_style = FunParam | MatchArm
                           let zero_lemma =
                             if not all_named then
                               Output.flat [
-                                from_string "/- "; from_string worker;
+                                from_string "/- lem: "; from_string worker;
                                 from_string "_zero not generated: a parameter is a destructuring pattern; state the exhaustion lemma by hand -/\n"]
                             else begin
                               let supply_names =
@@ -5486,7 +5682,7 @@ type pat_style = FunParam | MatchArm
                         Output.flat [sep; k; b; w]) bodies)
                   ]
               else
-                from_string "\n/- removed recursive definition intended for another target -/"
+                from_string "\n/- lem: removed a recursive definition for another backend -/"
           | Let_inline (skips, _, _, _, _, _, _, _) ->
               (* Let_inline declarations are inlined at use sites during compilation.
                  The backend emits nothing — the definition body appears inline. *)
@@ -6357,7 +6553,14 @@ type pat_style = FunParam | MatchArm
     (* B14: a node headed by a constant whose class constraints reach a
        confusable tuple type binds Lem's instances locally first. *)
     and exp inside_instance e =
-      let out = exp_core inside_instance e in
+      (* The comments in front of an expression are taken out of its skips and
+         emitted ahead of it, so no rendering path (rewrites, failure
+         threading, pattern compilation) can drop them. The whitespace stays
+         in place: the token spacing is unchanged. *)
+      let out = match Typed_ast.alter_init_lskips take_comments e with
+        | (_, None) -> exp_core inside_instance e
+        | (e', lead_comments) -> Output.flat [inline_comments lead_comments; exp_core inside_instance e']
+      in
       match lean_exp_head_const e with
       | None -> out
       | Some c ->
@@ -6811,7 +7014,7 @@ type pat_style = FunParam | MatchArm
             let (_, _, e2, _) = Seplist.hd cases in
             lem_seq_out inside_instance skips e1 e2
           | Case (_, skips, e, skips', cases, skips'') ->
-            let case_sep _ = from_string " " in
+            let case_sep sk = Output.flat [from_string " "; inline_comments sk] in
             let has_vec = Seplist.exists (fun (p, _, _, _) -> pat_has_vector p) cases in
             (* Use multi-discriminant match for tuple scrutinees:
                match l1, l2 with | [], [] => ... instead of
@@ -7428,8 +7631,7 @@ type pat_style = FunParam | MatchArm
     and type_def_record (n', _) tyvars path ty fields =
       let n' = B.type_path_to_name n' path in
       let name = Name.to_output (Type_ctor (false, false)) n' in
-      let field_list = Seplist.to_list fields in
-      let body = concat_str "\n" (List.map field field_list) in
+      let body = record_fields_with_comments ty fields in
       let tyvars' = type_def_type_variables tyvars in
       let tyvar_sep = if List.length tyvars = 0 then emp else from_string " " in
       let deriving_clause = if texp_can_derive_beq ty then
@@ -7494,6 +7696,24 @@ type pat_style = FunParam | MatchArm
         (* Separate abbreviations from the mutual block — they are just type aliases
            and can't participate in mutual recursion. Emit them after the mutual block. *)
         let all_defs = Seplist.to_list defs in
+        (* The comments before each `and` (in the separator before a type)
+           are kept and emitted above that type, wherever it is placed. *)
+        let and_comments =
+          let (_, pairs) = Seplist.to_pair_list None defs in
+          let rec go prev acc = function
+            | [] -> acc
+            | ((_, _, path, _, _), sk) :: rest -> go sk ((path, prev) :: acc) rest
+          in
+          go None [] pairs
+        in
+        let comments_before path =
+          match List.assoc_opt path and_comments with
+          | None -> emp
+          | Some sk -> let (t, l) = split_skip_comments sk in leading_comments ~indent:"" (t @ l)
+        in
+        let comments_before_sk path =
+          match List.assoc_opt path and_comments with None -> None | Some sk -> sk
+        in
         (* Partition into abbreviations (with extracted Te_abbrev data) and mutual types.
            Abbreviations can't participate in mutual recursion — they're type aliases.
            Extract Te_abbrev fields during partitioning so downstream code doesn't
@@ -7516,7 +7736,7 @@ type pat_style = FunParam | MatchArm
           let tyvars' = type_def_type_variables tyvars in
           let tyvar_sep = if List.length tyvars = 0 then emp else from_string " " in
           Output.flat [
-            from_string "\nabbrev"; name; tyvar_sep; tyvars';
+            from_string "\n"; comments_before path; from_string "abbrev"; name; tyvar_sep; tyvars';
             ws skips; from_string " := "; pat_typ t
           ]
         in
@@ -7528,7 +7748,17 @@ type pat_style = FunParam | MatchArm
            pre-collection near St.local_modules. *)
         let mutual_output =
           if mutual_n > 1 then
-            let mutual_sep = Seplist.from_list_default None mutual_defs in
+            let rec with_next_comments = function
+              | [] -> []
+              | [d] -> [(d, None)]
+              | d :: ((_, _, next_path, _, _) :: _ as rest) ->
+                (d, comments_before_sk next_path) :: with_next_comments rest
+            in
+            let mutual_sep = Seplist.from_list (with_next_comments mutual_defs) in
+            let and_sep sk =
+              let (t, l) = split_skip_comments sk in
+              Output.flat [from_string "\n"; leading_comments ~indent:"" (t @ l); from_string "inductive"]
+            in
             (* Check if all types in mutual block have the same number of type params *)
             let param_counts = List.map (fun (_, ty_vars, _, _, _) ->
               List.length ty_vars
@@ -7538,10 +7768,10 @@ type pat_style = FunParam | MatchArm
               | x :: xs -> List.for_all (fun y -> y = x) xs
             in
             if all_same then
-              let body = flat @@ Seplist.to_sep_list (type_def_variant false) (sep @@ from_string "\ninductive") mutual_sep in
+              let body = flat @@ Seplist.to_sep_list (type_def_variant false) and_sep mutual_sep in
               Output.flat [ from_string "mutual\ninductive"; body; from_string "\nend" ]
             else
-              let body = flat @@ Seplist.to_sep_list type_def_indexed (sep @@ from_string "\ninductive") mutual_sep in
+              let body = flat @@ Seplist.to_sep_list type_def_indexed and_sep mutual_sep in
               Output.flat [ from_string "mutual\ninductive"; body; from_string "\nend" ]
           else if mutual_n = 1 then
             let single_sep = Seplist.from_list_default None mutual_defs in
@@ -7804,14 +8034,28 @@ type pat_style = FunParam | MatchArm
               from_string " where\n  | mk"; mk_args; from_string " : "; name; ty_vars_sep; ty_vars_applied
             ]
         | Te_variant (skips, ctors) ->
-          let body = flat @@ Seplist.to_sep_list_first Seplist.Optional (constructor name ty_vars) (sep @@ from_string "\n") ctors in
+          (* One constructor per line. The source layout before each `|` is
+             replaced; its comments are kept (trailing ones on the previous
+             constructor's line, leading ones on their own lines). *)
+          let ctor_sep sk =
+            let (t, l) = split_skip_comments sk in
+            Output.flat [trailing_comments t; from_string "\n"; leading_comments ~indent:"  " l]
+          in
+          let first_sep sk =
+            let (t, l) = split_skip_comments sk in
+            leading_comments ~indent:"  " (t @ l)
+          in
+          let body = flat @@ Seplist.to_sep_list_first (Seplist.Forbid first_sep)
+                       (constructor name ty_vars) ctor_sep ctors in
           let is_all_nullary = Seplist.for_all (fun (_, _, _, args) -> Seplist.to_list args = []) ctors in
           let deriving_clause = if (emit_deriving || is_all_nullary) && texp_can_derive_beq ty
                                    && not (texp_needs_ocaml_rank ty) then
             from_string "\n  deriving BEq, Ord"
           else emp in
+            let (where_t, where_l) = split_skip_comments skips in
             Output.flat [
-              from_string " where"; ws skips; from_string "\n"; body; deriving_clause
+              from_string " where"; trailing_comments where_t; from_string "\n";
+              leading_comments ~indent:"  " where_l; body; deriving_clause
             ]
     and constructor ind_name (ty_vars : variable list) ((name0, _), c_ref, skips, args) =
       let ctor_name = B.const_ref_to_name name0 false c_ref in
@@ -7976,6 +8220,37 @@ type pat_style = FunParam | MatchArm
             Output.flat [
               i; space; concat_str " " ts_out
             ]
+    (* The fields of a record, one per line, with the author's comments:
+       a field's leading comments (in its name's skips, after a line break)
+       on their own lines above it; comments after its type (before the `;`,
+       or after the `;` on the same line) at the end of its line; comments
+       before the closing `|>` after the last field. *)
+    and record_fields_with_comments ty fields =
+      let rskips = match ty with Te_record (_, _, _, sk) -> sk | _ -> None in
+      let (_, pairs) = Seplist.to_pair_list None fields in
+      let items = Array.of_list (List.map fst pairs) in
+      let seps = Array.of_list (List.map snd pairs) in
+      let k = Array.length items in
+      let trail = Array.make (k + 1) [] and lead = Array.make (k + 1) [] in
+      Array.iteri (fun i ((n, _), _, _, _) ->
+          let (t, l) = split_skip_comments (Name.get_lskip n) in
+          if i > 0 then trail.(i - 1) <- trail.(i - 1) @ t else lead.(i) <- t;
+          lead.(i) <- lead.(i) @ l)
+        items;
+      Array.iteri (fun i sk ->
+          let (t, l) = split_skip_comments sk in
+          trail.(i) <- trail.(i) @ t;
+          lead.(i + 1) <- lead.(i + 1) @ l)
+        seps;
+      let (rt, rl) = split_skip_comments rskips in
+      if k > 0 then trail.(k - 1) <- trail.(k - 1) @ rt else lead.(k) <- rt;
+      lead.(k) <- lead.(k) @ rl;
+      let lines = List.mapi (fun i f ->
+          Output.flat [leading_comments ~indent:"  " lead.(i); field f; trailing_comments trail.(i)])
+          (Array.to_list items) in
+      Output.flat [concat_str "\n" lines;
+                   (if lead.(k) = [] then emp
+                    else Output.flat [from_string "\n"; leading_comments ~indent:"  " lead.(k)])]
     and field ((n, _), f_ref, _skips, t) =
       let fname = Name.add_lskip (Name.strip_lskip (B.const_ref_to_name n false f_ref)) in
       Output.flat [
@@ -8799,7 +9074,7 @@ type pat_style = FunParam | MatchArm
             Printf.sprintf "  | .%s%s => %d" cn wilds rank) ctors in
           let (binders, args) = sig_of tnvar_list [] "" in
           Printf.sprintf
-            "/- OCaml polymorphic-compare constructor rank: nullary constructors\n   (immediates) sort below non-nullary (blocks); declaration order within\n   each class. -/\ndef %s.ctor_rank_ocaml%s : %s%s → Nat\n%s"
+            "/- lem: constructor rank for OCaml's polymorphic compare: nullary\n   constructors (immediates) sort below non-nullary ones (blocks);\n   declaration order within each group. -/\ndef %s.ctor_rank_ocaml%s : %s%s → Nat\n%s"
             type_name binders type_name args (String.concat "\n" arms)
         in
         let beq_def (type_name, tnvar_list, bounds, ctors) : string =
@@ -8848,11 +9123,10 @@ type pat_style = FunParam | MatchArm
           if List.length ctors > 1 then Some (rank_def nm tvs ctors) else None) per_type in
         let all_mutual = type_defs_text @ List.rev !helper_defs in
         let text = String.concat "" [
-          "\n/- Arc-10 S2: derived structural comparisons (OCaml polymorphic\n";
-          "   (=)/compare parity at this type's constructors: structural equality;\n";
-          "   nullary-below-block constructor rank, declaration order within each\n";
-          "   class; left-to-right lexicographic fields; leaf fields via their\n";
-          "   Lean BEq/Ord instances). -/\n";
+          "\n/- lem: equality and comparison for these types, matching OCaml's\n";
+          "   polymorphic (=) and compare: structural equality; nullary constructors\n";
+          "   before non-nullary ones, declaration order within each group; fields\n";
+          "   compared left to right; leaf fields by their Lean BEq/Ord instances. -/\n";
           (match rank_defs_text with [] -> "" | rs -> String.concat "" [String.concat "\n" rs; "\n"]);
           "mutual\n";
           String.concat "\n" all_mutual;
@@ -8988,10 +9262,10 @@ type pat_style = FunParam | MatchArm
         let all_defs = type_defs_text @ List.rev !helper_defs in
         let body = String.concat "\n" all_defs in
         let text = String.concat "" [
-          "\n/- Backend-derived computable structural size (the fuel-measure form\n";
-          "   `lemSize x`): one per constructor node of this block's types and per\n";
-          "   non-nullary container constructor (`::`/`some`/`inl`/`inr`); tuples\n";
-          "   transparent; every other field a leaf (0). Kernel-computable. -/\n";
+          "\n/- lem: computable structural size `lemSize x`, for fuel measures: one\n";
+          "   per constructor node of these types and per non-nullary container\n";
+          "   constructor (`::`/`some`/`inl`/`inr`); tuples are transparent; every\n";
+          "   other field counts 0. -/\n";
           (if List.length all_defs > 1 then String.concat "" ["mutual\n"; body; "\nend\n"]
            else String.concat "" [body; "\n"])
         ] in
@@ -9349,7 +9623,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
         else
           from_string (String.concat "" ["import "; mod_name; "_lemMeasureProofs\n"]),
           Output.flat (
-            from_string "\n/- ===== fuel_measure obligations (generated statements; proofs in the hand-written module above) ===== -/\n"
+            from_string "\n/- lem: fuel_measure obligations (statements generated here; proofs in the hand-written module imported above) -/\n"
             :: !St.measure_obligations) in
         (* linksem 2026-09-28 (B9, retired with the 4.32.2 toolchain move):
            Lean 4.28 evaluated hoisted closed terms when a module LOADED, so

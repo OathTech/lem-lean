@@ -16,6 +16,7 @@ lean_lib LemComprehensiveTest where
     `Test_classes, `Test_classes_auxiliary,
     `Test_cmp_threading, `Test_cmp_threading_auxiliary,  -- comparison dictionaries threaded through generic defs (linksem audit A1)
     `Test_collections, `Test_collections_auxiliary,
+    `Test_comments, `Test_comments_auxiliary,  -- comments survive; layout sound (output-niceness S1)
     `Test_contextual_keywords, `Test_contextual_keywords_auxiliary,
     `Test_contextual_keywords_lemMeasureProofs,  -- hand-written proof of its measured declare's obligation (fuel-measure slice)
     `Test_cross_field_access,

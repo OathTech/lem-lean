@@ -112,3 +112,161 @@ for separately.
 Landing: linksem re-pins after each lem merge. The Cerberus re-pin waits for
 the lem-pin slot, which the Cerberus next-phase plan §11.5 shares with the SC
 track: one pin dance at a time.
+
+## 5. Constraints from the Cerberus worker (relayed by the operator, 2026-10-03)
+
+Relayed verbatim in substance (the operator's message quoting the Cerberus
+worker):
+
+- The shared switch and `deps/lem-pinned` stay at `77ad4fa` until the
+  Cerberus `_Alignas` and union-twin slices have landed. Those slices
+  regenerate Cerberus's trees, and a lem change in the middle of a slice
+  would shift the generated code underneath their gates.
+- Every lem-side slice runs `make upstream-drift`, which compares the fork's
+  non-Lean output against pristine upstream Lem. Keeping it at "no code
+  differences, Cerberus's and linksem's OCaml byte-identical" guarantees
+  that lem changes do not move Cerberus's oracle.
+- The lem mainline already leads the Cerberus pin (the drift harness, the
+  Coq rename). This arc adds to that lead, and the next Cerberus re-pin
+  picks it all up at once, after both bug fixes land, unless one of this
+  arc's changes affects Cerberus sooner.
+
+How this arc complies [AGENT]:
+- Every generation uses the worktree's own in-tree `lem`, writing into
+  scratch directories. Verified 2026-10-03: `deps/lem-pinned` is at
+  `77ad4fa`, and the switch's `lem -v` prints
+  `Lem lean-backend-v0.1.0-alpha.1-20-g77ad4fa`.
+- The drift check is part of each slice gate. It runs against pristine
+  clients: `deps/cerberus-upstream` and linksem's `worktrees/linksem-upstream`.
+
+## 6. Corrections and findings during the arc [AGENT]
+
+- **Tray count.** When the operator was offered the tray scope, the
+  orchestrator said "16" findings, five of them archive-only. That was a
+  miscount: the surveyed inventory was 15 mainline items, the `§` lexer
+  defect and the five archive-only findings. The tray worker also found the
+  `output.ml` block-format decode to be a genuine upstream bug, and the
+  orchestrator found the comments-before-`and` loss. The tray therefore
+  holds 23 drafts, and its INDEX.md carries the arithmetic. The ruling's
+  intent was "all, re-verified"; the number put to the operator was wrong.
+- **Comments before `and` in recursive function groups (not fixed in S1).**
+  The Lean pipeline loses them, as upstream's prover backends do (tray
+  draft 23, reproduced on pristine `3802cb0`):
+  - Upstream's `Patterns.remove_toplevel_match` regroups the clauses and
+    rebuilds the separators. In Cerberus's `cabs_to_ail.lem` the 18 distinct
+    separators of one group became 2.
+  - An attempt to print the separators' comments therefore printed one
+    comment in front of 29 different definitions. It was reverted, failing
+    closed: a missing comment, not a misplaced one.
+  - A fix in the shared `patterns.ml` would move Coq/HOL/Isabelle output,
+    which the drift guarantee above forbids. It is an upstream report; any
+    Lean-only fix needs its own decision.
+
+## 7. S1 record: comments and layout (2026-10-03)
+
+**Changes** (`src/lean_backend.ml`; `src/process_file.ml`, Lean branch only):
+- Source comments are kept at every position the backend lays out:
+  - a removed `val` (its comments in front, then those inside its type);
+  - every `declare`;
+  - constructors (trailing comments on the line, leading ones on their own
+    lines);
+  - record fields and the closing `|>`;
+  - `and` in type groups;
+  - match arms;
+  - the leading comments of every expression, which are taken out of its
+    skips in `exp`, so no rendering path can drop them.
+- Each source comment is emitted once per file. The identity is physical:
+  pattern compilation copies a skip list into several arms.
+- A comment inside a one-line expression has its line breaks folded to
+  spaces. Lean's layout is column-sensitive, and the census build caught a
+  `|` arm ended early by a multi-line comment (`Dwarf.lean`).
+- Comment text is escaped (`-/`, `/-`) and padded, so it can neither end
+  the Lean comment early nor form `/--` or `/-!`.
+- Every comment the backend writes starts with `lem: `. The internal
+  jargon is gone. The fixed `removed value specification` marker is gone,
+  because a `val` has no Lean counterpart.
+- `normalize_layout`, applied to every generated file: outside strings and
+  comments, it removes trailing spaces and makes each run of blank lines a
+  single blank line. That fixes the blank, indented line between
+  constructors.
+- New gate `lean-comments`: `tests/comprehensive/test_comments.lem` and
+  `check_comments.py`. It checks:
+  - every comment is present exactly once; the registered loss is tagged
+    `KNOWN-LOST` and must stay absent;
+  - no code follows a multi-line comment on its last line;
+  - no whitespace-only lines and no blank-line runs.
+
+  Plant-tested 2026-10-03 against copies of the generated file: a removed
+  comment gives C1, a duplicated one C2, a multi-line inline comment C3,
+  a blank-line run C4, and an emitted `KNOWN-LOST` comment C1.
+
+**Measurements** (scratch tools, derived numbers):
+
+| Tree | Missing comments before → after | Duplicated before → after | Code after a multi-line comment before → after |
+|---|---|---|---|
+| Cerberus (85 `.lem`) | 958/4060 → 64/4060 | 1 → 0 | 7 → 0 |
+| linksem (96 `.lem`) | 927/3833 → 47/3833 | 2 → 2 (both pre-existing) | 6 → 0 |
+
+Both generated trees and LemLib's checked-in sources (30 files) are
+token-identical to `6e2526e`'s output, modulo comments and whitespace. The
+token check normalises whitespace next to brackets. It was plant-tested on
+a `Nat`→`Int` change and on a split `:=`.
+
+**Declaration census** (`Census.lean`: every constant of every generated
+and hand-written module; name, kind, structural hashes of type and value):
+- **linksem:** 11782 constants in 193 modules, before and after identical
+  (0 diff lines). Plant: one string literal changed in `Dwarf.lean` moved
+  `attribute_encodings`' value hash. After the revert and a rebuild, 0
+  diff lines again.
+- **Cerberus** (219 modules, built against the LemLib pin `77ad4fa`):
+  - The strict census differs in `Cabs` only, in 360 lines. They are
+    hygienic auxiliary names of derived instances
+    (`…match_on_same_ctor._@.Cabs.…._hyg.N`), plus the values of 120
+    `beq_N`/`ord_N` internals that reference them. Their types are
+    unchanged.
+  - With macro scopes erased from every constant name (`--erase-scopes`),
+    before and after are identical: 34229 constants, 0 diff lines.
+  - The strict census is deterministic: a second run on the same build
+    gives 0 diff lines.
+  - Finding: S1 renumbers inaccessible hygienic helpers in `Cabs`. No
+    accessible declaration changes.
+
+**Gate on the candidate** (verbatim tails):
+```
+make exit 0
+lemlib exit 0
+Build completed successfully (39 jobs).
+comprehensive exit 0
+=== Generation: 68 passed, 0 failed, 0 skipped ===
+=== Comments and layout (gate) ===
+  OK: Test_comments.lean: comments preserved, layout sound
+Build completed successfully (197 jobs).
+parity: 48 probes: 38 OK, 10 XFAIL (registered, Lean side pinned), 0 FAIL
+  OK: 308 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+upstream-drift: 944 upstream files; 198 differ (list: …/drift3/differences.txt)
+library code files (OCaml/HOL/Isabelle/Coq):
+  comments/whitespace only  lib/coq/lem_basic_classes_auxiliary.v   [… 32 such rows, no code row]
+lean_keyword_probe: 178 core keywords checked
+```
+Drift notes:
+- The pristine clients were `deps/cerberus-upstream` (`b9aeedcb4`) and
+  linksem `worktrees/linksem-upstream` (`4464128`).
+- `cerberus-ocaml` and `linksem-ocaml` are absent from the differences:
+  their output is byte-identical.
+- The non-zero exit is the script reporting the fork's known non-code
+  library differences (tex/html/lem renderings), the classes accepted when
+  the drift check landed (`98b83c5`).
+- S1 changes no shared code. The diff is in `lean_backend.ml` and in
+  `process_file.ml`'s Lean branch.
+
+**Not fixed in S1:**
+- Comments before `and` in recursive function groups (TODO 26).
+- The mutual-record comments of `sdt_subroutine`, which are S2's: the
+  records move to the fixed `structure` path.
+- Cosmetics, which are S3's: double spaces (`|  Red`, `def  f  (x`), a
+  leading space on some own-line comments, the blank line after a
+  structure's last comment.
+- Lem theorems are emitted as `/- lem: theorem NAME not translated -/`.
+  The statement is not kept, although the backend README says theorems are
+  "emitted as comments". The S3 review settles this.

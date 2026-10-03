@@ -4,37 +4,52 @@ import LemLib
 
 
 namespace Lem_Bool
+ /- **************************************************************************** -/
+/- Boolean                                                                    -/
+/- **************************************************************************** -/
+/- rename module to clash with existing list modules of targets -/
 
-/- removed value specification -/
+/- The type bool is hard-coded, so are true and false -/
 
-/- 
+/- ----------------------- -/
+/- not                     -/
+/- ----------------------- -/
+
+/- lem: replaced by its target representation: 
 def  not  (b : Bool)  : Bool :=  match  b with  |  true =>  false |  false =>  true
  -/
-/- removed value specification -/
+/- ----------------------- -/
+/- and                     -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 def  and  (b1 : Bool) (b2 : Bool)  : Bool :=  match b1,  b2 with  | true,  true =>  true | _, _ =>  false
  -/
-/- removed value specification -/
+/- ----------------------- -/
+/- or                      -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 def  or  (b1 : Bool) (b2 : Bool)  : Bool :=  match b1,  b2 with  | false,  false =>  false | _, _ =>  true
  -/
-/- removed value specification -/
+/- ----------------------- -/
+/- implication             -/
+/- ----------------------- -/
 
-/- 
+/- lem: replaced by its target representation: 
 def  imp  (b1 : Bool) (b2 : Bool)  : Bool :=  match b1,  b2 with  | true,  false =>  false | _, _ =>  true
  -/
+/- declare coq      target_rep function (-->) = `imp` -/
 
+/- ----------------------- -/
+/- equivalence             -/
+/- ----------------------- -/
 
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  equiv  (b1 : Bool) (b2 : Bool)  : Bool :=  match b1,  b2 with  | true,  true =>  true | false,  false =>  true | _, _ =>  false
  -/
-/- removed value specification -/
-
+/- ----------------------- -/
+/- xor                     -/
+/- ----------------------- -/
 
 end Lem_Bool
-
-

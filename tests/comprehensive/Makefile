@@ -14,7 +14,7 @@ LAKE = "$(CAPPED)" lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
+.PHONY: all lean lean-comments lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -23,7 +23,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-version lean-constants-required lean-parity-admission lean-generate lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+lean: lean-version lean-constants-required lean-parity-admission lean-generate lean-comments lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
 
 # The reserved-name list is required (linksem 2026-09-28, B10): with the
 # library's lean_constants missing, lem must refuse to generate Lean (it used
@@ -111,6 +111,15 @@ lean-no-sorry-proofs:
 # choose theirs and are outside the scan by design. Runs LAST in the
 # suite so that everything generated — including the parity runner's
 # P_*.lean modules — is under the scan (pre-merge audit M3).
+# Comments survive translation and the generated layout is sound
+# (output-niceness S1, 2026-10-03): every comment of test_comments.lem is in
+# Test_comments.lean exactly once (registered losses tagged KNOWN-LOST must
+# stay absent), no code follows a multi-line comment on its last line, no
+# whitespace-only lines or blank-line runs. Plants in the check's header.
+lean-comments: lean-generate
+	@echo "=== Comments and layout (gate) ==="
+	@python3 check_comments.py test_comments.lem Test_comments.lean
+
 lean-no-fuel-numerals:
 	@echo "=== No fuel numerals in LemLib or generated code (gate) ==="
 	@./check_no_fuel_numerals.sh

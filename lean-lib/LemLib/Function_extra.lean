@@ -10,18 +10,14 @@ import LemLib.Function
 
 namespace Lem_Function_extra
 
-
 open Lem_Maybe
 open Lem_Bool
 open Lem_Basic_classes
 open Lem_Num
 open Lem_Function
 
-
-
-
-/- removed value specification -/
+/- ----------------------- -/
+/- getting a unique value  -/
+/- ----------------------- -/
 
 end Lem_Function_extra
-
-

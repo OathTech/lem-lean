@@ -7,45 +7,50 @@ import LemLib.Basic_classes
 import LemLib.List
 
 namespace Lem_String
-
+ /- **************************************************************************** -/
+/- A library for strings                                                      -/
+/- **************************************************************************** -/
+/- ========================================================================== -/
+/- Header                                                                     -/
+/- ========================================================================== -/
 
 open Lem_Bool
 open Lem_Basic_classes
 open Lem_List
 
+/- ----------------------- -/
+/- basic instantiations    -/
+/- ----------------------- -/
+/- set up the string and char types correctly for the backends and make
+   sure that parsing and equality checks work -/
 
+/- ------------------------------------------- -/
+/- translations between strings and char lists -/
+/- ------------------------------------------- -/
+ /- TODO: check -/ /- TODO: check -/
+/- ----------------------- -/
+/- generating strings      -/
+/- ----------------------- -/
 
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
 def  makeString  (len : Nat) (c : Char)  : String :=  String.ofList  (List.replicate  len  c) -/
-/- removed value specification -/
+/- ----------------------- -/
+/- length                  -/
+/- ----------------------- -/
+ /- TODO: check -/
+/- ----------------------- -/
+/- string concatenation    -/
+/- ----------------------- -/
 
-/- removed value specification -/
+/- ---------------------------- -/
+/- setting up pattern matching -/
+/- --------------------------- -/
 
-
-/- removed value specification -/
-
-
-def  string_case  {a : Type}  (s : String) (c_empty : a) (c_cons : Char → String → a)  : a := 
+def  string_case  {a : Type}  (s : String) (c_empty : a) (c_cons : Char → String → a)  : a :=
   match  (String.toList  s) with  |  [] =>  c_empty |  c  ::  cs =>  c_cons  c  (String.ofList  cs)
-  
-/- removed value specification -/
 
-
-/- removed value specification -/
-
-
-/- removed value specification -/
-
-/- 
+/- lem: replaced by its target representation: 
  def  concat  (sep : String) (ss : List (String))  : String := 
   match  ss with  |  [] =>  "" |  s  ::  ss' => (       match  ss' with  |  [] =>  s |  _ =>  String.append  s  String.append  sep  lemStringConcat  sep  ss'       )
    -/
 end Lem_String
-
