@@ -270,3 +270,72 @@ Drift notes:
 - Lem theorems are emitted as `/- lem: theorem NAME not translated -/`.
   The statement is not kept, although the backend README says theorems are
   "emitted as comments". The S3 review settles this.
+
+## 8. S2 record: mutual records as structures (2026-10-03)
+
+**Change** (`src/lean_backend.ml`):
+- A record in a mutual block whose members all have the same number of
+  type parameters is now a Lean `structure`. Records in other mutual
+  blocks are unchanged. Its fields are printed by S1's field printer, so
+  field comments are kept.
+- Lean generates the field projections. The hand-made accessor `def`s,
+  `match self with | .mk _ _ x .. => x`, are gone. The projections have
+  the same names.
+- Literals, updates and supply threading of these records take the
+  ordinary record path, i.e. `{ f := v, … }` and `{ r with f := v }`.
+  Before, a literal was a positional `T.mk` and an update was a positional
+  `T.mk` restating `(r.field)` for every unchanged field.
+- `St.mutual_records`, and with it `mutual_record_path`, now lists only
+  records in a block whose members have different numbers of type
+  parameters. Such a block is emitted with indices (`type_def_indexed`,
+  `Type 1`). A Lean structure cannot have indices, so there the
+  single-constructor inductive is forced and keeps its positional B7
+  emission.
+- The S1 field printer dropped the comments between `=` and `<|`: the
+  first field's handling overwrote them. Both record paths now keep them.
+  The case is added to `test_comments.lem`.
+
+**Lean facts checked on 4.32.2** (scratch `mix.lean`, `fld.lean`, run 2026-10-03):
+- An `inductive` and a `structure` may share a `mutual` block.
+- Structural recursion over `.mk` patterns works through `List`/`Option`
+  nesting.
+- A recursive parametric structure is accepted.
+- `{ b with name := "x" }` elaborates to
+  `{ name := "x", body := b.body, parent := b.parent }`.
+
+**Withdrawn [AGENT]: "stop needless field renames"** (§4, the S2 row). The
+rename is not needless. In a structure, a field's name is in scope in the
+types of the later fields, so a field named like a type captures them.
+`structure tree where forest : List forest; other : forest` fails with
+`type expected, got (forest : List _root_.forest)`. Lem's renaming of
+such fields (`forest` → `forest0`) is what keeps the generated structure
+well-formed.
+
+**Gate on the S2 candidate** (FAST-GATE: the commit-level gate of the
+two-tier rule; the behavioural lanes run at the merge):
+- comprehensive suite: `=== Generation: 68 passed, 0 failed, 0 skipped ===`,
+  `OK: Test_comments.lean: comments preserved, layout sound`,
+  `Build completed successfully (197 jobs).`,
+  `parity: 48 probes: 38 OK, 10 XFAIL (registered, Lean side pinned), 0 FAIL`.
+  `test_mutual_record_order.lem` now also covers a heterogeneous block;
+  its asserts `mro_h_lo`/`mro_h_hi`/`mro_h_upd` print PASS.
+- `nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)`.
+- Both consumers build: the linksem library, the Cerberus `CerberusLean`
+  library against LemLib `77ad4fa`, and the hand-written `CabsImport.lean`
+  with its positional `specifiers.mk`.
+- **Census against S1** (linksem strict; Cerberus with macro scopes erased):
+  - Changes occur only in `Dwarf` (linksem) and in `AilSyntax` and `Cabs`
+    (Cerberus).
+  - What changed: the accessor `def`s became projections with the same
+    names; `T.mk._flat_ctor` is new; the matcher numbering inside
+    `lemSize` moved (`T.lemSize.match_1` is new, and
+    `T.<first field>.match_1` is gone).
+  - What did not change: the types, their constructors and recursors, and
+    every definition that builds, reads or updates these records. In
+    particular, `AilSyntaxAux`'s text changed (literals in structure
+    syntax) while its declarations are identical.
+- The last change, the `<|` comments, is comment-only: its output is
+  token-identical to the trees the census was built from. The only
+  exceptions are Cerberus's `Core_run` `import Operators`, which the
+  Makefile strips, and linksem's two stale `Dump_image*` files.
+- Comment coverage after S2: Cerberus 62/4060 missing, linksem 42/3833.

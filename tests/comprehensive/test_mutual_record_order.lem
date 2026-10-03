@@ -2,12 +2,15 @@ open import Pervasives_extra
 
 (* ======================================================================
    Mutual-record literals in any field order (linksem 2026-09-28, B7).
-   Records in a mutual block are emitted as single-constructor inductives
-   and literals as positional `T.mk ...`. The arguments must follow the
-   DECLARATION order: dwarf.lem's sdt_subroutine literal lists its fields
-   in a different order. Here the two swapped fields share the type nat,
-   so literal-order emission would type-check and silently swap them; the
-   asserts pin every field.
+   Since output-niceness S2 (2026-10-03) a record in a mutual block is a
+   Lean `structure`, and literals and updates use the structure syntax, so
+   the field order of a literal no longer matters to the emission. Here the
+   two swapped fields share the type nat, so a positional emission in
+   literal order would type-check and silently swap them; the asserts pin
+   every field. The second block has members with different numbers of type
+   parameters: it is emitted with indices, a structure cannot have indices,
+   and its record stays a single-constructor inductive built positionally in
+   DECLARATION order (the B7 rule).
    ====================================================================== *)
 
 type node = <| n_lo : nat; n_hi : nat; n_tag : string; n_kids : list leaf |>
@@ -25,3 +28,18 @@ assert mro_hi : (sample_node.n_hi = 50)
 assert mro_tag : (sample_node.n_tag = "t")
 assert mro_leaf : (match sample_node.n_kids with [l] -> l.l_val = 53 | _ -> false end)
 assert mro_upd : (upd_node.n_lo = 3 && upd_node.n_hi = 7)
+
+(* heterogeneous block: the record stays an inductive *)
+type hbox 'a = <| hb_lo : nat; hb_hi : nat; hb_val : 'a; hb_items : list hitem |>
+and hitem = HItem of nat
+declare {lean} skip_instances type hbox
+declare {lean} skip_instances type hitem
+
+let mk_hbox (lo : nat) (hi : nat) : hbox string =
+  <| hb_hi = hi; hb_items = [HItem lo]; hb_val = "v"; hb_lo = lo |>
+
+let upd_hbox = <| (mk_hbox 1 2) with hb_hi = 9 |>
+
+assert mro_h_lo : ((mk_hbox 1 2).hb_lo = 1)
+assert mro_h_hi : ((mk_hbox 1 2).hb_hi = 2)
+assert mro_h_upd : (upd_hbox.hb_lo = 1 && upd_hbox.hb_hi = 9 && upd_hbox.hb_val = "v")

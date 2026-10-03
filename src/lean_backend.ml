@@ -3543,9 +3543,22 @@ let name_var_output v =
   else
     Name.to_output Term_var v
 
-(* If the type is a record rendered as a single-constructor inductive
-   (due to being in a mutual block), return its path. Uses the per-compilation-unit
-   list St.mutual_records which accumulates across files in one lem invocation. *)
+(* A record in a mutual block is a Lean `structure`, unless the block's
+   members have different numbers of type parameters. Such a block is
+   emitted with the parameters as INDICES (type_def_indexed), and a Lean
+   structure cannot have indices, so there the record is a single-constructor
+   inductive (forced). St.mutual_records lists exactly those records. *)
+let mutual_block_records_as_inductives (defs : (_ * Typed_ast.tnvar list * _ * _ * _) list) =
+  match List.map (fun (_, tvs, _, _, _) -> List.length tvs) defs with
+  | [] -> false
+  | x :: xs -> not (List.for_all (fun y -> y = x) xs)
+
+let lean_record_is_inductive path =
+  List.exists (fun p -> Path.compare p path = 0) !St.mutual_records
+
+(* If the type is a record rendered as a single-constructor inductive (see
+   above), return its path. St.mutual_records accumulates across the files
+   of one lem invocation. *)
 let mutual_record_path typ : Path.t option =
   match typ.Types.t with
     | Types.Tapp (_, path) ->
@@ -7768,8 +7781,23 @@ type pat_style = FunParam | MatchArm
               | x :: xs -> List.for_all (fun y -> y = x) xs
             in
             if all_same then
-              let body = flat @@ Seplist.to_sep_list (type_def_variant false) and_sep mutual_sep in
-              Output.flat [ from_string "mutual\ninductive"; body; from_string "\nend" ]
+              (* A record in a mutual block is a `structure` (Lean accepts
+                 structures, recursive through List/Option, in a mutual
+                 block with inductives); the other members are inductives. *)
+              let member ((((n0, _), ty_vars, t_path, ty, _)) as d) =
+                match ty with
+                | Te_record (_, _, fields, _) ->
+                  let n = B.type_path_to_name n0 t_path in
+                  Output.flat [ from_string "structure"; inductive (List.map tnvar_to_variable ty_vars) n;
+                                from_string " where\n"; record_fields_with_comments ty fields ]
+                | _ -> Output.flat [ from_string "inductive"; type_def_variant false d ]
+              in
+              let member_sep sk =
+                let (t, l) = split_skip_comments sk in
+                Output.flat [from_string "\n"; leading_comments ~indent:"" (t @ l)]
+              in
+              let body = flat @@ Seplist.to_sep_list member member_sep mutual_sep in
+              Output.flat [ from_string "mutual\n"; body; from_string "\nend" ]
             else
               let body = flat @@ Seplist.to_sep_list type_def_indexed and_sep mutual_sep in
               Output.flat [ from_string "mutual\ninductive"; body; from_string "\nend" ]
@@ -7780,12 +7808,15 @@ type pat_style = FunParam | MatchArm
           else
             emp  (* All were abbreviations *)
         in
-        (* Generate accessor functions for record types in the mutual block.
-           Lean 4 doesn't create .field projectors for inductives in mutual blocks,
-           so we emit explicit defs to enable dot notation. *)
+        (* Accessor functions for the records that are still single-constructor
+           inductives (those in a block whose members have different numbers
+           of type parameters, see mutual_block_records_as_inductives): an
+           inductive has no field projections, so dot notation needs these
+           defs. A record emitted as a structure has Lean's projections, under
+           the same names. *)
         let accessor_defs = flat @@ List.filter_map (fun ((n0, _), ty_vars_raw, path, ty, _) ->
           match ty with
-            | Te_record (_, _, fields, _) ->
+            | Te_record (_, _, fields, _) when lean_record_is_inductive path ->
               let n = B.type_path_to_name n0 path in
               let type_name = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n)) in
               let tv_decl = String.concat "" @@ List.map (fun tv ->
@@ -8221,20 +8252,27 @@ type pat_style = FunParam | MatchArm
               i; space; concat_str " " ts_out
             ]
     (* The fields of a record, one per line, with the author's comments:
-       a field's leading comments (in its name's skips, after a line break)
+       the comments at the opening `<|` above the first field; a field's
+       leading comments (in its name's skips, after a line break)
        on their own lines above it; comments after its type (before the `;`,
        or after the `;` on the same line) at the end of its line; comments
        before the closing `|>` after the last field. *)
     and record_fields_with_comments ty fields =
       let rskips = match ty with Te_record (_, _, _, sk) -> sk | _ -> None in
+      (* the comments before and at the opening `<|` lead the first field *)
+      let open_comments = match ty with
+        | Te_record (s1, s2, _, _) ->
+          List.concat_map (fun sk -> let (t, l) = split_skip_comments sk in t @ l) [s1; s2]
+        | _ -> [] in
       let (_, pairs) = Seplist.to_pair_list None fields in
       let items = Array.of_list (List.map fst pairs) in
       let seps = Array.of_list (List.map snd pairs) in
       let k = Array.length items in
       let trail = Array.make (k + 1) [] and lead = Array.make (k + 1) [] in
+      lead.(0) <- open_comments;
       Array.iteri (fun i ((n, _), _, _, _) ->
           let (t, l) = split_skip_comments (Name.get_lskip n) in
-          if i > 0 then trail.(i - 1) <- trail.(i - 1) @ t else lead.(i) <- t;
+          if i > 0 then trail.(i - 1) <- trail.(i - 1) @ t else lead.(0) <- lead.(0) @ t;
           lead.(i) <- lead.(i) @ l)
         items;
       Array.iteri (fun i sk ->
@@ -9473,7 +9511,7 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
             let non_abbrev = List.filter (fun (_, _, _, ty, _) ->
               match ty with Te_abbrev _ -> false | _ -> true
             ) all in
-            if List.length non_abbrev > 1 then
+            if List.length non_abbrev > 1 && mutual_block_records_as_inductives non_abbrev then
               List.filter_map (fun (_, _, path, ty, _) ->
                 match ty with
                   | Te_record _ -> Some path

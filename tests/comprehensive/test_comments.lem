@@ -19,7 +19,7 @@ type colour =
   (* leading a constructor *)
   | Blue of nat
 
-type ctx = <|
+type ctx = (* between the equals sign and the record *) <|
   bits : nat;  (* trailing a field *)
   (* leading a field *)
   half : nat;
