@@ -948,3 +948,47 @@ nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identica
 `upstream-drift`: as in §11, left to the orchestrator (no pristine
 upstream Lem in the container; the slice's shared-code change is still
 the one added `Output` function).
+
+## 14. Erratum and audit close (2026-10-03, orchestrator)
+
+**Erratum to §8 (S2 census).** §8 says that, apart from the
+accessor-to-projection change, the S2 census found "types, constructors,
+recursors and every use site" identical. The pre-merge auditor's stricter
+census (`.tmp/audit/tools/Census2.lean`) disagrees in two respects:
+- It canonicalises hygienic names by the hash of their own definition.
+- It also compares definitional heights and flags.
+
+Measured on the before/after builds, it finds the S2 set plus one class
+that the §8 census could not see. The definitional height of
+`instLocatedStatement` and `mark_as_forloop_body` drops (`h=reg2→reg1`),
+because the accessors they unfold are now projections. Neither is a
+behaviour change. The §8 statement is corrected by this note; §8 itself is
+left as written.
+
+**Audit close.** Fresh Fable audit [USER 2026-10-03] "Fresh Fable audit,
+full range". Verdict: `arc/output-niceness` merge after fixes;
+`docs/lem-upstream-tray` merge.
+- The fixes are `131b922` and `0885bf6` (§13), by the S3-A worker.
+- The orchestrator reproduced MAJOR-1, MAJOR-2 and MINOR-2 before the fix,
+  with the auditor's driver.
+- After the fix, the orchestrator re-verified on `0885bf6`:
+```
+make exit 0   [tree clean after make]
+tokdiff: identical modulo comments/whitespace (170 files) / (194 files)   [vs c423e5c output]
+comment coverage: 62 of 4060 / 42 of 3833; duplicated 0 / 2; code after a multi-line comment: 0 / 0
+linksem census (erased) diff lines vs B: 0 / cerberus census (erased) diff lines vs B: 0   [both builds exit 0]
+lemlib exit 0
+=== Generation: 70 passed, 0 failed, 0 skipped ===
+  OK: Test_comments.lean: comments preserved, layout sound
+  OK: Test_layout.lean: layout sound (15 alternatives, 2 lets, 14 comments, width 100)
+  OK: Test_text_fidelity.lean Test_text_fidelity_auxiliary.lean: target_rep text intact
+Build completed successfully (202 jobs).
+parity: 48 probes: 38 OK, 10 XFAIL (registered, Lean side pinned), 0 FAIL
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+upstream-drift: 944 upstream files; 198 differ   [32 library code rows, all comments/whitespace only; cerberus-ocaml / linksem-ocaml absent]
+lean_keyword_probe: 178 core keywords checked
+```
+- The S3-A worker reported twice that the drift check could not run,
+  because no pristine upstream Lem existed. The orchestrator found the build
+  at `linksem-lean/deps/lem-upstream` (`Lem 3802cb0`) and ran the check.
+  The worker's report most likely reflects a sandbox read restriction.
