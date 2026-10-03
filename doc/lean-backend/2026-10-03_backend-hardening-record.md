@@ -423,3 +423,32 @@ today, renames or escapes only on collisions neither consumer has, or
 measurement, the escape/refuse split of item 2, the rename/refuse split of
 item 3, the primed fresh names, the reserved `lemRecBase`, the 127-field
 limit as a count, the item-7 disposition, the tests and this record.
+
+## Orchestrator verification of package A (2026-10-03)
+
+The orchestrator re-ran the gates independently on `f33cf4f`, from the
+frozen inputs (Cerberus `51a7402ce`, linksem `f54d119` source export):
+```
+base make exit 0 / arc make exit 0   [tree clean after make]
+cerb: 0 differing files / linksem: 0 differing files   [vs 5dfcd25's lem]
+lemlib exit 0  (Build completed successfully (39 jobs).)
+=== Generation: 72 passed, 0 failed, 0 skipped ===
+Build completed successfully (206 jobs).
+parity: 49 probes: 38 OK, 11 XFAIL (registered, Lean side pinned), 0 FAIL
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+upstream-drift: 944 upstream files; 198 differ   [library code rows all comments/whitespace only; cerberus-ocaml / linksem-ocaml absent]
+```
+
+**Rulings since the slice began**, all [USER 2026-10-03]:
+- #2 (the `BEq` bridge): "(a) 450/400 (Recommended)", landing as its "Own slice
+  after A and C". Design note: branch `docs/beq-lattice-design`, `39c4e0c`.
+  TODO 45 (`automatic` termination under the bridge) is retested in that
+  slice.
+
+**Attribution note.** "Agree, this is minor but lets get it right from now
+on": `Co-Authored-By` trailers name the model that actually did the work.
+- `f33cf4f` correctly says Claude Fable 5.1.
+- The earlier Fable-written output-niceness commits `ac5565b`, `131b922` and
+  `0885bf6` say Claude Opus 5.5, because the orchestrator's brief prescribed
+  that line. They are merged and pushed, so they stay as they are; this note
+  is the correction.
