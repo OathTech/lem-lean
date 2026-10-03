@@ -134,7 +134,7 @@ A relation whose premises reach the **ambient fuel** (a fuel-declared or fuel-li
 
 ### Machine Words and Fixed-Width Integers
 
-Lem's `mword` type (machine words parameterised by bit width) is mapped to Lean's `BitVec` type, with the width computed from the type-level size argument. All standard machine word operations (arithmetic, bitwise, comparison, conversion) have Lean target representations in the library. The `int32` and `int64` types are mapped to Lean's fixed-width `Int32` and `Int64` (`library/num.lem`), so their arithmetic wraps as OCaml's does; conversions into them (`int32FromInteger` and the like) wrap too, following Lem's prover-side definitions rather than the OCaml target's `Overflow` raise (ruled 2026-09-04; `doc/lean-backend/2026-09-03_exception-case-rulings.md`, D4 addendum).
+Lem's `mword` type (machine words parameterised by bit width) is mapped to Lean's `BitVec` type, with the width computed from the type-level size argument. All standard machine word operations (arithmetic, bitwise, comparison, conversion) have Lean target representations in the library. The `int32` and `int64` types are mapped to Lean's fixed-width `Int32` and `Int64` (`library/num.lem`), so their arithmetic wraps as OCaml's does; conversions into them (`int32FromInteger` and the like) wrap too, following Lem's prover-side definitions rather than the OCaml target's `Overflow` raise ([USER 2026-09-04]; `doc/lean-backend/2026-09-03_exception-case-rulings.md`, D4 addendum).
 
 ### Comparison Instances
 

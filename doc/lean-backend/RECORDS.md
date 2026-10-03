@@ -45,11 +45,12 @@ describe a design that is no longer current.
 - 2026-08-31 [Features record](2026-08-31_L1-features-record.md): supply
   lifting and `reader_consumer` built; a per-declaration fuel budget
   built, later removed as a magic value.
+- 2026-08-31 [Audit log](2026-08-31_arc-audit-log.md): the audit verdicts
+  for the fix-first and features records above and for the deletion
+  record below.
 - 2026-09-01 [Deletion record](2026-09-01_L2-deletion-record.md): the
   `runEffectful` axiom and the `effectful` mechanism deleted; the declare
   now refused.
-- 2026-08-31 [Audit log](2026-08-31_arc-audit-log.md): the audit verdicts
-  for the three records above.
 
 ## Instances, comparisons and names
 
@@ -61,8 +62,8 @@ describe a design that is no longer current.
   `_lemReader_`, …).
 - 2026-09-29 [`doc/notes/` Comparison dictionaries](../notes/2026-09-29_comparison-dictionaries-design.md):
   threading `[Ord a]`/`[BEq a]` binders guided by Lem's instances, and
-  loud comparison of function-typed fields; the fallback instances
-  deleted.
+  loud comparison of function-typed fields; the open-type-variable
+  fallback instances deleted.
 
 ## Parity with the OCaml target
 
@@ -152,8 +153,19 @@ describe a design that is no longer current.
 - 2026-10-03 [Output-niceness record](2026-10-03_output-niceness-arc-plan.md):
   a Lem developer's feedback on the output; comments carried over, the
   `lem:` marker, the layout pass, mutual records as structures, the
-  printer cleanup; packages C and D deferred (TODO items 27, 28); the
+  printer cleanup; package A (layout engine) approved and in progress (TODO item 42); packages C and D deferred (TODO items 27, 28); the
   upstream report tray scope.
+
+## When the front documents were checked
+
+- 2026-09-25: the public-readiness work checked README.md end to end
+  against `fd048db` ([follow-up evidence](2026-09-25_public-readiness-followup.md));
+  the manual chapter's banner records the same check. The quickstart
+  measurement then used OCaml 5.4.0, opam 2.1.5 and Lean 4.28.0.
+- 2026-10-03: README.md, DESIGN.md, TODO.md and this index were
+  reconciled by reading against the source at `2e54ff0`; no build was run
+  for that. The last recorded test-suite run is the one quoted in the
+  [output-niceness record](2026-10-03_output-niceness-arc-plan.md) §10.
 
 ## Elsewhere
 

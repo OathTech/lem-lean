@@ -91,7 +91,13 @@ The output is meant to be read next to its source.
   line, a comment's line breaks become spaces, because Lean's layout is
   column-sensitive and a multi-line comment could end a `|` arm early.
 - **The backend's own comments are marked.** Every comment the backend
-  writes starts with `lem:` (`/- lem: … -/`), for example
+  writes starts with `lem:` (`/- lem: … -/`), with one exception: inside
+  library code that is itself rendered as a comment (a definition kept
+  only as text behind its target representation), an unsupported set
+  comprehension prints as `(sorry /- Lean backend: set comprehension … not
+  supported -/)` (`src/lean_backend.ml:7379`, `:7385`); outside such a
+  comment the same construct is a generation error. Examples of the
+  marker:
   `/- lem: theorem NAME not translated -/`,
   `/- lem: replaced by its target representation: … -/`, and the
   explanatory blocks above derived comparisons and sizes.
@@ -416,7 +422,7 @@ would make the logic inconsistent (history note at the top of
 
 **Comparisons mirror OCaml's polymorphic compare.** `BEq`/`Ord` (and
 the set/map instance trio) are derived structurally with OCaml parity
-for EVERY type: nullary constructors rank below non-nullary,
+for every type the derivation can handle: nullary constructors rank below non-nullary,
 declaration order within each class, fields left-to-right, records by
 field declaration order. Lean's own `deriving Ord` ranks constructors
 by declaration index, which coincides with OCaml's rank unless a
@@ -425,9 +431,15 @@ those variants (single or mutual) are emitted through the backend's
 `ctor_rank_ocaml` derivation instead of `deriving` (two-target pin
 `tests/comprehensive/parity/probes/p_cmp_order.lem`). Comparisons at a
 type with an unconstrained type variable get `[Ord a]`/`[BEq a]` binders
-threaded by a fixpoint guided by Lem's instances; there are no fallback
-instances, so a missed demand is a compile error
-([design](../notes/2026-09-29_comparison-dictionaries-design.md)).
+threaded by a fixpoint guided by Lem's instances; there are no
+open-type-variable fallback instances, so a missed demand is a compile
+error ([design](../notes/2026-09-29_comparison-dictionaries-design.md)).
+A type for which no structural comparison can be derived (the residual
+names the reason: function-typed fields, or a mutual sibling reached
+under a type head other than `list`/`maybe`/`either`/tuple) gets a
+loud residual `BEq`/`Ord` instance at priority `low` whose methods call
+`failwithI "Lean backend: comparison residual: …"`; it fails only if a
+comparison reaches it (`src/lean_backend.ml`, around `:8815-8875`).
 Function-typed positions are compared structurally with
 `lemFunctionalCompare`/`lemFunctionalBeq`, which fail loudly with
 OCaml's message `compare: functional value` when they reach a closure.

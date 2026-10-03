@@ -1,13 +1,8 @@
 # The Lean backend for Lem
 
-**What was checked when.** The public-readiness review checked this page
-end to end against `fd048db` on 2026-09-25
-([evidence](2026-09-25_public-readiness-followup.md)). On 2026-10-03 it
-was reconciled by reading against the source at `2e54ff0`; that
-reconciliation ran no build. The last recorded test-suite run is the one
-quoted in the [output-niceness record](2026-10-03_output-niceness-arc-plan.md)
-§10. This is an early experimental backend, not a general correctness
-proof.
+Last reconciled with the source at `2e54ff0` (2026-10-03); what was
+checked when is in [RECORDS.md](RECORDS.md#when-the-front-documents-were-checked).
+This is an early experimental backend, not a general correctness proof.
 
 This fork adds a **Lean 4 backend** to [Lem](https://github.com/rems-project/lem):
 `lem -lean` compiles Lem definitions to Lean 4 source that builds
@@ -42,8 +37,7 @@ unverified. Prerequisites are Git, Bash, GNU make/coreutils/diffutils,
 a C toolchain, opam 2, and elan with the toolchain in `lean-lib/lean-toolchain` installed
 (Lean 4.32.2, the toolchain Cerberus uses; record:
 [linksem findings](2026-09-28_linksem-findings.md), "Toolchain move to
-Lean 4.32.2"). The 2026-09-25 quickstart measurement used OCaml 5.4.0,
-opam 2.1.5 and Lean 4.28.0, the pin at that time. Package constraints are in `opam`. Public repository/ref
+Lean 4.32.2"). Package constraints are in `opam`. Public repository/ref
 availability and a fresh dependency download remain operator checks in
 the cleanup evidence; offline tests used preinstalled dependencies.
 
