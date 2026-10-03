@@ -239,7 +239,7 @@ def dest_init { a : Type } (l : List a) : Option (List a × a) :=
 /- [findIndices P l] returns the indices of all elements of list [l] that satisfy predicate [P]. 
    Counting starts with 0, the result list is sorted ascendingly -/
 
-def findIndices_aux { a : Type } (i :Nat) (P : a → Bool) (l : List a) : List Nat :=
+def findIndices_aux { a : Type } (i : Nat) (P : a → Bool) (l : List a) : List Nat :=
   match l with
   | [] => ([] : List Nat)
   | x :: xs => (lem_if P x then i :: findIndices_aux (i + 1) P xs else findIndices_aux (i + 1) P xs)
@@ -612,7 +612,7 @@ val fold_left2 : forall 'a 'b 'c. ('a -> 'b -> 'c -> 'a) -> 'a -> list 'b -> lis
 val fold_right2 : forall 'a 'b 'c. ('a -> 'b -> 'c -> 'c) -> list 'a -> list 'b -> 'c -> 'c
 
 
-/ - now maybe result and called lookup - /
+/- now maybe result and called lookup -/
 val assoc : forall 'a 'b. 'a -> list ('a * 'b) -> 'b
 let inline {ocaml} assoc = Ocaml.List.assoc
 

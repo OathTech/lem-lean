@@ -1353,8 +1353,15 @@ let collect_cr_simple_import (is_library : bool) (id_str : string) =
          "UInt8"; "UInt16"; "UInt32"; "UInt64"; "USize";
          "Int8"; "Int16"; "Int32"; "Int64"; "ISize";
          "LemUnsupported"] in
-      if String.length mod_name > 0 &&
-         Char.uppercase_ascii mod_name.[0] = mod_name.[0] &&
+      (* a module name: an upper-case letter, then letters, digits, `_`
+         (a rep such as `(fun (p : Nat × Nat) => (p).1)` has a dot too, and
+         its prefix is no module; audit fixes 2026-10-03) *)
+      let is_module_name m =
+        String.length m > 0 && m.[0] >= 'A' && m.[0] <= 'Z'
+        && String.for_all (fun c ->
+            (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '_') m
+      in
+      if is_module_name mod_name &&
          not (List.mem mod_name prelude_namespaces) &&
          not (List.mem mod_name !St.collected_imports) then
         St.collected_imports := mod_name :: !St.collected_imports
@@ -3301,15 +3308,24 @@ let undo_latin1_reading (s : string) : string =
   else if decode 0 && valid_utf8 (Buffer.contents out) then Buffer.contents out
   else s
 
-let wrap_lean_comment x =
-  let s = Ulib.Text.to_string x in
+(* The text of a comment: a `/-` or `-/` written in it would open or close
+   a Lean comment at the wrong depth, so a space is put between the two
+   characters. Only the author's text is escaped; a comment nested in a
+   comment is emitted with real delimiters (Lean's comments nest). *)
+let escape_lean_comment_text (s : string) : string =
   let b = Buffer.create (String.length s + 8) in
   String.iteri (fun i c ->
       Buffer.add_char b c;
       let next = if i + 1 < String.length s then s.[i + 1] else ' ' in
       if (c = '/' && next = '-') || (c = '-' && next = '/') then Buffer.add_char b ' ')
     s;
-  let body = Buffer.contents b in
+  Buffer.contents b
+
+(* `/- body -/`, padded so that the result is neither a docstring (`/--`)
+   nor a module doc (`/-!`), and so that a body starting or ending with `-`
+   cannot pair with a delimiter. *)
+let wrap_lean_comment x =
+  let body = Ulib.Text.to_string x in
   let is_space c = c = ' ' || c = '\n' || c = '\r' in
   let pre = if body <> "" && is_space body.[0] then "/-" else "/- " in
   let post = if body <> "" && is_space body.[String.length body - 1] then "-/" else " -/" in
@@ -3412,11 +3428,27 @@ let normalize_spacing (s : string) : string =
         end else None
   in
   (* `export T (C)` and `open N (x)` need their parentheses: is position i
-     on a line that starts with one of those commands? *)
+     on a line whose first word is one of those commands? *)
   let in_export_or_open i =
     let ls = try String.rindex_from s i '\n' + 1 with Not_found -> 0 in
+    let rec skip k = if k < n && s.[k] = ' ' then skip (k + 1) else k in
+    let ls = skip ls in
     let starts p = let m = String.length p in ls + m <= n && String.sub s ls m = p in
     starts "export " || starts "open "
+  in
+  (* s.[i] = '\'': the index of the closing quote if a character literal
+     starts here — an escape (`'\n'`, `'\''`, `'\x41'`) or one UTF-8
+     character of one to four bytes (`'a'`, `'×'`) — else None. *)
+  let char_literal_end i =
+    if i + 1 >= n then None
+    else if s.[i + 1] = '\\' then
+      (try Some (String.index_from s (i + 3) '\'') with Not_found | Invalid_argument _ -> None)
+    else begin
+      let c = Char.code s.[i + 1] in
+      let len = if c < 0x80 then 1 else if c land 0xE0 = 0xC0 then 2
+        else if c land 0xF0 = 0xE0 then 3 else if c land 0xF8 = 0xF0 then 4 else 1 in
+      if i + 1 + len < n && s.[i + 1 + len] = '\'' then Some (i + 1 + len) else None
+    end
   in
   let rec copy_until_string_end i =
     (* s.[i-1] was the opening quote *)
@@ -3452,16 +3484,33 @@ let normalize_spacing (s : string) : string =
           let k = ref (String.length line) in
           while !k > 0 && line.[!k - 1] = ' ' do decr k done;
           Buffer.add_string b (String.sub line 0 !k); go j
-      | '\'' when (i = 0 || not (is_ident_char s.[i - 1]))
-                  && i + 2 < n && (s.[i + 1] = '\\' || s.[i + 2] = '\'') ->
+      | '\'' when (i = 0 || not (is_ident_char s.[i - 1])) && char_literal_end i <> None ->
+          (* a character literal is copied as it is *)
           flush_ws '\'';
-          let j = try String.index_from s (if s.[i + 1] = '\\' then i + 3 else i + 2) '\'' with Not_found -> n - 1 in
+          let j = match char_literal_end i with Some j -> j | None -> assert false in
           Buffer.add_string b (String.sub s i (j - i + 1)); go (j + 1)
-      | '\xC3' when i + 1 < n && s.[i + 1] = '\x97' ->
-          (* `×`: one space on each side (the one after is dropped before `)`) *)
+      | '\xC2' when i + 1 < n && s.[i + 1] = '\xAB' ->
+          (* `«…»`, one identifier whatever it contains: copied as it is *)
+          flush_ws '\xC2';
+          let rec close k = if k + 1 >= n then n else if s.[k] = '\xC2' && s.[k + 1] = '\xBB' then k + 2 else close (k + 1) in
+          let j = close (i + 2) in
+          Buffer.add_string b (String.sub s i (j - i)); go j
+      | '\xC3' when i + 1 < n && s.[i + 1] = '\x97' && not (i + 2 < n && s.[i + 2] = '\'') ->
+          (* `×`: one space on each side (the one after is dropped before `)`);
+             `×'` is another token and is left alone *)
           if Buffer.length pending_spaces = 0 && !newlines = 0 then Buffer.add_char pending_spaces ' ';
           flush_ws '\xC3'; Buffer.add_string b "\xC3\x97";
           Buffer.add_char pending_spaces ' '; go (i + 2)
+      | ':' when not (i + 1 < n && (s.[i + 1] = ':' || s.[i + 1] = '=')) && not (i > 0 && s.[i - 1] = ':') ->
+          (* a lone `:` (a binder's or an ascription's) has a space on each
+             side: `(x :(Nat × Nat))` → `(x : (Nat × Nat))` *)
+          let prev = last_char () in
+          if Buffer.length pending_spaces = 0 && !newlines = 0 && prev <> ' ' && prev <> '(' && prev <> '[' && prev <> '{'
+          then Buffer.add_char pending_spaces ' ';
+          flush_ws ':'; Buffer.add_char b ':';
+          if i + 1 < n && (is_ident_char s.[i + 1] || s.[i + 1] = '(' || s.[i + 1] = '[' || s.[i + 1] = '{')
+          then Buffer.add_char pending_spaces ' ';
+          go (i + 1)
       | '(' when not (in_export_or_open i)
                  && (match atom_in_parens i with Some _ -> true | None -> false) ->
           (* `( atom )` is the atom: a name (possibly qualified) or a numeral *)
@@ -3471,7 +3520,8 @@ let normalize_spacing (s : string) : string =
              flush_ws a.[0];
              if is_ident_char prev then Buffer.add_char b ' ';
              Buffer.add_string b a;
-             if j < n && is_ident_char s.[j] then Buffer.add_char pending_spaces ' ';
+             (* a following `.` stays attached: `(x).1` is `x.1` *)
+             if j < n && is_ident_char s.[j] && s.[j] <> '.' then Buffer.add_char pending_spaces ' ';
              go j
            | None -> assert false)
       | c -> flush_ws c; Buffer.add_char b c; go (i + 1)
@@ -3598,8 +3648,19 @@ let sanitize_tabs r =
 
 let rec lean_comment_to_rope =
   function
-    | Ast.Chars r -> sanitize_tabs (Ulib.Text.of_string (undo_latin1_reading (Ulib.Text.to_string r)))
-    | Ast.Comment coms -> wrap_lean_comment (Ulib.Text.concat (r"") (List.map lean_comment_to_rope coms))
+    | Ast.Chars r ->
+      sanitize_tabs (Ulib.Text.of_string (escape_lean_comment_text (undo_latin1_reading (Ulib.Text.to_string r))))
+    | Ast.Comment coms ->
+      (* a nested comment keeps its nesting; a `-` right before its `/-`
+         would read as `-/`, so a space separates them *)
+      let body = List.fold_left (fun acc c ->
+          let piece = lean_comment_to_rope c in
+          let acc_s = Ulib.Text.to_string acc in
+          let needs_space = (match c with Ast.Comment _ -> true | Ast.Chars _ -> false)
+                            && acc_s <> "" && acc_s.[String.length acc_s - 1] = '-' in
+          Ulib.Text.(^^^) (if needs_space then Ulib.Text.(^^^) acc (r" ") else acc) piece)
+          (r"") coms in
+      wrap_lean_comment body
 
 let lex_skip =
   function

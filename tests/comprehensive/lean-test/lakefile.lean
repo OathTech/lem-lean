@@ -18,6 +18,8 @@ lean_lib LemComprehensiveTest where
     `Test_collections, `Test_collections_auxiliary,
     `Test_comments, `Test_comments_auxiliary,  -- comments survive; layout sound (output-niceness S1)
     `Test_layout, `Test_layout_auxiliary,  -- long declarations broken over lines (output-niceness S3-A)
+    `Test_text_fidelity, `Test_text_fidelity_auxiliary,  -- target_rep text intact through the passes (audit fixes)
+    `TestTextFidelityHelper,  -- hand-written: `«a b»` for test_text_fidelity
     `Test_contextual_keywords, `Test_contextual_keywords_auxiliary,
     `Test_contextual_keywords_lemMeasureProofs,  -- hand-written proof of its measured declare's obligation (fuel-measure slice)
     `Test_cross_field_access,

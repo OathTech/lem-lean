@@ -128,27 +128,33 @@ and fits w (s : sdoc Seq.t) =
     | Seq.Cons (SLine _, _) -> true
     | Seq.Cons (SFail, _) -> false
 
-(* Render [d] at indentation [indent] into lines (no trailing spaces, no
-   whitespace-only lines). *)
+(* Render [d] at indentation [indent] into the lines the printer makes. A
+   line is what lies between two of the printer's own breaks; the text of a
+   token is copied as it is, line breaks inside it included (a multi-line
+   comment or string literal), so only the printer's own separators are
+   trimmed: a line's trailing spaces (a token never ends in a space) and a
+   line holding nothing but indentation. *)
 let render ~width:w ~indent d : string list =
-  let b = Buffer.create 1024 in
-  Buffer.add_string b (String.make indent ' ');
-  let newline i = Buffer.add_char b '\n'; Buffer.add_string b (String.make i ' ') in
+  let lines = ref [] in
+  let cur = Buffer.create 256 in
+  let flush_line () =
+    let s = Buffer.contents cur in
+    let n = ref (String.length s) in
+    while !n > 0 && s.[!n - 1] = ' ' do decr n done;
+    if !n > 0 then lines := String.sub s 0 !n :: !lines;
+    Buffer.clear cur
+  in
+  Buffer.add_string cur (String.make indent ' ');
   let rec go s = match s () with
     | Seq.Nil -> ()
-    | Seq.Cons (SText t, rest) -> Buffer.add_string b t; go rest
-    | Seq.Cons (SLine i, rest) -> newline i; go rest
-    | Seq.Cons (SFail, rest) -> newline indent; go rest  (* cannot happen outside a lookahead *)
+    | Seq.Cons (SText t, rest) -> Buffer.add_string cur t; go rest
+    | Seq.Cons (SLine i, rest) -> flush_line (); Buffer.add_string cur (String.make i ' '); go rest
+    | Seq.Cons (SFail, rest) ->  (* cannot happen outside a lookahead *)
+      flush_line (); Buffer.add_string cur (String.make indent ' '); go rest
   in
   go (be w indent [ (indent, Break_m, d) ]);
-  let rstrip l =
-    let n = ref (String.length l) in
-    while !n > 0 && l.[!n - 1] = ' ' do decr n done;
-    String.sub l 0 !n
-  in
-  String.split_on_char '\n' (Buffer.contents b)
-  |> List.map rstrip
-  |> List.filter (fun l -> l <> "")
+  flush_line ();
+  List.rev !lines
 
 (* ---------------------------------------------------------------------- *)
 (* 2. Lexer (the conventions of lean_backend.ml's normalize_layout)         *)
@@ -168,6 +174,21 @@ type tok = {
 let is_ident_char c =
   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
   || c = '_' || c = '\'' || c = '.' || Char.code c >= 128
+
+(* s.[i] = '\'': the index of the closing quote if a character literal
+   starts here — an escape or one UTF-8 character of one to four bytes — else
+   None (the rule of lean_backend.ml's normalize_spacing) *)
+let char_literal_end (s : string) i =
+  let n = String.length s in
+  if i + 1 >= n then None
+  else if s.[i + 1] = '\\' then
+    (try Some (String.index_from s (i + 3) '\'') with Not_found | Invalid_argument _ -> None)
+  else begin
+    let c = Char.code s.[i + 1] in
+    let len = if c < 0x80 then 1 else if c land 0xE0 = 0xC0 then 2
+      else if c land 0xF0 = 0xE0 then 3 else if c land 0xF8 = 0xF0 then 4 else 1 in
+    if i + 1 + len < n && s.[i + 1 + len] = '\'' then Some (i + 1 + len) else None
+  end
 
 let lex (s : string) : tok array =
   let n = String.length s in
@@ -209,11 +230,15 @@ let lex (s : string) : tok array =
       let j = (try String.index_from s !i '\n' with Not_found -> n) in
       push LineComment !i j; i := j
     end
-    else if c = '\'' && (!i = 0 || not (is_ident_char s.[!i - 1]))
-            && !i + 2 < n && (s.[!i + 1] = '\\' || s.[!i + 2] = '\'') then begin
-      let j = (try String.index_from s (if s.[!i + 1] = '\\' then !i + 3 else !i + 2) '\''
-               with Not_found -> n - 1) in
+    else if c = '\'' && (!i = 0 || not (is_ident_char s.[!i - 1])) && char_literal_end s !i <> None then begin
+      let j = match char_literal_end s !i with Some j -> j | None -> assert false in
       push Word !i (j + 1); i := j + 1
+    end
+    else if c = '\xC2' && !i + 1 < n && s.[!i + 1] = '\xAB' then begin
+      (* `«…»` is one identifier, spaces inside included *)
+      let rec close k = if k + 1 >= n then n else if s.[k] = '\xC2' && s.[k + 1] = '\xBB' then k + 2 else close (k + 1) in
+      let j = close (!i + 2) in
+      push Word !i j; i := j
     end
     else if c = '(' || c = '[' || c = '{' then (push Open !i (!i + 1); incr i)
     else if c = ')' || c = ']' || c = '}' then (push Close !i (!i + 1); incr i)
@@ -293,8 +318,13 @@ let decl_head l =
 let ends_with_where l =
   match List.rev (code_toks l) with t :: _ -> t.s = "where" | [] -> false
 
+(* a command line: `#eval`, `#check`, … (the `assert`s lem emits are
+   `#eval do` blocks) *)
+let is_hash_command l =
+  match l.toks with t :: _ -> t.s <> "" && t.s.[0] = '#' | [] -> false
+
 let is_boundary l =
-  is_blank l || comment_only l
+  is_blank l || comment_only l || is_hash_command l
   || (match l.toks with
       | t :: _ -> t.s = "@" || List.mem t.s decl_kws || List.mem t.s modifier_kws
                   || List.mem t.s other_cmds
@@ -314,6 +344,14 @@ let depth_delta l =
 let split_units (lines : line list) : unit_ list =
   let rec go acc = function
     | [] -> List.rev acc
+    | l :: rest when is_hash_command l ->
+      (* a `#` command and the indented lines of its block are copied *)
+      let rec take acc = function
+        | l' :: rest' when l'.indent > l.indent && not (is_blank l') -> take (Verbatim l' :: acc) rest'
+        | rest' -> (acc, rest')
+      in
+      let acc', rest' = take (Verbatim l :: acc) rest in
+      go acc' rest'
     | l :: rest when decl_head l <> None && not (ends_with_where l) ->
       (* The declaration's body: every following line that is not the start
          of another item. A blank or comment-only line is inside the body if
@@ -518,7 +556,9 @@ let parse_unit (toks : tok array) : doc =
       else raise (Bail ("keyword " ^ kw))
     | (Word | Str), _ ->
       advance ();
-      item ~sep:(sep_of t) ~colon:(t.s = ":") (Text t.s)
+      (* a token with line breaks inside (a string literal) is copied as it
+         is and, like a multi-line comment, never fits on a line *)
+      item ~sep:(sep_of t) ~colon:(t.s = ":") (if has_nl t.s then MLText t.s else Text t.s)
     | _ -> raise (Bail ("unexpected " ^ t.s))
   and parse_bracket t =
     let close = if t.s = "(" then ")" else "]" in
@@ -750,36 +790,43 @@ let parse_unit (toks : tok array) : doc =
 (* 5. Driver                                                               *)
 (* ---------------------------------------------------------------------- *)
 
-(* A unit left as it was, from its tokens: the text before this pass. The
-   backend's two additions for the pass are undone here, so such a unit is
-   exactly the text that built before the pass: a multi-line comment that
-   shares a line with code is folded onto one line, and a line that starts
-   with a comment followed by code (a comment the backend set off with a
-   line break for the pass) is joined to the line before it. *)
-let verbatim_lines (ls : line list) : string list =
-  let out = ref [] in
-  let add_line s = out := s :: !out in
-  let render_line first_of_unit (l : line) =
+(* A unit left as it was: each line's original text, byte for byte, except
+   for the two things the backend does only for this pass, which are undone
+   so that the unit is the text that built before the pass:
+   - a multi-line comment followed by another token on its line (the
+     backend no longer folds the comments inside expressions) is folded
+     onto one line, as it was before S3-A;
+   - a line at column 0 that starts with a comment followed by code is the
+     backend's marker for "this comment followed a line break in the
+     source" (`inline_comments`); it is joined to the line before it, as
+     the text was without the marker.
+   Nothing else is changed: no re-spacing, no other join. *)
+let verbatim_lines (s : string) (ls : line list) : string list =
+  let line_text (l : line) =
     let b = Buffer.create 256 in
-    let rec go first = function
+    let pos = ref l.start in
+    let rec go = function
       | [] -> ()
-      | t :: rest ->
-        if not first && t.ws then Buffer.add_char b ' ';
-        let alone = first && rest = [] in
-        Buffer.add_string b (if t.k = Comment && has_nl t.s && not alone then fold_comment t.s else t.s);
-        go false rest
+      | (t : tok) :: rest ->
+        Buffer.add_string b (String.sub s !pos (t.pos - !pos));
+        Buffer.add_string b (if t.k = Comment && has_nl t.s && rest <> [] then fold_comment t.s else t.s);
+        pos := t.pos + String.length t.s;
+        go rest
     in
-    go true l.toks;
-    let s = Buffer.contents b in
-    let joins = (not first_of_unit)
-                && (match l.toks with
-                    | t :: (_ :: _ as rest) -> t.k = Comment && List.exists (fun x -> x.k <> Comment) rest
-                    | _ -> false) in
-    match !out with
-    | prev :: rest when joins -> out := (prev ^ " " ^ s) :: rest
-    | _ -> add_line (String.make l.indent ' ' ^ s)
+    go l.toks;
+    Buffer.add_string b (String.sub s !pos (l.stop_ - !pos));
+    Buffer.contents b
   in
-  List.iteri (fun i l -> render_line (i = 0) l) ls;
+  let out = ref [] in
+  List.iteri (fun i l ->
+      let text = line_text l in
+      let marker = i > 0 && l.indent = 0
+                   && (match l.toks with
+                       | t :: (_ :: _ as rest) -> t.k = Comment && List.exists (fun x -> x.k <> Comment) rest
+                       | _ -> false) in
+      match !out with
+      | prev :: rest when marker -> out := (prev ^ " " ^ text) :: rest
+      | _ -> out := text :: !out) ls;
   List.rev !out
 
 let debug_bail = Sys.getenv_opt "LEM_LEAN_LAYOUT_DEBUG" <> None
@@ -799,7 +846,7 @@ let reflow ?(width = 100) (s : string) : string =
         prerr_endline (Printf.sprintf "lean layout: left as is (%s): %s" why
                          (String.sub s (List.hd ls).start
                             (min 80 ((List.hd ls).stop_ - (List.hd ls).start))));
-      List.iter add_line (verbatim_lines ls)
+      List.iter add_line (verbatim_lines s ls)
   in
   List.iter (function
       | Verbatim l -> add_line (String.sub s l.start (l.stop_ - l.start))

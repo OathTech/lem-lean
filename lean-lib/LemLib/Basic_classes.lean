@@ -128,7 +128,7 @@ def genericCompare { a : Type } (less : a → a → Bool) (equal : a → a → B
     LemOrdering :=
   lem_if less x y then LemOrdering.LT else lem_if equal x y then LemOrdering.EQ else LemOrdering.GT
 /-
-/ - compare should really be a total order - /
+/- compare should really be a total order -/
 lemma ord_OK_1: (
   (forall x y. (compare x y = EQ) <-> (compare y x = EQ)) &&
   (forall x y. (compare x y = LT) <-> (compare y x = GT)))

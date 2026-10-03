@@ -14,7 +14,7 @@ LAKE = "$(CAPPED)" lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-comments lean-layout lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
+.PHONY: all lean lean-comments lean-layout lean-text-fidelity lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -23,7 +23,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-version lean-constants-required lean-parity-admission lean-generate lean-comments lean-layout lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+lean: lean-version lean-constants-required lean-parity-admission lean-generate lean-comments lean-layout lean-text-fidelity lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
 
 # The reserved-name list is required (linksem 2026-09-28, B10): with the
 # library's lean_constants missing, lem must refuse to generate Lean (it used
@@ -128,6 +128,14 @@ lean-comments: lean-generate
 lean-layout: lean-generate
 	@echo "=== Layout (gate) ==="
 	@python3 check_layout.py Test_layout.lean
+
+# Text that must come through the spacing and layout passes byte for byte
+# (pre-merge audit of output-niceness, 2026-10-03): `×'`, `(p).1`, `'×'`,
+# `«a b»`, `#eval do` blocks, all reached through target_rep text
+# (test_text_fidelity.lem; rules T1-T6 in check_text_fidelity.py).
+lean-text-fidelity: lean-generate
+	@echo "=== Target_rep text fidelity (gate) ==="
+	@python3 check_text_fidelity.py Test_text_fidelity.lean Test_text_fidelity_auxiliary.lean
 
 lean-no-fuel-numerals:
 	@echo "=== No fuel numerals in LemLib or generated code (gate) ==="

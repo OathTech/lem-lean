@@ -123,7 +123,7 @@ let set_case s c_empty c_sing c_else =
 /- ----------------------- -/
 
 /- lem: replaced by its target representation:  
-def  filter  {a : Type} [SetType a]  (P : a → Bool) (s : Pset a)  : Pset a := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+def  filter  {a : Type} [SetType a]  (P : a → Bool) (s : Pset a)  : Pset a := (sorry /- lem: set comprehension binding not supported -/) -/
 /- ----------------------- -/
 /- partition               -/
 /- ----------------------- -/
@@ -153,7 +153,7 @@ def splitMember { a : Type } [SetType a] [Ord0 a] (p : a) (s : Pset a) : (Pset a
 
 /- lem: replaced by its target representation: 
 
-def  bigunion  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+def  bigunion  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a := (sorry /- lem: set comprehension binding not supported -/) -/
 /- ------------------------ -/
 /- big intersection         -/
 /- ------------------------ -/
@@ -182,7 +182,7 @@ def bigintersection { a : Type } [SetType a] (bs : Pset (Pset a)) : Pset a :=
 /- ------------------------ -/
 
 /- lem: replaced by its target representation:  /- before image -/
-def  map  {a b : Type} [SetType a] [SetType b]  (f : a → b) (s : Pset a)  : Pset b := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+def  map  {a b : Type} [SetType a] [SetType b]  (f : a → b) (s : Pset a)  : Pset b := (sorry /- lem: set comprehension binding not supported -/) -/
 /- ------------------------ -/
 /- bigunionMap              -/
 /- ------------------------ -/
@@ -230,14 +230,14 @@ let inline findMax = findMinBy (>=) (=)
 
 /- lem: replaced by its target representation: 
 
-def  sigma  {a b : Type} [SetType a] [SetType b]  (sa : Pset a) (sb : a → Pset b)  : Pset (a ×b) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+def  sigma  {a b : Type} [SetType a] [SetType b]  (sa : Pset a) (sb : a → Pset b)  : Pset (a ×b) := (sorry /- lem: set comprehension binding not supported -/) -/
 /- ------------------------ -/
 /- cross product            -/
 /- ------------------------ -/
 
 /- lem: replaced by its target representation: 
 
-def  cross  {a b : Type} [SetType a] [SetType b]  (s1 : Pset a) (s2 : Pset b)  : Pset (a ×b) := (sorry /- Lean backend: set comprehension binding not supported -/) -/
+def  cross  {a b : Type} [SetType a] [SetType b]  (s1 : Pset a) (s2 : Pset b)  : Pset (a ×b) := (sorry /- lem: set comprehension binding not supported -/) -/
 /- ------------------------ -/
 /- finite                   -/
 /- ------------------------ -/

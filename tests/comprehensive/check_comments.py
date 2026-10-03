@@ -13,9 +13,11 @@ Fails (exit 1, naming each violation) if
       ends (Lean's layout is column-sensitive: the next token would sit at
       the comment's last column, e.g. a `|` that ends the enclosing match);
   C4  GENERATED has a whitespace-only line or two consecutive blank lines.
-Comments are compared by their alphanumeric text, so the change of
-delimiters, the comment escaping and the folding of line breaks inside
-one-line expressions do not matter.
+A comment of SOURCE is present when a comment of GENERATED — a nested one
+counts on its own — has exactly the same alphanumeric text; so the change
+of delimiters, the escaping and line breaks do not matter, and a comment
+whose text merely occurs inside another comment does not count (the
+pre-merge audit's substring plant, 2026-10-03).
 """
 import re
 import sys
@@ -47,19 +49,22 @@ def lem_comments(s):
 
 
 def lean_comments(s):
-    """Top-level /- ... -/ comments of a .lean file: (start, end, text)."""
+    """Every /- ... -/ comment of a .lean file, nested ones included, as
+    (start, end, text) in order of their start."""
     out, i, n = [], 0, len(s)
     while i < n:
         if s.startswith('/-', i):
-            d, j = 1, i + 2
-            while j < n and d:
+            stack, j = [i], i + 2
+            while j < n and stack:
                 if s.startswith('/-', j):
-                    d, j = d + 1, j + 2
+                    stack.append(j)
+                    j += 2
                 elif s.startswith('-/', j):
-                    d, j = d - 1, j + 2
+                    k = stack.pop()
+                    j += 2
+                    out.append((k, j, s[k + 2:j - 2]))
                 else:
                     j += 1
-            out.append((i, j, s[i + 2:j - 2]))
             i = j
         elif s[i] == '"':
             j = i + 1
@@ -78,14 +83,14 @@ def norm(t):
 def main(src_path, gen_path):
     src = open(src_path, encoding='utf-8').read()
     gen = open(gen_path, encoding='utf-8').read()
-    gcs = lean_comments(gen)
+    gcs = sorted(lean_comments(gen))
     texts = [norm(t) for (_, _, t) in gcs]
     errors = []
     for line, c in lem_comments(src):
         k = norm(c)
         if not k:
             continue
-        hits = sum(1 for t in texts if k in t)
+        hits = sum(1 for t in texts if k == t)
         if 'KNOWN-LOST' in c:
             if hits:
                 errors.append(f'C1 {src_path}:{line}: comment tagged KNOWN-LOST now appears; remove the tag')
@@ -99,11 +104,21 @@ def main(src_path, gen_path):
             rest = gen[j:e if e >= 0 else len(gen)].strip()
             if rest and not rest.startswith('/-') and not rest.startswith('--'):
                 errors.append(f'C3 {gen_path}:{gen.count(chr(10), 0, j) + 1}: code after a multi-line comment: {rest[:40]!r}')
+    # C4 is about the layout of code: the lines inside a multi-line comment
+    # are the author's text and are copied as written (blank lines included)
+    in_comment = set()
+    for (i, j, t) in gcs:
+        if '\n' in t:
+            first = gen.count('\n', 0, i) + 1
+            for k in range(first + 1, first + t.count('\n') + 1):
+                in_comment.add(k)
     lines = gen.split('\n')
     for n, l in enumerate(lines, 1):
+        if n in in_comment:
+            continue
         if l and not l.strip():
             errors.append(f'C4 {gen_path}:{n}: whitespace-only line')
-        if n > 1 and not l and not lines[n - 2] and n < len(lines):
+        if n > 1 and not l and not lines[n - 2] and n < len(lines) and (n - 1) not in in_comment:
             errors.append(f'C4 {gen_path}:{n}: two consecutive blank lines')
     for e in errors:
         print('  FAIL:', e)
