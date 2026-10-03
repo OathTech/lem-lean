@@ -67,4 +67,6 @@ done
   echo '$ lem -lem -outdir out user.lem'
   (cd transform && "$LEM" -lem -outdir out user.lem); echo "[exit $?]"
 ) > transform/transcript.txt 2>&1
+# draft 23: comments before `and`, clause order (generation only)
+./andsep/run.sh > andsep/transcript.txt 2>&1
 echo "run-all.sh: done"

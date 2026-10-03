@@ -17,8 +17,9 @@ without an issue/PR URL; **Filed** = issue/PR URL recorded; **Closed** =
 upstream closure recorded. A pushed or prepared patch branch does not make
 a report Filed.
 
-Inventory (2026-10-03): 22 reports, **22 Draft, 0 Sent, 0 Filed, 0
-Closed**; two patch branches prepared, not pushed.
+Inventory (2026-10-03): 23 reports, **23 Draft, 0 Sent, 0 Filed, 0
+Closed**; two patch branches prepared, not pushed. Draft 23 was added
+later the same day (orchestrator finding).
 
 | Report | Recorded state | Submission evidence |
 |---|---|---|
@@ -44,6 +45,7 @@ Closed**; two patch branches prepared, not pushed.
 | [20-bigunionby-comparator-ignored-question.md](20-bigunionby-comparator-ignored-question.md) | Draft | No submission recorded |
 | [21-wordtohex-stub.md](21-wordtohex-stub.md) | Draft | No submission recorded |
 | [22-nat-int-63-bit-on-ocaml-note.md](22-nat-int-63-bit-on-ocaml-note.md) | Draft | No submission recorded |
+| [23-comments-before-and-dropped-in-mutual-definitions.md](23-comments-before-and-dropped-in-mutual-definitions.md) | Draft | No submission recorded |
 
 ## Ranking and triage (by upstream value) [AGENT]
 
@@ -76,6 +78,10 @@ agent for the operator to adjust.
 | 20 | OCaml `bigunionBy cmp` ignores `cmp` | UNCLEAR (question) | yes (behaviour as described; not a wrong value) | — |
 | 21 | `wordToHex`/`show` on machine words is a stub on OCaml/Isabelle/Coq | INTENDED GAP | yes | — |
 | 22 | `nat`/`int` 63-bit and silently wrapping on OCaml (a `nat` can be negative) | INTENDED GAP (note) | yes | — |
+| 23 | Comments before `and` in `let rec … and …` dropped (Coq always; Isabelle, HOL4 `-hol_remove_matches` when matches are lifted, which also reorders clauses) | TRUE BUG (minor, output fidelity) | yes | — |
+
+Draft 23 was added after the ranking and is numbered last; by value it
+belongs with the minor true bugs (14–16) [AGENT].
 
 Every reproducer reproduced. "Reproduced" means the upstream `3802cb0`
 build shows the behaviour the draft describes; for 19 and 20 the drafts
@@ -96,8 +102,8 @@ number. The survey listed 16 numbered items (the five machine-word OCaml
 findings OM1–OM5 as separate items) plus the five archive-only ones,
 which is 21; the operator was told 16 "including the five archive-only
 ones". One grouping that gives 16, offered as a guess only: the 63-bit
-note left out and OM1–OM5 counted as one finding. This tray has 22
-drafts: those 16, plus OM1–OM5 split into five drafts (05–09, +4), the
+note left out and OM1–OM5 counted as one finding. This tray had 22
+drafts at that point (draft 23 came later, from a new finding): those 16, plus OM1–OM5 split into five drafts (05–09, +4), the
 63-bit note (22, +1), and one item the survey listed as ambiguous that
 proved to be an upstream defect (01, +1).
 
@@ -142,6 +148,7 @@ Considered, not upstream (no draft):
 | 19 | lem-lean mainline library-parity record §1 LP4 | — |
 | 21 | lem-lean mainline library-parity record §2 item 1 (LP5) | — |
 | 22 | Cerberus `lean_frontend/docs/upstream-tray/lem/README.md` (the 63-bit note); lem-lean `doc/lean-backend/2026-09-03_exception-case-rulings.md` X3/N4 | the Cerberus README keeps its note |
+| 23 | lem-lean orchestrator, 2026-10-03 (output-readability work), reported to this slice with the `test_and.lem` reproducer | — |
 
 The Cerberus and linksem `lem/01` drafts stay where they are, untouched
 ([USER 2026-10-03] Tray home: "lem-lean, copies stay"). If one of those

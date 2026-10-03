@@ -114,6 +114,7 @@ pushed.
 | 19–20 | 31-bit `int`/`nat` bitwise definitions; `bigunionBy` comparator | UNCLEAR |
 | 21 | `wordToHex` stub | INTENDED GAP |
 | 22 | 63-bit `nat`/`int` on OCaml | note |
+| 23 | Comments before `and` in mutual definitions dropped (Coq; Isabelle/HOL4 when matches are lifted) | TRUE BUG (minor) |
 
 ## 7. How this work was produced
 

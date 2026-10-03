@@ -20,6 +20,7 @@ the run on 2026-10-03 (`transcript-2026-10-03.txt`).
 | `genlist/` | 18 |
 | `bitwise/` | 19 |
 | `nat63/` | 22 |
+| `andsep/` | 23 (its own `run.sh`; needs only `LEM`) |
 
 ## Re-running
 
