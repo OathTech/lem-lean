@@ -121,5 +121,5 @@ This line is the whole fix.
 ## Provenance
 
 Found and analysed by AI agents (Claude, Anthropic) working under the
-direction and review of a human operator. Any filed issue or PR must say
+direction and review of a human operator. Any filed issue must say
 so (INDEX.md, "Provenance labelling").

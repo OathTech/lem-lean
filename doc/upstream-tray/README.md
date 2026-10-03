@@ -63,7 +63,8 @@ zarith 1.14. The OCaml runtime was upstream's `ocaml-lib`, compiled in a
 scratch directory from the same checkout (the generated `lem_*.ml` were
 first regenerated from upstream `library/` with upstream `lem` and found
 byte-identical). No fork code was involved in any run, except the
-patch-branch checks, which use the branch builds and say so.
+checks of the fixes in drafts 01 and 03, which used local patched builds
+of `3802cb0` (since deleted, §5) and say so.
 
 The sources and full transcripts are in [`repro/`](repro/): one directory
 per reproducer, holding the `.lem` file, any driver, and
@@ -110,9 +111,8 @@ fix as a proposed remedy.
 The fork, its records and these drafts were produced by AI agents
 (Claude, Anthropic) working under the direction and review of a human
 operator. Each draft's classification is proposed by the drafting agent;
-the operator decides what is filed. Commits on the patch branches carry a
-`Co-Authored-By: Claude … <noreply@anthropic.com>` trailer, and any filed
-issue or PR will say how the finding was made (INDEX.md, "Provenance
+the operator decides what is filed. Any filed issue will say how the
+finding was made (INDEX.md, "Provenance
 labelling").
 
 ## 8. Caveats
