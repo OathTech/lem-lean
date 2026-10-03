@@ -123,10 +123,6 @@ theorem lemListMapiAuxAcc_eq (f : Nat → α → β) (n : Nat) (l : List α) (ac
   | nil => simp [lemListMapiAuxAcc, mapiAuxSpec]
   | cons x xs ih => simp [lemListMapiAuxAcc, mapiAuxSpec, ih]
 
-theorem lemListMapiAux_eq (f : Nat → α → β) (n : Nat) (l : List α) :
-    lemListMapiAux f n l = mapiAuxSpec f n l := by
-  simp [lemListMapiAux, lemListMapiAuxAcc_eq]
-
 theorem lemListMapi_eq (f : Nat → α → β) (l : List α) : lemListMapi f l = mapiAuxSpec f 0 l := by
   simp [lemListMapi, lemListMapiAuxAcc_eq]
 

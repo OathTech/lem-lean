@@ -217,9 +217,6 @@ def defaultLessEq [Ord α] (x y : α) : Bool := isLessEqual (defaultCompare x y)
 def defaultGreater [Ord α] (x y : α) : Bool := isGreater (defaultCompare x y)
 def defaultGreaterEq [Ord α] (x y : α) : Bool := isGreaterEqual (defaultCompare x y)
 
-/- Bool/Prop bridge -/
-def lemBoolToProp (b : Bool) : Prop := b = true
-
 /- failwithI: failure at a KNOWN-INHABITED type (arc-2 S5). The Lean
    backend emits this instead of failwith at call sites whose result type
    is syntactically GROUND (no type variables), where instance resolution
@@ -375,9 +372,6 @@ def fromJustI1 {α : Type} [Inhabited α] : Option α → α
   | none => failwithI "fromJust"
 
 
-/- Function application -/
-def apply (f : α → β) (x : α) : β := f x
-
 /- List operations -/
 def listEqualBy (eq : α → α → Bool) : List α → List α → Bool
   | [], [] => true
@@ -394,8 +388,6 @@ def tupleEqualBy (eq1 : α → α → Bool) (eq2 : β → β → Bool) (p1 : α 
 
 /- Natural number operations -/
 @[inline] def natPower (base exp : Nat) : Nat := base ^ exp
-@[inline] def natDiv (a b : Nat) : Nat := a / b
-@[inline] def natMod (a b : Nat) : Nat := a % b
 @[inline] def natMin (a b : Nat) : Nat := min a b
 @[inline] def natMax (a b : Nat) : Nat := max a b
 @[inline] def natLtb (a b : Nat) : Bool := a < b
@@ -913,7 +905,6 @@ def setSubsetBy (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Bool := Ps
 def setProperSubsetBy (cmp : α → α → LemOrdering) (s1 s2 : Pset α) : Bool :=
   Pset.subset cmp s1 s2 && !(Pset.equal cmp s1 s2)
 def setFilterBy (cmp : α → α → LemOrdering) (p : α → Bool) (s : Pset α) : Pset α := Pset.filter cmp p s
-def setPartitionBy (cmp : α → α → LemOrdering) (p : α → Bool) (s : Pset α) : Pset α × Pset α := Pset.partition cmp p s
 def setMapBy (cmp : β → β → LemOrdering) (f : α → β) (s : Pset α) : Pset β := Pset.map cmp f s
 def setBigunionBy (cmp : α → α → LemOrdering) (xss : Pset (Pset α)) : Pset α := Pset.bigunion cmp xss
 def setBigunionMapBy (cmp : β → β → LemOrdering) (f : α → Pset β) (s : Pset α) : Pset β := Pset.mapUnion cmp f s
@@ -1022,26 +1013,11 @@ def find? (cmp : α → α → LemOrdering) (x : α) : Pmap α β → Option β
     | .LT => find? cmp x l
     | .GT => find? cmp x r
 
-/-- pmap.ml:87 `mem` -/
-def mem (cmp : α → α → LemOrdering) (x : α) : Pmap α β → Bool
-  | Empty => false
-  | Node l v _ r _ =>
-    match cmp x v with
-    | .EQ => true
-    | .LT => mem cmp x l
-    | .GT => mem cmp x r
-
 /-- pmap.ml:94 `min_binding` -/
 def minBinding? : Pmap α β → Option (α × β)
   | Empty => none
   | Node Empty x d _ _ => some (x, d)
   | Node l _ _ _ _ => minBinding? l
-
-/-- pmap.ml:99 `max_binding` -/
-def maxBinding? : Pmap α β → Option (α × β)
-  | Empty => none
-  | Node _ x d Empty _ => some (x, d)
-  | Node _ _ _ r _ => maxBinding? r
 
 /-- pmap.ml:104 `remove_min_binding` -/
 def removeMinBinding : Pmap α β → Pmap α β
@@ -1095,28 +1071,6 @@ def fold (f : α → β → γ → γ) : Pmap α β → γ → γ
 def forAll (p : α → β → Bool) : Pmap α β → Bool
   | Empty => true
   | Node l v d r _ => p v d && forAll p l && forAll p r
-
-/-- pmap.ml:162 `exists` -/
-def exists_ (p : α → β → Bool) : Pmap α β → Bool
-  | Empty => false
-  | Node l v d r _ => p v d || exists_ p l || exists_ p r
-
-/-- pmap.ml:167 `filter` -/
-def filterAux (cmp : α → α → LemOrdering) (p : α → β → Bool) : Pmap α β → Pmap α β → Pmap α β
-  | accu, Empty => accu
-  | accu, Node l v d r _ => filterAux cmp p (filterAux cmp p (if p v d then add cmp v d accu else accu) l) r
-
-def filter (cmp : α → α → LemOrdering) (p : α → β → Bool) (s : Pmap α β) : Pmap α β :=
-  filterAux cmp p Empty s
-
-/-- pmap.ml:175 `partition` -/
-def partitionAux (cmp : α → α → LemOrdering) (p : α → β → Bool) : Pmap α β × Pmap α β → Pmap α β → Pmap α β × Pmap α β
-  | accu, Empty => accu
-  | (t, f), Node l v d r _ =>
-    partitionAux cmp p (partitionAux cmp p (if p v d then (add cmp v d t, f) else (t, add cmp v d f)) l) r
-
-def partition (cmp : α → α → LemOrdering) (p : α → β → Bool) (s : Pmap α β) : Pmap α β × Pmap α β :=
-  partitionAux cmp p (Empty, Empty) s
 
 /-- Heights consistent with the shape (see `Pset.heightsOk`). -/
 def heightsOk : Pmap α β → Bool
@@ -1232,25 +1186,6 @@ def equalAux (cmp : α → α → LemOrdering) (eqV : β → β → Bool) : Nat 
 
 def equal (cmp : α → α → LemOrdering) (eqV : β → β → Bool) (m1 m2 : Pmap α β) : Bool :=
   equalAux cmp eqV (cardinal m1 + cardinal m2 + 1) (consEnum m1 .End) (consEnum m2 .End)
-
-/-- pmap.ml:238 `compare cmp_key cmp_a m1 m2` -/
-def compareAux (cmp : α → α → LemOrdering) (cmpV : β → β → LemOrdering) : Nat → Enum α β → Enum α β → LemOrdering
-  | 0, _, _ => fuelExhaustedWith "Pmap.compare: fuel exhausted (unreachable)" .EQ
-  | fuel + 1, e1, e2 =>
-    match e1, e2 with
-    | .End, .End => .EQ
-    | .End, _ => .LT
-    | _, .End => .GT
-    | .More v1 d1 r1 e1, .More v2 d2 r2 e2 =>
-      match cmp v1 v2 with
-      | .EQ =>
-        match cmpV d1 d2 with
-        | .EQ => compareAux cmp cmpV fuel (consEnum r1 e1) (consEnum r2 e2)
-        | c => c
-      | c => c
-
-def compare (cmp : α → α → LemOrdering) (cmpV : β → β → LemOrdering) (m1 m2 : Pmap α β) : LemOrdering :=
-  compareAux cmp cmpV (cardinal m1 + cardinal m2 + 1) (consEnum m1 .End) (consEnum m2 .End)
 
 /-- pmap.ml:269 `bindings` — ascending -/
 def bindingsAux : List (α × β) → Pmap α β → List (α × β)
@@ -1414,18 +1349,14 @@ instance : BEq LemFloat32 where beq _ _ := panic! "float32: not supported in Lea
 instance : Ord LemFloat32 where compare _ _ := panic! "float32: not supported in Lean backend"
 instance (n : Nat) : OfNat LemFloat32 n where ofNat := panic! "float32: not supported in Lean backend"
 
-/- Target rep wrappers for rational/real operations. `never_extract`
-   (parity-fix slice 2026-09-03): a generated closed application such as
-   `unsupportedRationalFromNumeral 0` (the `(0 : rational)` literal inside
-   the generated `NumAbs LemRational` instance) was lifted to module
-   initialisation and panicked at start-up of EVERY binary importing
-   LemLib.Num — silently, and fatally under LEAN_ABORT_ON_PANIC=1. -/
-@[never_extract] def unsupportedRationalFromNumeral (_ : Nat) : LemRational :=
-  panic! "rational: not supported in Lean backend"
-@[never_extract] def unsupportedRationalFromInt (_ : Int) : LemRational :=
-  panic! "rational: not supported in Lean backend"
-@[never_extract] def unsupportedRationalFromFrac (_ _ : Int) : LemRational :=
-  panic! "rational: not supported in Lean backend"
+/- Target rep wrappers for the rational/real comparison operations (the
+   value entry points — numerals, conversions — are the refusal markers in
+   the `LemUnsupported` namespace below). `never_extract` on every one of
+   them: a generated closed application of such a wrapper (the
+   `(0 : rational)` literal inside the generated `NumAbs LemRational`
+   instance was one) is otherwise lifted to module initialisation and
+   panics at start-up of EVERY binary importing LemLib.Num — silently, and
+   fatally under LEAN_ABORT_ON_PANIC=1. -/
 @[never_extract] def unsupportedRationalLess (_ _ : LemRational) : Bool :=
   panic! "rational: not supported in Lean backend"
 @[never_extract] def unsupportedRationalLessEq (_ _ : LemRational) : Bool :=
@@ -1435,13 +1366,7 @@ instance (n : Nat) : OfNat LemFloat32 n where ofNat := panic! "float32: not supp
 @[never_extract] def unsupportedRationalGreaterEq (_ _ : LemRational) : Bool :=
   panic! "rational: not supported in Lean backend"
 
-/- Target rep wrappers for real operations that can't use infix operators -/
-@[never_extract] def unsupportedRealFromNumeral (_ : Nat) : LemReal :=
-  panic! "real: not supported in Lean backend"
-@[never_extract] def unsupportedRealFromInt (_ : Int) : LemReal :=
-  panic! "real: not supported in Lean backend"
-@[never_extract] def unsupportedRealFromFrac (_ _ : Int) : LemReal :=
-  panic! "real: not supported in Lean backend"
+/- The same for the real operations. -/
 @[never_extract] def unsupportedRealLess (_ _ : LemReal) : Bool :=
   panic! "real: not supported in Lean backend"
 @[never_extract] def unsupportedRealLessEq (_ _ : LemReal) : Bool :=
@@ -1482,10 +1407,6 @@ def integerSqrt (n : Int) : Int :=
 
 /- Integer absolute value returning Int (not Nat) -/
 def intAbs (n : Int) : Int := Int.ofNat n.natAbs
-
-/- List indexing wrappers -/
-def listGet? (l : List α) (n : Nat) : Option α := l[n]?
-def listGet! [Inhabited α] (l : List α) (n : Nat) : α := l[n]!
 
 /- ============================================================ -/
 /- Division and remainder — the OCaml reference semantics          -/
@@ -1732,13 +1653,10 @@ def integerRem_f (a b : Int) : Int := if b == 0 then lemDivByZero else Int.emod 
 @[never_extract] def THE (_p : α → Bool) : Option α :=
   panic! "THE: Hilbert choice is not computable"
 
-/- List indexing — replaces removed List.get? and List.get! -/
+/- List indexing: the Lean reps of lem `List.index` / `List_extra.nth`
+   (`List.get?`/`List.get!` were removed from Lean core). -/
 def listGetOpt (l : List α) (n : Nat) : Option α := l[n]?
 def listGetBang [Inhabited α] (l : List α) (n : Nat) : α := l[n]!
-
-/- List update (set element at index) — replaces removed List.set -/
-def listSet (l : List α) (n : Nat) (v : α) : List α :=
-  l.set n v
 
 /- Convert a natural number to a list of bools (binary representation, LSB first) -/
 def boolListFromNatural (acc : List Bool) (remainder : Nat) : List Bool :=
@@ -1865,7 +1783,6 @@ def lemListCatMaybes (xs : List (Option α)) : List α := lemListCatMaybesAux xs
 def lemListMapiAuxAcc (f : Nat → α → β) : Nat → List α → List β → List β
   | _, [], acc => acc.reverse
   | n, x :: xs, acc => lemListMapiAuxAcc f (n + 1) xs (f n x :: acc)
-def lemListMapiAux (f : Nat → α → β) (n : Nat) (l : List α) : List β := lemListMapiAuxAcc f n l []
 def lemListMapi (f : Nat → α → β) (l : List α) : List β := lemListMapiAuxAcc f 0 l []
 
 /-- lem List_extra.init: all but the last element; `[]` fails loudly on

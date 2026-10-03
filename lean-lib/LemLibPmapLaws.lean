@@ -490,7 +490,6 @@ theorem defaultCompare_eq_EQ_iff {α : Type} [Ord α] (a b : α) :
 
 theorem Pmap.cmpLaws_of_transOrd {α : Type} [Ord α] [Std.TransOrd α] :
     Pmap.CmpLaws (defaultCompare : α → α → LemOrdering) := by
-  -- (inside `theorem Pmap.…` the bare `compare` would resolve to `Pmap.compare`)
   refine ⟨?_, ?_, ?_, ?_⟩
   · intro a
     unfold defaultCompare
