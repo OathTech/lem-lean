@@ -173,7 +173,7 @@ describe a design that is no longer current.
 
 ## Elsewhere
 
-- Upstream Lem report drafts: `doc/upstream-tray/` on branch
-  `docs/lem-upstream-tray` (not yet merged; TODO item 30).
+- Upstream Lem report drafts: [`doc/upstream-tray/`](../upstream-tray/)
+  (TODO item 30).
 - The noodle record (`2026-09-03_noodle-backend.md`) cited by the
   parity-fix record is on branch `noodle/backend`, not in this tree.
