@@ -138,13 +138,10 @@ val (^) : t -> t -> t
     it does [o0 ^ ... ^ on]. *)
 val flat : t list -> t
 
-(** [flatten_newlines t] replaces all newlines in the output tree with spaces.
-    Used by the Lean backend to keep match alternatives on a single line. *)
-val flatten_newlines : t -> t
-
-(** [flatten_newlines_keep_comments t] is [flatten_newlines t], except that
-    the line breaks inside comments are kept. Used by the Lean backend,
-    whose layout pass puts a multi-line comment on lines of its own. *)
+(** [flatten_newlines_keep_comments t] replaces the newlines in the output
+    tree with spaces, except inside comments. Used by the Lean backend, which
+    lays the text out itself and whose layout pass puts a multi-line comment
+    on lines of its own. *)
 val flatten_newlines_keep_comments : t -> t
 
 (** [concat sep [o0; ...; on]] appends all the outputs in the list using

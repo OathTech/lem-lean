@@ -85,7 +85,6 @@
 (*                                                                        *)
 (**************************************************************************)
 
-open Backend_common
 open Output
 open Typed_ast
 open Typed_ast_syntax
@@ -513,7 +512,9 @@ let locn_of_clause_group g =
 let inhabited_census_lookup (p : Path.t) : (string * inh_status) option =
   Option.map snd
     (List.find_opt (fun (q, _) -> Path.compare p q = 0) !St.inhabited_census)
-let inhabited_census_debug = (try Sys.getenv "LEM_INH_DEBUG" <> "" with Not_found -> false)
+(* LEM_INH_DEBUG set: trace the Inhabited census on stderr (DESIGN,
+   "Debugging the analyses"). *)
+let inhabited_census_debug = Sys.getenv_opt "LEM_INH_DEBUG" <> None
 let inhabited_census_add (p : Path.t) (name : string) (st : inh_status) : unit =
   St.inhabited_census := (p, (name, st)) :: !St.inhabited_census;
   if inhabited_census_debug then
@@ -2371,7 +2372,9 @@ let lean_size_prepass env (ds : def list) =
 
 let lean_thread_lookup (c : Types.const_descr_ref) : (int list * string list) option =
   Types.Cdmap.apply !St.failwith_threaded c
-let lean_thread_debug = (try Sys.getenv "LEM_THREAD_DEBUG" <> "" with Not_found -> false)
+(* LEM_THREAD_DEBUG set: trace the [Inhabited] threading fixpoint on stderr
+   (DESIGN, "Debugging the analyses"). *)
+let lean_thread_debug = Sys.getenv_opt "LEM_THREAD_DEBUG" <> None
 
 (* ===== The reserved-name CAPTURE check (tails-and-pmap-laws audit response
    F1, 2026-09-05) =====
@@ -2396,13 +2399,62 @@ let lean_thread_debug = (try Sys.getenv "LEM_THREAD_DEBUG" <> "" with Not_found 
    the text named. Run for every fuel'd/reader/supply group
    (reserved_binder_check) and whenever a `function` tail is hoisted
    (lean_hoist_tail_binders). *)
-let lean_reserved_exact_names = ["lemFuel"; "lemMeasureLe"; "lemHyp"; "LemFuel"; "lemTail"; "lemRecBase"]
+let lean_starts_with (pre : string) (s : string) : bool =
+  String.length s >= String.length pre && String.sub s 0 (String.length pre) = pre
+
+(* THE RESERVED-NAME TABLE: every identifier the backend synthesizes into
+   generated code, in one place, so the checks that read it cannot drift
+   apart. The populations checked against it:
+   - the BINDERS of a fuel'd/reader/supply definition — its parameters and
+     every binder inside its clause bodies (reserved_binder_check): the
+     binder names and the prefixes. `lemTail` is deliberately not a binder
+     name: the tail hoisting synthesizes it into the very clause this check
+     scans (lean_hoist_tail_binders runs first) and guards the user's
+     binders against it itself;
+   - the Lean names a referenced constant RENDERS as
+     (lean_reserved_capture_check): every exact name and the prefixes;
+   - top-level DEFINITION names: the synthesized destructuring-let family
+     `lemLetRhs_*` (lean_check_reserved_def_name);
+   - the free variables of a long if/else-if chain: its continuations
+     `_lemIfTail<n>`; constructor and field names of a recursive type
+     block: the derived size functions `lemSize`/`lemSize_aux<k>` in the
+     type's namespace (generate_lem_size).
+   The class name `LemFuel` is also avoided through library/lean_constants
+   like every other root Lean name. *)
+let lean_reserved_binder_names = ["lemFuel"; "lemMeasureLe"; "lemHyp"]
+let lean_reserved_tail_name = "lemTail"       (* the hoisted `function` scrutinee *)
+let lean_reserved_rec_base_name = "lemRecBase" (* the bound base of a mutual-record update *)
+let lean_reserved_exact_names =
+  lean_reserved_binder_names @ ["LemFuel"; lean_reserved_tail_name; lean_reserved_rec_base_name]
 let lean_reserved_prefixes = ["_lemReader_"; "_lemSupply"]
+let lean_reserved_let_rhs_prefix = "lemLetRhs_"
+let lean_reserved_if_tail_prefix = "_lemIfTail"
+let lean_reserved_size_name = "lemSize"
+let lean_reserved_size_aux_prefix = "lemSize_aux"
+let lean_has_reserved_prefix (n : string) : bool =
+  List.exists (fun pre -> lean_starts_with pre n) lean_reserved_prefixes
+let lean_is_reserved_binder (n : string) : bool =
+  List.mem n lean_reserved_binder_names || lean_has_reserved_prefix n
 let lean_is_reserved_name (n : string) : bool =
-  List.mem n lean_reserved_exact_names
-  || List.exists (fun pre ->
-       String.length n >= String.length pre && String.sub n 0 (String.length pre) = pre)
-       lean_reserved_prefixes
+  List.mem n lean_reserved_exact_names || lean_has_reserved_prefix n
+(* The reserved names as the error messages list them. *)
+let lean_reserved_names_text (names : string list) : string =
+  String.concat "" [
+    String.concat ", " (List.map (Printf.sprintf "'%s'") names);
+    " and the ";
+    String.concat "/" (List.map (Printf.sprintf "'%s'") lean_reserved_prefixes);
+    " prefixes"]
+
+(* Instance priorities come from one table, the lattice note
+   doc/notes/2026-08-22_arc14-instance-priority-lattice.md: model-declared
+   and derived BEq/Ord instances at Lean's default (1000); the automatic
+   SetType/Eq0/Ord0 trio and the comparator-derived BEq bridges at the
+   "auto" slot below it, so a model's own instance wins by priority and not
+   by declaration order; generic defaults and residual instances at `low`
+   (100). This is the auto slot. *)
+let lean_instance_auto_priority = 500
+let lean_instance_kw_auto =
+  Printf.sprintf "\ninstance (priority := %d)" lean_instance_auto_priority
 
 (* every `Backend` identifier (a target_rep's Lean text) in an expression *)
 let rec exp_backend_idents (e : exp) : string list =
@@ -2928,8 +2980,8 @@ let lean_reserved_capture_check env (l : Ast.l) (fname : string) (e : exp) : uni
       if lean_is_reserved_name rendered then
         raise (Reporting_basic.err_general true l
           (Printf.sprintf
-            "Lean backend: the body of %s references constant %s, which renders on Lean as `%s` — a reserved synthesized binder name (the reserved-name contract: 'lemFuel', 'lemMeasureLe', 'lemHyp', 'LemFuel', 'lemTail' and the '_lemReader_'/'_lemSupply' prefixes are the backend's); inside the generated worker that identifier is CAPTURED by the synthesized binder and computes a different value than the OCaml target (pre-merge audit 2026-09-05, probe p11b) — rename the constant or its Lean target_rep"
-            fname lem_name rendered)))
+            "Lean backend: the body of %s references constant %s, which renders on Lean as `%s` — a reserved synthesized binder name (the reserved-name contract: %s are the backend's); inside the generated code that identifier would be captured by the synthesized binder and compute a different value than the OCaml target — rename the constant or its Lean target_rep"
+            fname lem_name rendered (lean_reserved_names_text lean_reserved_exact_names))))
     (lean_referenced_lean_names env e)
 
 (* Constants whose LEAN target_rep is the bare identifier `failwith`
@@ -3146,21 +3198,15 @@ let lean_group_funcls (funcls : funcl_aux list)
     funcls;
   List.map (fun c -> (c, Hashtbl.find tbl c)) (List.rev !order)
 
-(* Reserved GENERATED-NAME contract (top-level definition names; the
-   companion of the reserved-BINDER contract at the fuel/reader
-   emission path): the 'lemLetRhs_' prefix is the synthesized
-   multi-name destructuring-let RHS family (m7) — a user def there
-   would collide with a synthesized definition. Fail closed at
-   generation time, naming the definition. (History: 'lemDefaultFuel'
-   was reserved here while it was the fuel wrappers' budget reference;
-   the fuel-parameter arc deleted that constant — generated code no
-   longer references any fuel numeral — so the name is ordinary again.
-   The class name `LemFuel` is avoided through library/lean_constants
-   like every other root Lean name.) *)
+(* Top-level definition names: a multi-name destructuring let
+   (`let (a, b) = e`) is emitted as a synthesized `lemLetRhs_<names>`
+   definition plus one projection per name, so a user definition with that
+   prefix would collide with it. Refused at generation time, naming the
+   definition (the reserved-name table above). *)
 let lean_check_reserved_def_name l n =
-  if String.length n >= 10 && String.sub n 0 10 = "lemLetRhs_" then
+  if lean_starts_with lean_reserved_let_rhs_prefix n then
     raise (Reporting_basic.err_general true l
-      (Printf.sprintf "Lean backend: definition name '%s' uses the reserved 'lemLetRhs_' prefix (synthesized destructuring-let RHS definitions; the reserved-name contract) — rename it" n))
+      (Printf.sprintf "Lean backend: definition name '%s' uses the reserved '%s' prefix (synthesized destructuring-let RHS definitions; the reserved-name contract) — rename it" n lean_reserved_let_rhs_prefix))
 
 (* Supply pre-pass: grow St.supply_lifted to a fixpoint over this
    module's Val_defs (the lean_reader_prepass pattern: Val_def
@@ -3838,11 +3884,6 @@ let ws s =
 let sep x s = ws s ^ x
 let path_sep = r"."
 
-(* Lean 4 is whitespace-sensitive, so disable auto-formatting blocks
-   which can break indentation of match alternatives *)
-let block _ _ t = t
-let block_hov _ _ t = t
-
 (* Source line breaks inside an expression become spaces; the backend lays
    the text out itself (normalize_layout, then Lean_layout.reflow). The
    line breaks inside comments are kept: the layout pass puts a multi-line
@@ -4323,7 +4364,6 @@ type pat_style = FunParam | MatchArm
 
     (* --- Fuel lifting helpers (declare {lean} fuel val / fuel_consumer
        val; the mechanism comment is at lean_fuel_is_fuelled). --- *)
-    let is_fuelled_cref = lean_fuel_is_fuelled A.env
     let is_fuel_consumer_cref = lean_fuel_is_consumer A.env
     (* declare {lean} fuel_measure val (mechanism comment at lean_fuel_measure_for) *)
     let fuel_measure_for = lean_fuel_measure_for A.env
@@ -4377,7 +4417,7 @@ type pat_style = FunParam | MatchArm
        definition: the supply prepass records the pre-hoist arity for the
        call-site threading. The OCaml (and every non-Lean) emitter never
        sees any of this. *)
-    let lean_tail_binder = "lemTail"
+    let lean_tail_binder = lean_reserved_tail_name
     let lean_hoist_tail_binders inside_instance (g : funcl_aux list) : funcl_aux list =
       match g with
       | [(nla, c, pats, typ_opt, sk, e)]
@@ -4869,16 +4909,14 @@ type pat_style = FunParam | MatchArm
               ]
             else match compare_method with
             | Some cmp_name ->
-              (* (priority := 500) — arc-14 re-mark R3 de-tie: the
-                 comparator-derived BEq bridge ([SetType a]/[MapKeyType a]
-                 : BEq a) sits in the lattice's 500 slot, strictly BELOW
+              (* The comparator-derived BEq bridge ([SetType a]/[MapKeyType a]
+                 : BEq a) sits in the lattice's auto slot, strictly BELOW
                  the isEqual bridge and derived BEq (default = 1000): a
                  comparator can be COARSER than a type's own equality, so
-                 when both apply the finer Eq0-route must win by PRIORITY,
-                 not by declaration order (the former third default tie —
-                 doc/notes/2026-08-22_arc14-instance-priority-lattice.md). *)
+                 when both apply the finer Eq0 route must win by PRIORITY,
+                 not by declaration order (lean_instance_kw_auto). *)
               Output.flat [
-                from_string "\ninstance (priority := 500) {"; tv; from_string " : "; from_string tv_kind;
+                from_string (String.concat "" [lean_instance_kw_auto; " {"]); tv; from_string " : "; from_string tv_kind;
                 from_string "} ["; name; from_string " "; tv; from_string "] : BEq "; tv;
                 from_string (String.concat "" [" where\n  beq x y := match "; cmp_name; " x y with | .EQ => true | _ => false\n"])
               ]
@@ -5708,24 +5746,23 @@ type pat_style = FunParam | MatchArm
                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
                          "Lean backend: reader_seed combined with fuel (unsupported)")
                      | _ -> ());
-                    (* THE RESERVED-NAME CONTRACT (arc-14 re-mark, be:S2;
+                    (* The reserved-name contract (the table at
+                       lean_reserved_exact_names; the design note
                        doc/notes/2026-08-22_arc14-reserved-names.md): the
-                       backend synthesizes binders `lemFuel` (fuel) and
-                       `_lemReader_<name>` (reader injection) into user
-                       signatures. A user PARAMETER with one of those
-                       names silently SHADOWS the synthesized binder —
-                       probe-measured (probe_fuel_shadow, 2026-08-22):
-                       the worker matched the USER's lemFuel, returning
-                       the 999 sentinel for shadow_probe 0 3. Fail
-                       closed at generation time. COVERAGE (RG1, the
-                       re-mark's A' hole): clause PARAMETERS and every
-                       binder inside the compiled clause BODY
-                       (exp_bound_names — body-level match/let/fun/do
-                       binders shadow the synthesized binder at
-                       self-call/injection sites just as parameters do;
-                       A' witness: a tuple-pattern reader body compiled
-                       and ran silently wrong, use2 100 (1,2) = 5 not
-                       103 — now a negative probe). *)
+                       backend synthesizes binders such as `lemFuel` (fuel)
+                       and `_lemReader_<name>` (reader injection) into user
+                       signatures. A user binder with one of those names
+                       silently SHADOWS the synthesized binder — a worker
+                       that matched the user's `lemFuel` returned the
+                       sentinel for every call — so it is refused at
+                       generation time. Checked: the clause PARAMETERS and
+                       every binder inside the compiled clause BODY
+                       (exp_bound_names: a match/let/fun/do binder shadows
+                       the synthesized binder at the self-call and injection
+                       sites just as a parameter does; a tuple-pattern
+                       binder in a reader body once compiled and ran wrong
+                       — negative probes neg_fuel_shadow_body,
+                       neg_reader_shadow_body). *)
                     let reserved_binder_check () =
                       let bound = List.concat_map (fun (_, _, pats, _, _, e) ->
                           List.concat_map (fun p ->
@@ -5734,16 +5771,13 @@ type pat_style = FunParam | MatchArm
                               (Pattern_syntax.pat_vars_src p)) pats
                           @ exp_bound_names e) g in
                       List.iter (fun n ->
-                        if n = "lemFuel" || n = "lemMeasureLe" || n = "lemHyp"
-                           || (String.length n >= 11 && String.sub n 0 11 = "_lemReader_")
-                           || (String.length n >= 10 && String.sub n 0 10 = "_lemSupply") then
+                        if lean_is_reserved_binder n then
                           raise (Reporting_basic.err_general true (locn_of_clause_group g)
                             (Printf.sprintf
-                              "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: 'lemFuel', 'lemMeasureLe', 'lemHyp' and the '_lemReader_'/'_lemSupply' prefixes are the backend's, in parameters AND clause bodies; a shadowed fuel/reader/supply/hypothesis binder is silently wrong) — rename the variable" n)))
+                              "Lean backend: binder '%s' collides with a reserved synthesized binder (the reserved-name contract: %s are the backend's, in parameters AND clause bodies; a shadowed fuel/reader/supply/hypothesis binder is silently wrong) — rename the variable" n (lean_reserved_names_text lean_reserved_binder_names))))
                         bound;
-                      (* and what the body's constants RENDER as (audit
-                         response F1; mechanism comment at
-                         lean_reserved_capture_check) *)
+                      (* and what the body's constants RENDER as (mechanism
+                         comment at lean_reserved_capture_check) *)
                       List.iter (fun ({term = n}, _, _, _, _, e) ->
                           lean_reserved_capture_check A.env (locn_of_clause_group g)
                             (Name.to_string (Name.strip_lskip n)) e) g in
@@ -7066,7 +7100,6 @@ type pat_style = FunParam | MatchArm
            Output.flat ([from_string "("] @ List.map binding ds @ [out; from_string ")"]))
 
     and exp_core inside_instance e =
-      let is_user_exp = Typed_ast_syntax.is_pp_exp e in
         match C.exp_to_term e with
           | Var v ->
               name_var_output v
@@ -7335,10 +7368,9 @@ type pat_style = FunParam | MatchArm
               end
           | Fun (skips, ps, skips', e) ->
               let ps = fun_pattern_list inside_instance ps in
-                block_hov (Typed_ast_syntax.is_pp_exp e) 2 (
-                  Output.flat [
-                    ws skips; from_string "fun"; ps; ws skips'; from_string "=> "; exp inside_instance e
-                  ])
+                Output.flat [
+                  ws skips; from_string "fun"; ps; ws skips'; from_string "=> "; exp inside_instance e
+                ]
           | Function _ ->
               print_and_fail (Typed_ast.exp_to_locn e) "illegal function in extraction, should have been previously macro'd away"
           | Set (skips, es, skips') ->
@@ -7349,22 +7381,20 @@ type pat_style = FunParam | MatchArm
               else
                 ws skips
             in
-              block is_user_exp 0 (
-                if Seplist.is_empty es then
-                  Output.flat [
-                    skips; from_string "(setEmpty)"
-                  ]
-                else
-                  (* Comparator-keyed literal (arc-14 S2 B3, be:G4): set
-                     literals dedupe by the SetType comparator — matching
-                     OCaml lem's comparator-keyed Pset — never by BEq
-                     (a BEq finer than the comparator, e.g. cerberus sym,
-                     could otherwise keep comparator-EQ duplicates). The
-                     lem type of a set literal carries SetType 'a, so the
-                     instance is resolvable at every splice site. *)
-                  Output.flat [
-                    skips; from_string "(setFromListBy setElemCompare ["; body; from_string "])"; ws skips'
-                  ])
+              if Seplist.is_empty es then
+                Output.flat [
+                  skips; from_string "(setEmpty)"
+                ]
+              else
+                (* A set literal is deduplicated by the SetType comparator,
+                   as the OCaml target's comparator-keyed Pset is — never by
+                   BEq: a BEq finer than the comparator (Cerberus's symbols)
+                   could otherwise keep comparator-equal duplicates. The lem
+                   type of a set literal carries SetType 'a, so the instance
+                   is resolvable at every splice site. *)
+                Output.flat [
+                  skips; from_string "(setFromListBy setElemCompare ["; body; from_string "])"; ws skips'
+                ]
           | Begin (skips, e, skips') ->
               (* Lem's begin...end is a grouping construct. In Lean, use parens. *)
               Output.flat [
@@ -7456,7 +7486,7 @@ type pat_style = FunParam | MatchArm
                  constant of that name in the base or an updated value would
                  be captured, so it is refused (backend-hardening record,
                  2026-10-03). *)
-              let base = "lemRecBase" in
+              let base = lean_reserved_rec_base_name in
               let locn = Typed_ast.exp_to_locn e in
               let capture_check (e' : exp) =
                 Nfmap.iter (fun n _ ->
@@ -7651,9 +7681,9 @@ type pat_style = FunParam | MatchArm
                    synthesized prefix *)
                 Nfmap.iter (fun n _ ->
                   let ns = Name.to_string n in
-                  if String.length ns >= 10 && String.sub ns 0 10 = "_lemIfTail" then
+                  if lean_starts_with lean_reserved_if_tail_prefix ns then
                     raise (Reporting_basic.err_general true (Typed_ast.exp_to_locn e)
-                      (Printf.sprintf "Lean backend: variable '%s' uses the reserved '_lemIfTail' prefix (synthesized continuations of long if/else-if chains; the reserved-name contract) — rename it" ns)))
+                      (Printf.sprintf "Lean backend: variable '%s' uses the reserved '%s' prefix (synthesized continuations of long if/else-if chains; the reserved-name contract) — rename it" ns lean_reserved_if_tail_prefix)))
                   (C.exp_to_free e);
                 let rec split_at k l =
                   if k = 0 then ([], l) else
@@ -7765,15 +7795,14 @@ type pat_style = FunParam | MatchArm
               else
                 ws skips
             in
-              block is_user_exp 0 (
-                if Seplist.is_empty es then
-                  Output.flat [
-                    skips; from_string "#v[]"
-                  ]
-                else
-                  Output.flat [
-                    skips; from_string "#v["; body; ws skips'; from_string "]"
-                  ])
+              if Seplist.is_empty es then
+                Output.flat [
+                  skips; from_string "#v[]"
+                ]
+              else
+                Output.flat [
+                  skips; from_string "#v["; body; ws skips'; from_string "]"
+                ]
     and src_nexp n =
       match n.nterm with
         | Nexp_var (skips, nvar) ->
@@ -9190,27 +9219,20 @@ type pat_style = FunParam | MatchArm
             match tv with
               | Typed_ast.Tn_A _ -> Some (tnvar_to_string tv)
               | Typed_ast.Tn_N _ -> None) tnvar_list in
-          (* Loud residual body (arc-10 S2): failwithI replaces the historical
-             `sorry` bodies — axiom-free, honest-panic (the arc-8 convention;
+          (* A residual instance has a loud failwithI body (axiom-free; it
              mirrors OCaml raising Invalid_argument when polymorphic
-             comparison reaches a closure). Two labeled residual classes:
-             - "carries function-typed fields": the type itself is
-               underivable (OCaml comparison would raise on its closures);
-             - "unconstrained type variable": the bounded real instance
-               exists but a lem default-instance use site erased the
-               dictionary (fallback, priority below the bounded instance). *)
+             comparison reaches a closure), naming its class. *)
           let residual_body cls reason =
             String.concat "" ["failwithI \"Lean backend: comparison residual: "; cls; " ("; type_name_str; "): "; reason; "\""] in
           let fn_reason = "type carries function-typed fields (OCaml polymorphic comparison raises on closures)" in
           (* A type without a derived comparison keeps a LOUD residual: it
              fails if, and only if, a comparison actually reaches it (as
-             OCaml's compare does on closures). Say why honestly: function
-             fields are derived since audit A1, so what remains is a shape
-             the derivation cannot recurse through. *)
+             OCaml's compare does on closures). Function-typed fields are
+             compared structurally down to the closure, so what remains is a
+             shape the derivation cannot recurse through. *)
           let residual_reason =
             if texp_fn_fields t then fn_reason
             else "no derived structural comparison (a mutual sibling under a type head other than list/maybe/either/tuple); fails only if a comparison reaches it" in
-          let tv_reason = "demanded at an unconstrained type variable (lem default instance erased the dictionary); the bounded real instance needs concrete comparable arguments" in
           let residual_beq_ord reason priority_kw =
             (Output.flat [
               from_string priority_kw; bare_tvs; from_string " : BEq ("; o;
@@ -9264,22 +9286,11 @@ type pat_style = FunParam | MatchArm
                 ])
               | None -> residual_beq_ord residual_reason "\ninstance (priority := low)"
           in
-          (* Unconstrained fallbacks for bounded real instances (parameterized
-             types only): lem's unconstrained default instances mean generated
-             polymorphic code may demand these classes at OPEN type variables
-             (no dictionary); priority strictly below the bounded instance so
-             it is only reached when the bounds cannot be synthesized. *)
-          (* RETIRED (linksem 2026-09-29, audit A1): the priority-50
-             "unconstrained type variable" fallbacks. They panicked at
-             runtime wherever a generic definition compared values of a
-             parameterized type without a dictionary -- and a panic
-             continues with a default value, so sets silently kept
-             duplicates and the linksem linker produced a broken
-             executable. lean_cmp_prepass now threads the [Ord a]/[BEq a]
-             dictionaries into such definitions; a demand it misses is a
-             Lean compile error, never a runtime panic. *)
-          let _ = tv_reason in
-          let fallback_beq_ord = emp in
+          (* There is no instance for a demand at an OPEN type variable: a
+             generic definition that compares values of a parameterized type
+             takes [Ord a]/[BEq a] binders instead (lean_cmp_prepass), so a
+             demand the threading misses is a Lean compile error, never a
+             runtime panic. *)
           (* SetType/Eq0/Ord0 are defined for (a : Type) only, skip for Type 1 *)
           if is_type1 then Output.flat [beq_instance; ord_instance]
           else
@@ -9337,14 +9348,14 @@ type pat_style = FunParam | MatchArm
                   from_string " "; from_string y; from_string (String.concat "" [" with "; arms]);
                 ] in
               Output.flat [
-                from_string "\ninstance (priority := 500)"; bare_tvs; cls_bounds "Ord" bounds;
+                from_string lean_instance_kw_auto; bare_tvs; cls_bounds "Ord" bounds;
                 from_string " : Lem_Basic_classes.SetType ("; o; type_args;
                 from_string ") where\n  setElemCompare x y := "; lem_of_cmp "x" "y";
-                from_string "\ninstance (priority := 500)"; bare_tvs; cls_bounds "BEq" bounds;
+                from_string lean_instance_kw_auto; bare_tvs; cls_bounds "BEq" bounds;
                 from_string " : Lem_Basic_classes.Eq0 ("; o; type_args;
                 from_string ") where\n  isEqual := "; bd; from_string ".beq_derived";
                 from_string "\n  isInequal x y := !("; bd; from_string ".beq_derived x y)";
-                from_string "\ninstance (priority := 500)"; bare_tvs; cls_bounds "Ord" bounds;
+                from_string lean_instance_kw_auto; bare_tvs; cls_bounds "Ord" bounds;
                 from_string " : Lem_Basic_classes.Ord0 ("; o; type_args;
                 from_string ") where\n  compare x y := "; lem_of_cmp "x" "y";
                 from_string "\n  isLess x y := "; bool_of_cmp "x" "y" "| .lt => true | _ => false";
@@ -9371,20 +9382,14 @@ type pat_style = FunParam | MatchArm
                 from_string "\n  isGreaterEqual _ _ := "; from_string (residual_body "Ord0" reason);
               ]
             in
-            (* Fallback trio for any parameterized type whose trio is real
-               (deriving-bridge or derived): the open-tyvar demand class. *)
-            (* RETIRED with fallback_beq_ord above (audit A1). *)
-            let fallback_trio = emp in
             Output.flat [
               beq_instance;
               ord_instance;
-              fallback_beq_ord;
-              (if has_deriving && tnvar_list = [] then real_trio [] "\ninstance (priority := 500)"
-               else if has_deriving then real_trio all_ty_tvs "\ninstance (priority := 500)"
+              (if has_deriving && tnvar_list = [] then real_trio [] lean_instance_kw_auto
+               else if has_deriving then real_trio all_ty_tvs lean_instance_kw_auto
                else match derived_cmp with
                  | Some bounds -> derived_trio bounds
                  | None -> residual_trio residual_reason "\ninstance (priority := low)");
-              fallback_trio;
             ]
     (* ===== Arc-10 S2: derived structural comparisons for mutual blocks =====
        For every derivable type of a (homogeneous-parameter) mutual block,
@@ -9739,9 +9744,8 @@ type pat_style = FunParam | MatchArm
         let l = match ts_list with ((_, l0), _, _, _, _) :: _ -> l0 | [] -> Ast.Trans (false, "generate_lem_size", None) in
         let siblings = List.map (fun (p, nm, _, _) -> (p, nm)) members in
         let shape_of ty = lean_size_shape d siblings ty in
-        let starts_with pre str =
-          String.length str >= String.length pre && String.sub str 0 (String.length pre) = pre in
-        let collides nm = nm = "lemSize" || starts_with "lemSize_aux" nm in
+        let collides nm =
+          nm = lean_reserved_size_name || lean_starts_with lean_reserved_size_aux_prefix nm in
         (* fail-closed: the derived names live in the type's namespace,
            as constructors (and mutual-block record accessors) do *)
         List.iter (fun (_, tnm, _, ctors) ->
@@ -9894,7 +9898,7 @@ type pat_style = FunParam | MatchArm
        a residual (panicking) instance where OCaml compares fine, and
        `deriving Ord` would compute the WRONG order — neither is
        acceptable, so the type is refused with the workarounds named. *)
-    and derived_comparison_single (((name, _), _, path, t, _) as td) : Output.t * string list option =
+    and derived_comparison_single (((name, _), _, path, _, _) as td) : Output.t * string list option =
       let skip =
         let l = Ast.Trans (false, "derived_comparison_single", None) in
         let tdescr = Types.type_defs_lookup l A.env.t_env path in
@@ -9907,7 +9911,6 @@ type pat_style = FunParam | MatchArm
         match List.find_opt (fun (p, _) -> Path.compare p path = 0) derived_info with
         | Some (_, bounds) -> (cmp_defs, Some bounds)
         | None ->
-          let _ = t in
           raise (Reporting_basic.err_general true Ast.Unknown
             (Printf.sprintf
               "Lean backend: type '%s' declares a nullary constructor after a non-nullary one (OCaml polymorphic compare ranks nullary constructors below block constructors, Lean's `deriving Ord` ranks by declaration index) and its constructor fields reference the type under a head the derived comparison cannot recurse through (only list/maybe/either/tuples are supported) — emitting `deriving Ord` would compute a different order than the OCaml reference. Provide a hand-written Ord instance (`declare {lean} skip_instances type %s`) or restructure the field"
@@ -10121,10 +10124,9 @@ module LeanBackend (A : sig val avoid : var_avoid_f option;; val env : env;; val
          This guarantees the standard namespace opens (Lem_Basic_classes, etc.)
          are available for auto-generated instances even when the source .lem file
          doesn't explicitly import Pervasives (e.g., linux.lem). *)
-      let _ = if not is_library &&
-                not (List.mem "LemLib.Pervasives" !St.collected_imports) then
-        St.collected_imports := "LemLib.Pervasives" :: !St.collected_imports
-      in
+      if not is_library &&
+         not (List.mem "LemLib.Pervasives" !St.collected_imports) then
+        St.collected_imports := "LemLib.Pervasives" :: !St.collected_imports;
       (* Imports for target_rep references are collected per-file during rendering:
          - Function CR_simple target reps: via Backend_common.on_cr_simple_applied callback
          - Type TYR_simple target reps: directly in type_def_variant

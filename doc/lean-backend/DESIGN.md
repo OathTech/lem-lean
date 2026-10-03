@@ -162,8 +162,8 @@ The output is meant to be read next to its source.
   column-0 line that starts with a comment followed by code — the
   backend's marker for a comment that followed a line break in the source
   (`inline_comments`) — is joined to the line before it; that is the text
-  as it was before the pass (`LEM_LEAN_LAYOUT_DEBUG=1` lists such
-  declarations). Checked on Cerberus and linksem by a declaration census
+  as it was before the pass (`LEM_LEAN_LAYOUT_DEBUG` lists such
+  declarations; "Debugging the analyses" below). Checked on Cerberus and linksem by a declaration census
   equal before and after, macro scopes erased (output-niceness record
   §10, §11, §13); gates: `tests/comprehensive/test_layout.lem` with
   `check_layout.py` (suite phase `lean-layout`) and
@@ -685,6 +685,17 @@ lifetimes and reset hooks. `Backend_common.on_cr_simple_applied` is a
 separate process-global callback, installed on entry to `lean_defs`;
 `process_file.ml` supplies `St.current_module_name` before emission.
 Threading these through explicit arguments is TODO item 6.
+
+**Debugging the analyses.** Three environment variables, read once when
+`lem` starts and effective when set to any value, make the backend trace a
+decision on stderr; none changes the output. `LEM_INH_DEBUG`: the
+`Inhabited` derivation — each type's derivation plan (`PLAN`), each census
+entry as it is added (`CENSUS add`), and each demand checked against the
+census (`DEMAND check`). `LEM_THREAD_DEBUG`: each definition the
+`[Inhabited]` threading fixpoint lifts, with the type variables it threads
+(`THREAD`). `LEM_LEAN_LAYOUT_DEBUG`: each declaration the layout pass
+leaves as it was, with the reason and the start of its text (`lean layout:
+left as is`).
 
 ## No magic values
 

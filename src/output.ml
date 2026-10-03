@@ -158,29 +158,16 @@ let rec flat = function
   | [] -> Empty
   | x::y -> x ^ flat y
 
-(* Replace newlines with spaces in an Output.t tree.
-   Used by Lean backend to keep match alternatives on one line. *)
+(* Replace newlines with spaces in an Output.t tree (the Lean backend lays
+   the text out itself). *)
 let flatten_newlines_in_rope r =
   let s = Ulib.Text.to_string r in
   if String.contains s '\n' then
     Ulib.Text.of_string (String.map (fun c -> if c = '\n' then ' ' else c) s)
   else r
-let rec flatten_newlines_in_comment = function
-  | Ast.Chars r -> Ast.Chars (flatten_newlines_in_rope r)
-  | Ast.Comment coms -> Ast.Comment (List.map flatten_newlines_in_comment coms)
-let rec flatten_newlines t =
-  match t with
-  | Cons(a, b) -> Cons(flatten_newlines a, flatten_newlines b)
-  | Block(b, bt, inner) -> Block(b, bt, flatten_newlines inner)
-  | Inter(Ast.Nl) -> Inter(Ast.Ws (Ulib.Text.of_latin1 " "))
-  | Inter(Ast.Com c) -> Inter(Ast.Com (flatten_newlines_in_comment c))
-  | Inter(Ast.Ws r) -> Inter(Ast.Ws (flatten_newlines_in_rope r))
-  | Core inner -> Core (flatten_newlines inner)
-  | other -> other
-
-(* As flatten_newlines, but the line breaks inside comments are kept. The
-   Lean backend's layout pass (lean_layout.ml) puts a multi-line comment on
-   lines of its own, so the author's comment text survives unchanged. *)
+(* The line breaks inside comments are kept: the Lean backend's layout pass
+   (lean_layout.ml) puts a multi-line comment on lines of its own, so the
+   author's comment text survives unchanged. *)
 let rec flatten_newlines_keep_comments t =
   match t with
   | Cons(a, b) -> Cons(flatten_newlines_keep_comments a, flatten_newlines_keep_comments b)
