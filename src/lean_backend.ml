@@ -3359,8 +3359,10 @@ let open_line (nss : string list) : string =
      `(`/`[` or before `)`/`]`/`,`; `×` has one space on each side.
    The indentation at the start of a line is kept as it is. No token is
    added, removed or joined, so this changes no declaration; tokens move
-   only along their own line (the declaration census checks the result). *)
-let normalize_layout (s : string) : string =
+   only along their own line (the declaration census checks the result).
+   normalize_layout, below, runs this and then the layout pass
+   (Lean_layout.reflow), which breaks long declarations over lines. *)
+let normalize_spacing (s : string) : string =
   let n = String.length s in
   let b = Buffer.create n in
   let pending_spaces = Buffer.create 16 in
@@ -3478,6 +3480,15 @@ let normalize_layout (s : string) : string =
   if !newlines > 0 then Buffer.add_char b '\n';
   Buffer.contents b
 
+(* The layout of a generated Lean file: token spacing (normalize_spacing),
+   then line breaking and indentation (Lean_layout.reflow; the width is the
+   Lean community's 100 columns). Both are text-only: the declaration
+   census of the consumers is unchanged by them. *)
+let lean_layout_width = 100
+
+let normalize_layout (s : string) : string =
+  Lean_layout.reflow ~width:lean_layout_width (normalize_spacing s)
+
 (* Split a skip list at its first line break (in source order). The comments before it trail
    the previous item (same line); the comments after it lead the next item
    (one per line). The source whitespace itself is dropped: the backend owns
@@ -3527,25 +3538,27 @@ let take_comments (s : Ast.lex_skips) : Ast.lex_skips * Ast.lex_skips =
     let (cs, ws_) = List.partition (function Ast.Com _ -> true | _ -> false) ts in
     if cs = [] then (s, None) else (Some ws_, Some cs)
 
-(* The comments of a skip list inside an expression printed on one line:
-   `/- c -/ ` for each (Lean accepts a comment between any two tokens). *)
+(* The comments of a skip list inside an expression: `/- c -/ ` for each
+   (Lean accepts a comment between any two tokens). The comment text is kept
+   as written, line breaks included: the layout pass (Lean_layout.reflow)
+   puts a multi-line comment on lines of its own, so no token can end up at
+   the comment's last column (Lean's layout is column-sensitive: a `|` at a
+   low column ends the enclosing match). Where that pass leaves a
+   declaration as it was, it folds such a comment's line breaks to spaces
+   instead. *)
 let inline_comments (s : Ast.lex_skips) =
-  (* A line break inside such a comment would put the next token at the
-     comment's last column, and Lean's layout is column-sensitive (a `|` at
-     a low column ends the enclosing match). So the comment's line breaks,
-     with the indentation after them, become single spaces: every word is
-     kept, on one line. *)
-  let rec one_line = function
-    | Ast.Chars r ->
-      Ast.Chars (Ulib.Text.of_string
-                   (Str.global_replace (Str.regexp "[ \t]*\n[ \t]*") " " (Ulib.Text.to_string r)))
-    | Ast.Comment cs -> Ast.Comment (List.map one_line cs)
-  in
   let (t, l) = split_skip_comments s in
-  Output.flat (List.map (fun c ->
-      St.emitted_comments := c :: !St.emitted_comments;
-      Output.flat [Output.ws (Some [Ast.Com (one_line c)]); meta_utf8 " "])
-      (fresh_comments (t @ l)))
+  let one c =
+    St.emitted_comments := c :: !St.emitted_comments;
+    Output.flat [Output.ws (Some [Ast.Com c]); meta_utf8 " "]
+  in
+  (* The comments that followed a line break in the source are preceded by
+     one here (an Nl skip, so flatten_newlines folds it inside a match
+     alternative): the layout pass puts such a comment on a line of its
+     own before the code it leads, and re-joins the line where it leaves a
+     declaration as it was. *)
+  Output.flat (List.map one (fresh_comments t)
+               @ List.map (fun c -> Output.flat [Output.new_line; one c]) (fresh_comments l))
 
 (* Every comment of a skip list, laid out as at a top-level position: the
    trailing ones on the current line, the leading ones on their own lines. *)
@@ -3648,7 +3661,11 @@ let path_sep = r"."
 let block _ _ t = t
 let block_hov _ _ t = t
 
-let flatten_newlines = Output.flatten_newlines
+(* Source line breaks inside an expression become spaces; the backend lays
+   the text out itself (normalize_layout, then Lean_layout.reflow). The
+   line breaks inside comments are kept: the layout pass puts a multi-line
+   comment on lines of its own. *)
+let flatten_newlines = Output.flatten_newlines_keep_comments
 
 let tyvar (_, tv, _) = id Type_var (Ulib.Text.(^^^) (r"") tv)
 let concat_str s = concat (from_string s)

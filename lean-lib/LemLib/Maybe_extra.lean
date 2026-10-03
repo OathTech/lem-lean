@@ -20,7 +20,10 @@ open Lem_Assert_extra
 /- fromJust                -/
 /- ----------------------- -/
 
-def fromJust {a : Type} [Inhabited a] (op : Option a) : a := match op with | some v => v | none => (failwithI "fromJust of Nothing" : a)
+def fromJust { a : Type } [Inhabited a] (op : Option a) : a :=
+  match op with
+  | some v => v
+  | none => (failwithI "fromJust of Nothing" : a)
 /- Lean: at call sites with a ground result type, emit the
    [Inhabited]-bounded LemLib.fromJustI instead (axiom-free failure leaf;
    success equation still holds by rfl). Type-variable sites keep this

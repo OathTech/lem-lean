@@ -46,8 +46,10 @@ def  makeString  (len : Nat) (c : Char)  : String :=  String.ofList  (List.repli
 /- setting up pattern matching -/
 /- --------------------------- -/
 
-def string_case {a : Type} (s : String) (c_empty : a) (c_cons : Char → String → a) : a :=
-  match (String.toList s) with | [] => c_empty | c :: cs => c_cons c (String.ofList cs)
+def string_case { a : Type } (s : String) (c_empty : a) (c_cons : Char → String → a) : a :=
+  match (String.toList s) with
+  | [] => c_empty
+  | c :: cs => c_cons c (String.ofList cs)
 
 /- lem: replaced by its target representation: 
  def  concat  (sep : String) (ss : List String)  : String := 

@@ -52,8 +52,11 @@ class MapKeyType (a : Type) where
 
 export MapKeyType (mapKeyCompare)
 
-instance (priority := 500) {a : Type} [MapKeyType a] : BEq a where
-  beq x y := match mapKeyCompare x y with | .EQ => true | _ => false
+instance (priority := 500) { a : Type } [MapKeyType a] : BEq a where
+  beq x y :=
+    match mapKeyCompare x y with
+    | .EQ => true
+    | _ => false
 
 instance (priority := low) (a : Type) [SetType a] : MapKeyType a where
 
@@ -95,7 +98,11 @@ instance (priority := low) (a : Type) [SetType a] : MapKeyType a where
 /- from lists                                                                 -/
 /- -------------------------------------------------------------------------- -/
 
-def fromList {k v : Type} [MapKeyType k] (l : List (k × v)) : Fmap k v := List.foldl (fun (m : Fmap k v) (p : (k × v)) => match m, p with | m, (k1, v1) => (fmapAddBy (@mapKeyCompare k _) k1 v1 m)) fmapEmpty l
+def fromList { k v : Type } [MapKeyType k] (l : List (k × v)) : Fmap k v :=
+  List.foldl
+    (fun (m : Fmap k v) (p : (k × v)) =>
+      match m, p with
+      | m, (k1, v1) => (fmapAddBy (@mapKeyCompare k _) k1 v1 m)) fmapEmpty l
 /- -------------------------------------------------------------------------- -/
 /- to sets / domain / range                                                   -/
 /- -------------------------------------------------------------------------- -/
@@ -131,11 +138,17 @@ def  all  {k v : Type} [MapKeyType k] [Eq0 v]  (P : k → v → Bool) (m : Fmap 
 /- -------------------------------------------------------------------------- -/
 
 /- instance of SetType -/
-def map_setElemCompare {a b c d e : Type} [SetType a] [SetType b] [SetType c] [SetType d] [MapKeyType b] [MapKeyType d] (cmp : Pset (d × c) → Pset (b × a) → e) (x : Fmap d c) (y : Fmap b a) : e :=
-  cmp ((fmapToSetBy (pairCompare (@setElemCompare d _) (@setElemCompare c _)) x)) ((fmapToSetBy (pairCompare (@setElemCompare b _) (@setElemCompare a _)) y))
+def map_setElemCompare { a b c d e : Type } [SetType a] [SetType b] [SetType c] [SetType d]
+    [MapKeyType b] [MapKeyType d] (cmp : Pset (d × c) → Pset (b × a) → e) (x : Fmap d c)
+    (y : Fmap b a) :
+    e :=
+  cmp ((fmapToSetBy (pairCompare (@setElemCompare d _) (@setElemCompare c _)) x))
+    ((fmapToSetBy (pairCompare (@setElemCompare b _) (@setElemCompare a _)) y))
 
 instance (a b : Type) [SetType a] [SetType b] [MapKeyType a] : SetType (Fmap a b) where
 
-    setElemCompare x y := map_setElemCompare (setCompareBy (pairCompare (@setElemCompare a _) (@setElemCompare b _))) x y
+    setElemCompare x y :=
+      map_setElemCompare (setCompareBy (pairCompare (@setElemCompare a _) (@setElemCompare b _))) x
+        y
 
 end Lem_Map

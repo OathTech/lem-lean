@@ -34,12 +34,16 @@ open Lem_Map
 /- find                                                                       -/
 /- -------------------------------------------------------------------------- -/
 
-def find0 {k v : Type} [MapKeyType k] [Inhabited v] (k1 : k) (m : Fmap k v) : v := match ((fmapLookupBy (@mapKeyCompare k _) k1 m)) with | some x => x | none => (failwithI "Map_extra.find" : v)
+def find0 { k v : Type } [MapKeyType k] [Inhabited v] (k1 : k) (m : Fmap k v) : v :=
+  match ((fmapLookupBy (@mapKeyCompare k _) k1 m)) with
+  | some x => x
+  | none => (failwithI "Map_extra.find" : v)
 /- -------------------------------------------------------------------------- -/
 /- from sets / domain / range                                                 -/
 /- -------------------------------------------------------------------------- -/
 
-def fromSet {k v : Type} [MapKeyType k] (f : k → v) (s : Pset k) : Fmap k v := setFold (fun (k1 : k) (m : Fmap k v) => (fmapAddBy (@mapKeyCompare k _) k1 (f k1) m)) s fmapEmpty
+def fromSet { k v : Type } [MapKeyType k] (f : k → v) (s : Pset k) : Fmap k v :=
+  setFold (fun (k1 : k) (m : Fmap k v) => (fmapAddBy (@mapKeyCompare k _) k1 (f k1) m)) s fmapEmpty
 /-
 assert fromSet_0: (fromSet succ (Set.empty : set nat) = Map.empty)
 assert fromSet_1: (fromSet succ {(2:nat); 3; 4}) = Map.fromList [(2,3); (3, 4); (4, 5)]
@@ -48,7 +52,14 @@ assert fromSet_1: (fromSet succ {(2:nat); 3; 4}) = Map.fromList [(2,3); (3, 4); 
 /- fold                                                                       -/
 /- -------------------------------------------------------------------------- -/
 
-def fold {k r v : Type} [MapKeyType k] [SetType k] [SetType v] (f : k → v → r → r) (m : Fmap k v) (v1 : r) : r := setFold (fun (p : (k × v)) (r1 : r) => match p, r1 with | (k1, v1), r1 => f k1 v1 r1) ((fmapToSetBy (pairCompare (@setElemCompare k _) (@setElemCompare v _)) m)) v1
+def fold { k r v : Type } [MapKeyType k] [SetType k] [SetType v] (f : k → v → r → r) (m : Fmap k v)
+    (v1 : r) :
+    r :=
+  setFold
+    (fun (p : (k × v)) (r1 : r) =>
+      match p, r1 with
+      | (k1, v1), r1 => f k1 v1 r1)
+    ((fmapToSetBy (pairCompare (@setElemCompare k _) (@setElemCompare v _)) m)) v1
 /-
 assert fold_1: (fold (fun k v a -> (a+k)) (Map.fromList [((2:nat),(3:nat)); (3, 4); (4, 5)]) 0 = 9)
 assert fold_2: (fold (fun k v a -> (a+v)) (Map.fromList [((2:nat),(3:nat)); (3, 4); (4, 5)]) 0 = 12)
@@ -59,9 +70,12 @@ assert fold_2: (fold (fun k v a -> (a+v)) (Map.fromList [((2:nat),(3:nat)); (3, 
 /- TODO: this function is in map_extra rather than map just for implementation reasons -/
 
 /- OLD: TODO: mapMaybe depends on toList that is not defined for hol and isabelle -/
-def mapMaybe0 {a b c : Type} [MapKeyType a] (f : a → b → Option c) (m : Fmap a b) : Fmap a c :=
+def mapMaybe0 { a b c : Type } [MapKeyType a] (f : a → b → Option c) (m : Fmap a b) : Fmap a c :=
   List.foldl
-    (fun (m' : Fmap a c) (p : (a × b)) => match m', p with | m', (k, v) => (match f k v with | none => m' | some v' => (fmapAddBy (@mapKeyCompare a _) k v' m')))
-    fmapEmpty
-    (fmapElements m)
+    (fun (m' : Fmap a c) (p : (a × b)) =>
+      match m', p with
+      | m', (k, v) =>
+        (match f k v with
+         | none => m'
+         | some v' => (fmapAddBy (@mapKeyCompare a _) k v' m'))) fmapEmpty (fmapElements m)
 end Lem_Map_extra

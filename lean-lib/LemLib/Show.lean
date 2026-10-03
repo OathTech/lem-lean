@@ -24,8 +24,10 @@ instance : Show String where
 
     show0 s := String.append "\"" (String.append s "\"")
 
-def stringFromMaybe {a : Type} (showX : a → String) (x : Option a) : String :=
-  match x with | some x => String.append "Just (" (String.append (showX x) ")") | none => "Nothing"
+def stringFromMaybe { a : Type } (showX : a → String) (x : Option a) : String :=
+  match x with
+  | some x => String.append "Just (" (String.append (showX x) ")")
+  | none => "Nothing"
 
 instance (a : Type) [Show a] : Show (Option a) where
 
@@ -35,16 +37,21 @@ instance (a : Type) [Show a] : Show (Option a) where
  def  stringFromListAux  {a : Type}  (showX : a → String) (x : List a)  : String := 
   match  x with  |  [] =>  "" |  x :: xs' => (       match  xs' with  |  [] =>  showX  x |  _ =>  String.append  showX  x  String.append  "; "  lemShowListAux  showX  xs'       )
    -/
-def stringFromList {a : Type} (showX : a → String) (xs : List a) : String :=
+def stringFromList { a : Type } (showX : a → String) (xs : List a) : String :=
   String.append "[" (String.append (lemShowListAux showX xs) "]")
 
 instance (a : Type) [Show a] : Show (List a) where
 
     show0 xs := stringFromList (@show0 a _) xs
 
-def stringFromPair {a b : Type} (showX : a → String) (showY : b → String) (p : (a × b)) : String := match showX, showY, p with | showX, showY, (x, y) => String.append "(" (String.append (showX x) (String.append ", " (String.append (showY y) ")")))
+def stringFromPair { a b : Type } (showX : a → String) (showY : b → String) (p : (a × b)) :
+    String :=
+  match showX, showY, p with
+  | showX, showY, (x, y) =>
+    String.append "(" (String.append (showX x) (String.append ", " (String.append (showY y) ")")))
 
-instance _root_.lemInst_Lem_Show_Instance_Show_Show_tup2 (a b : Type) [Show a] [Show b] : Show (a × b) where
+instance _root_.lemInst_Lem_Show_Instance_Show_Show_tup2 (a b : Type) [Show a] [Show b] :
+    Show (a × b) where
 
     show0 := stringFromPair (@show0 a _) (@show0 b _)
 

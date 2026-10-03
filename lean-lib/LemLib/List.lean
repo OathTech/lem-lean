@@ -69,11 +69,35 @@ instance (a : Type) [Eq0 a] : Eq0 (List a) where
 /- compare                 -/
 /- ----------------------- -/
 
- def lexicographicCompareBy {a : Type} (cmp : a → a → LemOrdering) (l1 : List a) (l2 : List a) : LemOrdering := match l1, l2 with | [], [] => LemOrdering.EQ | [], _ :: _ => LemOrdering.LT | _ :: _, [] => LemOrdering.GT | x :: xs, y :: ys => (match cmp x y with | LemOrdering.LT => LemOrdering.LT | LemOrdering.GT => LemOrdering.GT | LemOrdering.EQ => lexicographicCompareBy cmp xs ys)
+def lexicographicCompareBy { a : Type } (cmp : a → a → LemOrdering) (l1 : List a) (l2 : List a) :
+    LemOrdering :=
+  match l1, l2 with
+  | [], [] => LemOrdering.EQ
+  | [], _ :: _ => LemOrdering.LT
+  | _ :: _, [] => LemOrdering.GT
+  | x :: xs, y :: ys =>
+    (match cmp x y with
+     | LemOrdering.LT => LemOrdering.LT
+     | LemOrdering.GT => LemOrdering.GT
+     | LemOrdering.EQ => lexicographicCompareBy cmp xs ys)
 
- def lexicographicLessBy {a : Type} (less : a → a → Bool) (less_eq : a → a → Bool) (l1 : List a) (l2 : List a) : Bool := match l1, l2 with | [], [] => false | [], _ :: _ => true | _ :: _, [] => false | x :: xs, y :: ys => ((less x y) || ((less_eq x y) && (lexicographicLessBy less less_eq xs ys)))
+def lexicographicLessBy { a : Type } (less : a → a → Bool) (less_eq : a → a → Bool) (l1 : List a)
+    (l2 : List a) :
+    Bool :=
+  match l1, l2 with
+  | [], [] => false
+  | [], _ :: _ => true
+  | _ :: _, [] => false
+  | x :: xs, y :: ys => ((less x y) || ((less_eq x y) && (lexicographicLessBy less less_eq xs ys)))
 
- def lexicographicLessEqBy {a : Type} (less : a → a → Bool) (less_eq : a → a → Bool) (l1 : List a) (l2 : List a) : Bool := match l1, l2 with | [], [] => true | [], _ :: _ => true | _ :: _, [] => false | x :: xs, y :: ys => (less x y || (less_eq x y && lexicographicLessEqBy less less_eq xs ys))
+def lexicographicLessEqBy { a : Type } (less : a → a → Bool) (less_eq : a → a → Bool) (l1 : List a)
+    (l2 : List a) :
+    Bool :=
+  match l1, l2 with
+  | [], [] => true
+  | [], _ :: _ => true
+  | _ :: _, [] => false
+  | x :: xs, y :: ys => (less x y || (less_eq x y && lexicographicLessEqBy less less_eq xs ys))
 
 instance (a : Type) [Ord0 a] : Ord0 (List a) where
 
@@ -98,7 +122,7 @@ instance (a : Type) [Ord0 a] : Ord0 (List a) where
 /- snoc                    -/
 /- ----------------------- -/
 
-def snoc {a : Type} (e : a) (l : List a) : List a := l ++ [e]
+def snoc { a : Type } (e : a) (l : List a) : List a := l ++ [e]
 /- ----------------------- -/
 /- Reverse                 -/
 /- ----------------------- -/
@@ -118,12 +142,17 @@ def  reverse  {a : Type}  (l : List a)  : List a :=  List.reverseAux  l  [] -/
 /- Map                     -/
 /- ----------------------- -/
 
- def map_tr {a b : Type} (rev_acc : List b) (f : a → b) (l : List a) : List b := match l with | [] => List.reverse rev_acc | x :: xs => map_tr ((f x) :: rev_acc) f xs
+def map_tr { a b : Type } (rev_acc : List b) (f : a → b) (l : List a) : List b :=
+  match l with
+  | [] => List.reverse rev_acc
+  | x :: xs => map_tr ((f x) :: rev_acc) f xs
 
 /- taken from: https://blogs.janestreet.com/optimizing-list-map/ -/
 
- def count_map {a b : Type} (f : a → b) (l : List a) (ctr : Nat) : List b :=
-  match l with | [] => [] | hd :: tl => f hd :: (lem_if natLtb ctr 5000 then count_map f tl (ctr + 1) else map_tr [] f tl)
+def count_map { a b : Type } (f : a → b) (l : List a) (ctr : Nat) : List b :=
+  match l with
+  | [] => []
+  | hd :: tl => f hd :: (lem_if natLtb ctr 5000 then count_map f tl (ctr + 1) else map_tr [] f tl)
 
 /- lem: replaced by its target representation: 
 def  map  {a b : Type}  (f : a → b) (l : List a)  : List b :=  count_map  f  l  0 -/
@@ -182,10 +211,16 @@ def  any  {a : Type}  (P : a → Bool) (l : List a)  : Bool :=  List.foldl  (fun
 /- ------------------------- -/
 /- get the initial part and the last element of the list in a safe way -/
 
- def dest_init_aux {a : Type} (rev_init : List a) (last_elem_seen : a) (to_process : List a) : (List a × a) :=
-  match to_process with | [] => (List.reverse rev_init, last_elem_seen) | x :: xs => dest_init_aux (last_elem_seen :: rev_init) x xs
+def dest_init_aux { a : Type } (rev_init : List a) (last_elem_seen : a) (to_process : List a) :
+    (List a × a) :=
+  match to_process with
+  | [] => (List.reverse rev_init, last_elem_seen)
+  | x :: xs => dest_init_aux (last_elem_seen :: rev_init) x xs
 
-def dest_init {a : Type} (l : List a) : Option (List a × a) := match l with | [] => none | x :: xs => some (dest_init_aux [] x xs)
+def dest_init { a : Type } (l : List a) : Option (List a × a) :=
+  match l with
+  | [] => none
+  | x :: xs => some (dest_init_aux [] x xs)
 
 /- ========================================================================== -/
 /- Indexing lists                                                             -/
@@ -204,16 +239,21 @@ def dest_init {a : Type} (l : List a) : Option (List a × a) := match l with | [
 /- [findIndices P l] returns the indices of all elements of list [l] that satisfy predicate [P]. 
    Counting starts with 0, the result list is sorted ascendingly -/
 
- def findIndices_aux {a : Type} (i :Nat) (P : a → Bool) (l : List a) : List Nat :=
-  match l with | [] => ([] : List Nat) | x :: xs => (lem_if P x then i :: findIndices_aux (i + 1) P xs else findIndices_aux (i + 1) P xs)
+def findIndices_aux { a : Type } (i :Nat) (P : a → Bool) (l : List a) : List Nat :=
+  match l with
+  | [] => ([] : List Nat)
+  | x :: xs => (lem_if P x then i :: findIndices_aux (i + 1) P xs else findIndices_aux (i + 1) P xs)
 
-def findIndices {a : Type} (P : a → Bool) (l : List a) : List Nat := findIndices_aux 0 P l
+def findIndices { a : Type } (P : a → Bool) (l : List a) : List Nat := findIndices_aux 0 P l
 /- ------------------------- -/
 /- findIndex                 -/
 /- ------------------------- -/
 /- findIndex returns the first index of a list that satisfies a given predicate. -/
 
-def findIndex {a : Type} (P : a → Bool) (l : List a) : Option Nat := match findIndices P l with | [] => none | x :: _ => some x
+def findIndex { a : Type } (P : a → Bool) (l : List a) : Option Nat :=
+  match findIndices P l with
+  | [] => none
+  | x :: _ => some x
 
 /- ------------------------- -/
 /- elemIndices               -/
@@ -255,11 +295,13 @@ def findIndex {a : Type} (P : a → Bool) (l : List a) : Option Nat := match fin
    "length xs1 = n". If there are not enough elements 
    in [xs], the original list and the empty one are returned. -/
 
- def splitAtAcc {a : Type} (revAcc : List a) (n : Nat) (l : List a) : (List a × List a) :=
-  match l with | [] => (List.reverse revAcc, []) | x :: xs => (lem_if natLteb n 0 then (List.reverse revAcc, l) else splitAtAcc (x :: revAcc) (n - 1) xs)
+def splitAtAcc { a : Type } (revAcc : List a) (n : Nat) (l : List a) : (List a × List a) :=
+  match l with
+  | [] => (List.reverse revAcc, [])
+  | x :: xs =>
+    (lem_if natLteb n 0 then (List.reverse revAcc, l) else splitAtAcc (x :: revAcc) (n - 1) xs)
 
-def splitAt {a : Type} (n : Nat) (l : List a) : (List a × List a) :=
-   splitAtAcc [] n l
+def splitAt { a : Type } (n : Nat) (l : List a) : (List a × List a) := splitAtAcc [] n l
 /-   match l with
     | []    -> ([], [])
     | x::xs -> 
@@ -288,20 +330,28 @@ def  drop  {a : Type}  (n : Nat) (l : List a)  : List a :=  Prod.snd  (splitAt  
 /- splitWhile, takeWhile, and dropWhile -/
 /- ------------------------------------ -/
 
- def splitWhile_tr {a : Type} (p : a → Bool) (xs : List a) (acc : List a) : (List a × List a) := match xs with | [] => (List.reverse acc, []) | x :: xs => (lem_if p x then splitWhile_tr p xs (x :: acc) else (List.reverse acc, (x :: xs)))
+def splitWhile_tr { a : Type } (p : a → Bool) (xs : List a) (acc : List a) : (List a × List a) :=
+  match xs with
+  | [] => (List.reverse acc, [])
+  | x :: xs => (lem_if p x then splitWhile_tr p xs (x :: acc) else (List.reverse acc, (x :: xs)))
 
-def splitWhile {a : Type} (p : a → Bool) (xs : List a) : (List a × List a) := splitWhile_tr p xs []
+def splitWhile { a : Type } (p : a → Bool) (xs : List a) : (List a × List a) :=
+  splitWhile_tr p xs []
 /- [takeWhile p xs] takes the first elements of [xs] that satisfy [p]. -/
 
-def takeWhile {a : Type} (p : a → Bool) (l : List a) : List a := Prod.fst (splitWhile p l)
+def takeWhile { a : Type } (p : a → Bool) (l : List a) : List a := Prod.fst (splitWhile p l)
 /- [dropWhile p xs] drops the first elements of [xs] that satisfy [p]. -/
 
-def dropWhile {a : Type} (p : a → Bool) (l : List a) : List a := Prod.snd (splitWhile p l)
+def dropWhile { a : Type } (p : a → Bool) (l : List a) : List a := Prod.snd (splitWhile p l)
 /- ------------------------- -/
 /- isPrefixOf                -/
 /- ------------------------- -/
 
- def isPrefixOf {a : Type} [Eq0 a] (l1 : List a) (l2 : List a) : Bool := match l1, l2 with | [], _ => true | _ :: _, [] => false | x :: xs, y :: ys => (x == y) && isPrefixOf xs ys
+def isPrefixOf { a : Type } [Eq0 a] (l1 : List a) (l2 : List a) : Bool :=
+  match l1, l2 with
+  | [], _ => true
+  | _ :: _, [] => false
+  | x :: xs, y :: ys => (x == y) && isPrefixOf xs ys
 
 /- ------------------------- -/
 /- update                    -/
@@ -337,21 +387,29 @@ def dropWhile {a : Type} (p : a → Bool) (l : List a) : List a := Prod.snd (spl
 /- lem: replaced by its target representation: 
 
 def  elemBy  {a : Type}  (eq : a → a → Bool) (e : a) (l : List a)  : Bool :=  List.any  l  (eq  e) -/
-def elem {a : Type} [Eq0 a] : a → List a → Bool := listMemberBy (fun x y => x == y)
+def elem { a : Type } [Eq0 a] : a → List a → Bool := listMemberBy (fun x y => x == y)
 /-  declare ocaml    target_rep function elem = `List.mem`  -/
 
 /- ------------------------- -/
 /- Find                      -/
 /- ------------------------- -/
  /- previously not of maybe type -/
- def find {a : Type} (P : a → Bool) (l : List a) : Option a := match l with | [] => none | x :: xs => (lem_if P x then some x else find P xs)
+def find { a : Type } (P : a → Bool) (l : List a) : Option a :=
+  match l with
+  | [] => none
+  | x :: xs => (lem_if P x then some x else find P xs)
 
 /- ----------------------------- -/
 /- Lookup in an associative list -/
 /- ----------------------------- -/
 
 /- DPM: eta-expansion for Coq backend type-inference. -/
-def lookupBy {a b : Type} (eq : a → a → Bool) (k : a) (m : List (a × b)) : Option b := Option.map (fun (x : (a × b)) => Prod.snd x) (find (fun (p : (a × b)) => match p with | (k', _) => eq k k') m)
+def lookupBy { a b : Type } (eq : a → a → Bool) (k : a) (m : List (a × b)) : Option b :=
+  Option.map (fun (x : (a × b)) => Prod.snd x)
+    (find
+      (fun (p : (a × b)) =>
+        match p with
+        | (k', _) => eq k k') m)
 
 /- ------------------------- -/
 /- filter                    -/
@@ -364,8 +422,10 @@ def lookupBy {a b : Type} (eq : a → a → Bool) (k : a) (m : List (a × b)) : 
 /- partition                 -/
 /- ------------------------- -/
 
-def partition {a : Type} (P : a → Bool) (l : List a) : (List a × List a) := (List.filter P l, List.filter (fun (x : a) => not (P x)) l)
-def reversePartition {a : Type} (P : a → Bool) (l : List a) : (List a × List a) := partition P (List.reverse l)
+def partition { a : Type } (P : a → Bool) (l : List a) : (List a × List a) :=
+  (List.filter P l, List.filter (fun (x : a) => not (P x)) l)
+def reversePartition { a : Type } (P : a → Bool) (l : List a) : (List a × List a) :=
+  partition P (List.reverse l)
 /- ------------------------- -/
 /- delete first element      -/
 /- with certain property     -/
@@ -375,7 +435,8 @@ def reversePartition {a : Type} (P : a → Bool) (l : List a) : (List a × List 
  def  deleteFirst  {a : Type}  (P : a → Bool) (l : List a)  : Option (List a) :=  match  l with  |  [] =>  none |  x  ::  xs => ( lem_if  (P  x) then  some  xs  else  Option.map  (fun (xs' : List a) =>  x  ::  xs')  (lemListDeleteFirst  P  xs))
                            -/
 
-def deleteBy {a : Type} (eq : a → a → Bool) (x : a) (l : List a) : List a := fromMaybe l (lemListDeleteFirst (eq x) l)
+def deleteBy { a : Type } (eq : a → a → Bool) (x : a) (l : List a) : List a :=
+  fromMaybe l (lemListDeleteFirst (eq x) l)
 
 /- ========================================================================== -/
 /- Zipping and unzipping lists                                                -/
@@ -404,19 +465,29 @@ instance (a : Type) [SetType a] : SetType (List a) where
 /- distinct elements         -/
 /- ------------------------- -/
 
- def allDistinct {a : Type} [Eq0 a] (l : List a) : Bool :=
-  match l with | [] => true | (x :: l') => not (elem x l') && allDistinct l'
+def allDistinct { a : Type } [Eq0 a] (l : List a) : Bool :=
+  match l with
+  | [] => true
+  | (x :: l') => not (elem x l') && allDistinct l'
 
 /- some more useful functions -/
 
- def mapMaybe {a b : Type} (f : a → Option b) (xs : List a) : List b :=
-  match xs with | [] => [] | x :: xs => (match f x with | none => mapMaybe f xs | some y => y :: (mapMaybe f xs))
+def mapMaybe { a b : Type } (f : a → Option b) (xs : List a) : List b :=
+  match xs with
+  | [] => []
+  | x :: xs =>
+    (match f x with
+     | none => mapMaybe f xs
+     | some y => y :: (mapMaybe f xs))
 
- def mapiAux {a b : Type} (f : Nat → b → a) (n : Nat) (l : List b) : List a := match l with | [] => [] | x :: xs => (f n x) :: mapiAux f (n + 1) xs
+def mapiAux { a b : Type } (f : Nat → b → a) (n : Nat) (l : List b) : List a :=
+  match l with
+  | [] => []
+  | x :: xs => (f n x) :: mapiAux f (n + 1) xs
 
 /- lem: replaced by its target representation: 
 def  mapi  {a b : Type}  (f : Nat → a → b) (l : List a)  : List b :=  mapiAux  f  0  l -/
-def deletes {a : Type} [Eq0 a] (xs : List a) (ys : List a) : List a :=
+def deletes { a : Type } [Eq0 a] (xs : List a) (ys : List a) : List a :=
   List.foldl (flip (deleteBy (fun x y => x == y))) xs ys
 /- ========================================================================== -/
 /- Comments (not clean yet, please ignore the rest of the file)               -/

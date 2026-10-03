@@ -142,6 +142,11 @@ val flat : t list -> t
     Used by the Lean backend to keep match alternatives on a single line. *)
 val flatten_newlines : t -> t
 
+(** [flatten_newlines_keep_comments t] is [flatten_newlines t], except that
+    the line breaks inside comments are kept. Used by the Lean backend,
+    whose layout pass puts a multi-line comment on lines of its own. *)
+val flatten_newlines_keep_comments : t -> t
+
 (** [concat sep [o0; ...; on]] appends all the outputs in the list using
     the separator [sep], i.e.
     it does [o0 ^ sep ^ o1 ^ ... sep ^ tn].*)

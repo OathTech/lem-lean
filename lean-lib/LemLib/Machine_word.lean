@@ -37,7 +37,7 @@ export Size (size)
 inductive itself (a : Type) : Type where
 open itself
 
-def size_itself {a : Type} [Size a] (x : itself a) : Nat := (@size a _)
+def size_itself { a : Type } [Size a] (x : itself a) : Nat := (@size a _)
 
 /- ***************************************************************** -/
 /- Fixed bitwidths extracted from Anthony's models.                -/
@@ -1625,7 +1625,7 @@ instance (a : Type) [Size a] : Show (BitVec (@Size.size a _)) where
 
     show0 := mwordToHex
 
-def size_test_fn {a : Type} [Size a] (_ : BitVec (@Size.size a _)) : Nat := (@size a _)
+def size_test_fn { a : Type } [Size a] (_ : BitVec (@Size.size a _)) : Nat := (@size a _)
 /- **************************************************************** -/
 /- Comparisons                                                    -/
 /- **************************************************************** -/

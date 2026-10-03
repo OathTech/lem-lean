@@ -281,9 +281,8 @@ instance : NumRemainder Nat where
    match  e with  |  0 =>  a /- cannot happen, call discipline guarentees e >= 1 -/ |  1 =>  mul  a  b | (  (e' + 2)) => ( let  e''  := /  e  2;                     let  a'   := (lem_if  (mod  e  2)  =  0 then  a  else  mul  a  b);                     gen_pow_aux  mul  a'  (mul  b  b)  e'')
     -/
 
-def gen_pow {a : Type} (one : a) (mul : a → a → a) (b : a) (e : Nat) : a :=
-  lem_if natLtb e 0 then one else
-  lem_if (e == 0) then one else gen_pow_aux mul one b e
+def gen_pow { a : Type } (one : a) (mul : a → a → a) (b : a) (e : Nat) : a :=
+  lem_if natLtb e 0 then one else lem_if (e == 0) then one else gen_pow_aux mul one b e
 
 instance : NumPow Nat where
 
@@ -811,7 +810,12 @@ instance : NumNegate LemUnsupported.rational where
 
 instance : NumAbs LemUnsupported.rational where
 
-    abs := (fun n=> (lem_if unsupportedRationalGreater n (LemUnsupported.rationalFromNumeral 0) then n else LemUnsupported.rationalFromNumeral 0 - n))
+    abs :=
+      (fun n=>
+        (lem_if unsupportedRationalGreater n (LemUnsupported.rationalFromNumeral 0) then
+          n
+        else
+          LemUnsupported.rationalFromNumeral 0 - n))
 
 instance : NumSucc LemUnsupported.rational where
 

@@ -34,12 +34,18 @@ open Lem_Assert_extra
 /- head of non-empty list    -/
 /- ------------------------- -/
 
-def head {a : Type} [Inhabited a] (l : List a) : a := match l with | x :: xs => x | [] => (failwithI "List_extra.head of empty list" : a)
+def head { a : Type } [Inhabited a] (l : List a) : a :=
+  match l with
+  | x :: xs => x
+  | [] => (failwithI "List_extra.head of empty list" : a)
 /- ------------------------- -/
 /- tail of non-empty list    -/
 /- ------------------------- -/
 
-def tail {a : Type} (l : List a) : List a := match l with | x :: xs => xs | [] => (failwithI "List_extra.tail of empty list" : List a)
+def tail { a : Type } (l : List a) : List a :=
+  match l with
+  | x :: xs => xs
+  | [] => (failwithI "List_extra.tail of empty list" : List a)
 /- ------------------------- -/
 /- last                      -/
 /- ------------------------- -/
@@ -59,8 +65,14 @@ def tail {a : Type} (l : List a) : List a := match l with | x :: xs => xs | [] =
 /- folding functions for non-empty lists,
     which don`t take the base case -/
 
-def foldl1 {a : Type} [Inhabited a] (f : a → a → a) (x_xs : List a) : a := match x_xs with | (x :: xs) => List.foldl f x xs | [] => (failwithI "List_extra.foldl1 of empty list" : a)
-def foldr1 {a : Type} [Inhabited a] (f : a → a → a) (x_xs : List a) : a := match x_xs with | (x :: xs) => lemListFoldr f x xs | [] => (failwithI "List_extra.foldr1 of empty list" : a)
+def foldl1 { a : Type } [Inhabited a] (f : a → a → a) (x_xs : List a) : a :=
+  match x_xs with
+  | (x :: xs) => List.foldl f x xs
+  | [] => (failwithI "List_extra.foldl1 of empty list" : a)
+def foldr1 { a : Type } [Inhabited a] (f : a → a → a) (x_xs : List a) : a :=
+  match x_xs with
+  | (x :: xs) => lemListFoldr f x xs
+  | [] => (failwithI "List_extra.foldr1 of empty list" : a)
 /- ------------------------- -/
 /- nth element               -/
 /- ------------------------- -/
@@ -72,7 +84,10 @@ def  nth  {a : Type}  (l : List a) (n : Nat)  : a :=  match  listGetOpt  l  n wi
 /- Find_non_pure             -/
 /- ------------------------- -/
 
-def findNonPure {a : Type} [Inhabited a] (P : a → Bool) (l : List a) : a := match (find P l) with | some e => e | none => (failwithI "List_extra.findNonPure" : a)
+def findNonPure { a : Type } [Inhabited a] (P : a → Bool) (l : List a) : a :=
+  match (find P l) with
+  | some e => e
+  | none => (failwithI "List_extra.findNonPure" : a)
 
 /- ------------------------- -/
 /- zip same length           -/

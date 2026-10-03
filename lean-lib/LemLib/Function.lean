@@ -39,7 +39,7 @@ def  comb  {a b c : Type}  (f : b → c) (g : a → b)  : a → c :=  (fun (x : 
 
 /- lem: replaced by its target representation: 
 def  apply  {a b : Type}  (f : a → b)  : a → b :=  (fun (x : a) =>  f  x) -/
-def rev_apply {a b : Type} (x : a) (f : a → b) : b := f x
+def rev_apply { a b : Type } (x : a) (f : a → b) : b := f x
 /- ----------------------- -/
 /- flipping argument order -/
 /- ----------------------- -/
@@ -48,6 +48,8 @@ def rev_apply {a b : Type} (x : a) (f : a → b) : b := f x
 def  flip  {a b c : Type}  (f : a → b → c)  : b → a → c :=  (fun (x : b) (y : a) =>  f  y  x) -/
 /- currying / uncurrying -/
 
-def curry {a b c : Type} (f : (a × b) → c) : a → b → c := (fun (a1 : a) (b1 : b) => f (a1, b1))
-def uncurry {a b c : Type} (f : a → b → c) (p : (a × b)) : c := match f, p with | f, (a1, b1) => f a1 b1
+def curry { a b c : Type } (f : (a × b) → c) : a → b → c := (fun (a1 : a) (b1 : b) => f (a1, b1))
+def uncurry { a b c : Type } (f : a → b → c) (p : (a × b)) : c :=
+  match f, p with
+  | f, (a1, b1) => f a1 b1
 end Lem_Function

@@ -178,6 +178,18 @@ let rec flatten_newlines t =
   | Core inner -> Core (flatten_newlines inner)
   | other -> other
 
+(* As flatten_newlines, but the line breaks inside comments are kept. The
+   Lean backend's layout pass (lean_layout.ml) puts a multi-line comment on
+   lines of its own, so the author's comment text survives unchanged. *)
+let rec flatten_newlines_keep_comments t =
+  match t with
+  | Cons(a, b) -> Cons(flatten_newlines_keep_comments a, flatten_newlines_keep_comments b)
+  | Block(b, bt, inner) -> Block(b, bt, flatten_newlines_keep_comments inner)
+  | Inter(Ast.Nl) -> Inter(Ast.Ws (Ulib.Text.of_latin1 " "))
+  | Inter(Ast.Ws r) -> Inter(Ast.Ws (flatten_newlines_in_rope r))
+  | Core inner -> Core (flatten_newlines_keep_comments inner)
+  | other -> other
+
 let comment_block min_l sl = 
   if sl = [] then emp else
   begin    

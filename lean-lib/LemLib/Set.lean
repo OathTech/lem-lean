@@ -128,13 +128,17 @@ def  filter  {a : Type} [SetType a]  (P : a → Bool) (s : Pset a)  : Pset a := 
 /- partition               -/
 /- ----------------------- -/
 
-def partition0 {a : Type} [SetType a] (P : a → Bool) (s : Pset a) : (Pset a × Pset a) := (setFilterBy setElemCompare P s, setFilterBy setElemCompare (fun (e : a) => not (P e)) s)
+def partition0 { a : Type } [SetType a] (P : a → Bool) (s : Pset a) : (Pset a × Pset a) :=
+  (setFilterBy setElemCompare P s, setFilterBy setElemCompare (fun (e : a) => not (P e)) s)
 /- ----------------------- -/
 /- split                   -/
 /- ----------------------- -/
 
-def split {a : Type} [SetType a] [Ord0 a] (p : a) (s : Pset a) : (Pset a × Pset a) := (setFilterBy setElemCompare (isGreater p) s, setFilterBy setElemCompare (isLess p) s)
-def splitMember {a : Type} [SetType a] [Ord0 a] (p : a) (s : Pset a) : (Pset a × Bool × Pset a) := (setFilterBy setElemCompare (isLess p) s, (setMemberBy (@setElemCompare a _) p s), setFilterBy setElemCompare (isGreater p) s)
+def split { a : Type } [SetType a] [Ord0 a] (p : a) (s : Pset a) : (Pset a × Pset a) :=
+  (setFilterBy setElemCompare (isGreater p) s, setFilterBy setElemCompare (isLess p) s)
+def splitMember { a : Type } [SetType a] [Ord0 a] (p : a) (s : Pset a) : (Pset a × Bool × Pset a) :=
+  (setFilterBy setElemCompare (isLess p) s, (setMemberBy (@setElemCompare a _) p s),
+    setFilterBy setElemCompare (isGreater p) s)
 /- ------------------------ -/
 /- subset and proper subset -/
 /- ------------------------ -/
@@ -157,7 +161,14 @@ def  bigunion  {a : Type} [SetType a]  (bs : Pset (Pset a))  : Pset a := (sorry 
  * Lem maintainer...
  -/
 
-def bigintersection {a : Type} [SetType a] (bs : Pset (Pset a)) : Pset a := let x2 := setEmpty; setFold (fun (x : a) (x2 : Pset a) => lem_if setForAll (fun (s : Pset a) => (setMemberBy (@setElemCompare a _) x s)) bs then setAddBy setElemCompare x x2 else x2) ((setBigunionBy (@setElemCompare a _) bs)) x2
+def bigintersection { a : Type } [SetType a] (bs : Pset (Pset a)) : Pset a :=
+  let x2 := setEmpty;
+  setFold
+    (fun (x : a) (x2 : Pset a) =>
+      lem_if setForAll (fun (s : Pset a) => (setMemberBy (@setElemCompare a _) x s)) bs then
+        setAddBy setElemCompare x x2
+      else
+        x2) ((setBigunionBy (@setElemCompare a _) bs)) x2
 /- ------------------------ -/
 /- difference               -/
 /- ------------------------ -/
@@ -184,13 +195,16 @@ def  map  {a b : Type} [SetType a] [SetType b]  (f : a → b) (s : Pset a)  : Ps
 /- If the mapping function returns Just x, x is added to the result
    set. If it returns Nothing, no element is added. -/
 
-def setMapMaybe {a b : Type} [SetType a] [SetType b] (f : a → Option b) (s : Pset a) : Pset b :=
-  (setBigunionMapBy (@setElemCompare b _) (fun (x : a) => match f x with | some y => setSingleton y | none => setEmpty
-                        )
-              s)
+def setMapMaybe { a b : Type } [SetType a] [SetType b] (f : a → Option b) (s : Pset a) : Pset b :=
+  (setBigunionMapBy (@setElemCompare b _)
+    (fun (x : a) =>
+      match f x with
+      | some y => setSingleton y
+      | none => setEmpty) s)
 /- The name mapMaybe is already being used in the list.lem -/
 
-def removeMaybe {a : Type} [SetType a] (s : Pset (Option a)) : Pset a := setMapMaybe (fun (x : Option a) => x) s
+def removeMaybe { a : Type } [SetType a] (s : Pset (Option a)) : Pset a :=
+  setMapMaybe (fun (x : Option a) => x) s
 /- ------------------------ -/
 /- min and max              -/
 /- ------------------------ -/

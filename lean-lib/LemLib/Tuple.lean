@@ -38,5 +38,7 @@ def  snd  {a b : Type}   ((v1 : a), (v2 : b))  : b :=  v2 -/
 /- swap                    -/
 /- ----------------------- -/
 
-def swap {a b : Type} (p : (a × b)) : (b × a) := match p with | (v1, v2) => (v2, v1)
+def swap { a b : Type } (p : (a × b)) : (b × a) :=
+  match p with
+  | (v1, v2) => (v2, v1)
 end Lem_Tuple

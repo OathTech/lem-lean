@@ -426,3 +426,226 @@ read a frozen copy of linksem's sources (the arc's starting sources) and a
 detached Cerberus worktree at `f3d9cc419`
 (`worktrees/cerberus-lean-frozen-niceness`; its `.lem` files are identical
 to `621caf996`'s).
+
+## 11. S3-A record: layout engine (2026-10-03)
+
+Branch `arc/output-niceness-layout`, from `arc/output-niceness` at `2e54ff0`.
+Package A of §9: the generated Lean reads like the source. Text-only; the
+declaration census is the exit test (Cerberus plan P2c-5).
+
+**Design** [AGENT]: a token-stream formatter over the final text,
+`src/lean_layout.ml`, run by `normalize_layout` after the spacing pass of
+S3-B (now `normalize_spacing`). Not the `Output` block machinery: enabling
+it would mean revisiting every emission site of the backend and arguing
+about OCaml `Format`'s box breaking against Lean's column rules; one pass
+over the text, with the lexer conventions of `normalize_spacing`, keeps the
+layout decision in one place and makes fail-closed trivial.
+
+- **Units.** A declaration (`def`, `theorem`, `abbrev`, `instance … :=`,
+  with attributes and modifiers) and all its lines up to the next item is
+  re-laid out from its tokens at indentation 0; a blank or comment-only
+  line is part of the body when a bracket is still open or the next code
+  line is a continuation. A header ending in `where`, each item of an
+  `instance`/`structure`/`inductive` body (with the lines that close its
+  brackets) and each `export` line is laid out on its own at its own
+  indentation. Imports, opens, comments, `deriving`, `termination_by` and
+  the like are copied.
+- **Structure recovered:** brackets; `match … with | … => …` (also with
+  several discriminants); `fun … => …`; `let … := …; …`; `if`/`lem_if …
+  then … else …` (an `else if` chain stays flat); `{ … }` instances and
+  `{ r with … }` updates. Everything else is an application sequence.
+- **Printer:** Wadler/Leijen groups (flat if the group fits, else its
+  breaks are taken); application arguments fill the line; match
+  alternatives and let bodies are hard breaks (always one per line, as in
+  the source); `fun`, `if` and `{ … }` break only when they do not fit. A
+  trailing `(fun … =>` argument hugs the line when everything before it
+  and its head fit (`Union`), so a chain of monadic binds costs two columns
+  per level. The fields of a structure instance, a `let` and a `match` are
+  indented relative to their own first field or keyword (`Align`).
+- **Width 100** [AGENT]: the Lean community's line length. Lines that hold
+  a string literal or a comment wider than that are left wide; neither is
+  broken.
+- **Token-preserving by construction.** A break is only ever placed where
+  the input had whitespace (and after `,`/`;`, delimiter tokens); where
+  the input had none (`x=>`, `:=lemNatDiv`, `).f`), none is added.
+- **Comments.** A comment that followed a line break in the source (the
+  backend now marks it with an `Output.new_line` in `inline_comments`), or
+  that spans lines, goes on lines of its own; any other comment trails the
+  previous token when a closer or separator follows it, else leads the
+  next one; a comment in front of a `let` or `match` always gets a line of
+  its own. Multi-line comments inside expressions are no longer folded
+  (`inline_comments`; `flatten_newlines` is now
+  `Output.flatten_newlines_keep_comments`, an added function in the shared
+  `output.ml` with no other caller): the pass puts a line break after
+  them, and where it leaves a declaration as it was, it folds them and
+  re-joins the backend's marker break, so such a declaration is exactly
+  the text that built before.
+- **Fail closed.** A declaration the parser does not fully understand (an
+  unknown keyword, an unbalanced bracket, a `let` without `;`, a `,`
+  outside brackets) is emitted as it was. `LEM_LEAN_LAYOUT_DEBUG=1` lists
+  them on stderr.
+
+**Lean 4.32.2 facts relied on** (scratch `.tmp/layout/lay3.lean`,
+`lay4.lean`, run 2026-10-03; re-verifying the orchestrator's four):
+- an alternative's right-hand side left of its `|` is refused: `expected
+  alternative right-hand-side to start in a column greater than or equal to
+  the corresponding '|'`;
+- a `let` value's continuation line at or left of the `let` column is
+  refused (`unexpected token ';'; expected command`), both for a `let` at
+  the start of its line and for one in the middle of an alternative;
+- a continuation line at column 0 after a top-level body is not an
+  argument (`unexpected identifier; expected command`);
+- the 42 shapes the pass emits elaborate: alternatives one per line with
+  the right-hand side on the next line at +2; a multi-line comment on its
+  own lines between alternatives, after `with`, inside an application and
+  after `then`; a nested unparenthesised match in a last alternative; a
+  parenthesised match as an argument with its alternatives right of the
+  bracket line; a lambda body on the next line followed by another
+  argument; equations; theorem binders at +4 with the statement on its own
+  line; an `export` list wrapped; operators at line ends and line starts;
+  a discriminant broken after its comma; an ascription split at `:`; a
+  prefix `-` split from its operand; a let value on its own line; a
+  structure update and a structure instance broken one field per line,
+  aligned under the first field after `((({`; a comment on its own line
+  in front of a `let` inside parentheses; `else if` chains; lambda
+  binders split across lines; the `lemSeq (fun _ =>\n …)\n (fun _ =>\n …)`
+  shape; a lambda with a match body as an argument on its own line.
+
+**Not laid out on purpose.** The four `indreln` constructors
+`incReflexive`, `incStep`, `monReflexive`, `monStep` of Cerberus's
+`Cmm_op.lean` (`| incStep : ∀ pre x y z a, (` — a `,` outside brackets);
+they stay on their lines as before. Comment text and string literals are
+never broken.
+
+**Measurements** (derived; `.tmp/layout/linelen.py` over the regenerated
+trees: S3-B's output `ref-b` against this slice's `cur`; the §9 headline
+numbers were taken before S3-B and on bytes, these are on characters):
+
+| Tree | lines | > 100 | > 200 | > 1000 | longest line | text on lines > 200 |
+|---|---|---|---|---|---|---|
+| Cerberus before | 32,449 | 4,316 | 1,572 | 317 | 78,812 (`GenTyping.lean`) | 55% |
+| Cerberus after | 83,781 | 1,173 | 72 | 0 | 602 (`Formatted_auxiliary.lean`) | 1% |
+| linksem before | 26,750 | 3,083 | 1,036 | 158 | 57,266 (`Linker_script.lean`) | 43% |
+| linksem after | 51,672 | 1,415 | 30 | 0 | 394 (`Dwarf.lean`) | 0% |
+
+Every line still over 200 columns holds comment text (67 of Cerberus's
+72, 17 of linksem's 30) or a string literal (5 and 13); none is code. The
+longest line is a backend-written `/- lem: fuel_measure obligation … -/`
+comment.
+
+**Gates on the committed source** (verbatim tails).
+
+Gate 1, `check.sh` (regeneration of both trees with the worktree's lem,
+`tokdiff` against S3-B's `ref-b`, comment coverage, duplicates, `mlcheck`):
+```
+[cerb]
+tokdiff: identical modulo comments/whitespace (170 files)
+[linksem]
+tokdiff: identical modulo comments/whitespace (194 files)
+comment coverage: 62 of 4060 source comments missing (16 modules)
+comment coverage: 42 of 3833 source comments missing (11 modules)
+[cerb dup]
+duplicated comments: 0
+[linksem dup]
+duplicated comments: 2
+[cerb layout]
+code after a multi-line comment: 0
+[linksem layout]
+code after a multi-line comment: 0
+check exit 0
+```
+`tokdiff.py` [AGENT]: its whitespace normalisation, which already ignored
+whitespace next to brackets, commas and `×`, now also ignores it next to
+`;` (the pass glues a let's `;` to the value; `;` is a delimiter token).
+Plant on `Core_aux.lean` line 584: the `;` of `let backend :=
+CerbGlobal.backend_name ();` removed → `tokdiff: DIFFERENT`; the same `;`
+given a space on each side → `identical modulo comments/whitespace`.
+
+Gate 2, `census-run.sh a4` (both consumers built from the regenerated
+trees — linksem's library and `main_link`, Cerberus's `CerberusLean`
+against LemLib `77ad4fa` — then `Census.lean --erase-scopes` diffed against
+S3-B's reference censuses):
+```
+linksem build exit 0
+linksem census exit 0
+linksem census (erased) diff lines vs B: 0
+cerberus build exit 0
+cerberus census exit 0
+cerberus census (erased) diff lines vs B: 0
+```
+(build log tails: `Build completed successfully (241 jobs).` and
+`Build completed successfully (252 jobs).`; no `error:` line in either.)
+The two earlier census runs on intermediate binaries failed to build and
+are listed under "found and fixed" below; this is the run on the committed
+source.
+
+Gate 3, `make -C tests/comprehensive lean` (the full suite; a first run was
+invalidated by this worker rebuilding `lem` underneath it — `../../lem:
+not found` in `lean-generate` — and repeated with the worktree untouched):
+```
+=== Generation: 69 passed, 0 failed, 0 skipped ===
+  OK: Test_comments.lean: comments preserved, layout sound
+  OK: Test_layout.lean: layout sound (15 alternatives, 2 lets, 14 comments, width 100)
+Build completed successfully (199 jobs).
+parity: 48 probes: 38 OK, 10 XFAIL (registered, Lean side pinned), 0 FAIL
+  OK: 11 proofs modules scanned; no sorry/admit/axiom/native_decide/bv_decide token
+  OK: 311 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+comprehensive exit 0
+```
+LemLib, regenerated by `make` (27 of its 30 checked-in sources change,
+layout only) and built with `scripts/capped lake build` in `lean-lib/`:
+```
+Build completed successfully (39 jobs).
+lemlib build exit 0
+```
+The `assert`s lem emits as `#eval do …` blocks are left as they were: `do`
+is not a construct the pass lays out (fail closed, by design).
+
+`nonlean-regress`:
+```
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+```
+`upstream-drift` was not run in this slice: it needs a built pristine
+upstream Lem checkout, which no longer exists in the container and which
+this worker may not create (a worktree of the primary repo). The slice's
+only change to shared code is the added `Output.flatten_newlines_keep_comments`,
+called from the Lean backend alone; `nonlean-regress` holds the fork's
+non-Lean output byte-identical. The drift check is left to the orchestrator
+at the merge.
+
+**New gate `lean-layout`** (`tests/comprehensive/test_layout.lem`,
+`check_layout.py`, rule in the `lean` target, roots in the lean-test
+lakefile): long nested matches, a nested match with a long first
+alternative, a bind chain, lets, an if-chain, a record literal, a list
+with a comment on every element, a long header, comments in every
+position. Rules: L1 every `|` is the first token of its line; L2 a let's
+`;` is the last code token of its line; L3 a line without a string or
+comment is at most 100 columns; L4 no code after a multi-line comment on
+its last line; L5 vacuity (the file must hold an alternative, a `let` and
+a comment).
+```
+  OK: Test_layout.lean: layout sound (15 alternatives, 2 lets, 14 comments, width 100)
+```
+Plants (modified copies of the generated file, 2026-10-03):
+```
+  FAIL: L1 …/p1_arm_joined.lean:76: `|` is not the first token of its line: '(String.append " in " cfg.cfg_name)) /- leading an alternati'
+  FAIL: L2 …/p2_let_body_joined.lean:104: code after the `;` of a let: '(let n := List.length sides; /- between two lets -/ let tota'
+  FAIL: L3 …/p3_wide_line.lean:69: 118 columns, no string or comment to excuse it
+  FAIL: L4 …/p4_code_after_comment.lean:93: code after a multi-line comment: 'lem_if'
+  FAIL: L5 …/p5_vacuous.lean: vacuous — alternatives=0 lets=1 comments=1
+```
+(each plant exits 1; the clean file exits 0.)
+
+**Found and fixed on the way** (each caught by a gate, none reached a
+commit): the hug layout printed a lambda's stored head and lost a comment
+attached in front of it (`(/- 1-byte delta -/ fun …`, linksem `Dwarf`);
+the header's result-type split dropped a comment attached to the `:`
+(`(bs0 : T) /- os proc usr hdr sht stbl -/ : String`, four linksem
+harness functions); the hug's fit check could stop at a hard break inside
+the first argument; the first census run failed both builds on structure
+fields not aligned with the first (`((({ name := …,`) and on a `let`
+pushed off its line start by a comment, and the second on a `let` in the
+middle of a line (`match let i := …` as a discriminant, `(let lo1 :=` in
+`Cmm_csem`) — the `Align` rule above is the fix; `x=>` and `:=lemNatDiv`
+(no space, left by S3-B) were one token to the first lexer, and the fixed
+keyword spacing of the first printer added a space there.

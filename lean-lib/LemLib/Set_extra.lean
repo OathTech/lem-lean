@@ -73,7 +73,8 @@ open Lem_Set
 /- compare                 -/
 /- ----------------------- -/
 
-def setCompare {a : Type} [SetType a] [Ord0 a] : Pset a → Pset a → LemOrdering := setCompareBy Ord0.compare
+def setCompare { a : Type } [SetType a] [Ord0 a] : Pset a → Pset a → LemOrdering :=
+  setCompareBy Ord0.compare
 
 instance (a : Type) [SetType a] : SetType (Pset a) where
 
@@ -84,8 +85,11 @@ instance (a : Type) [SetType a] : SetType (Pset a) where
 /- --------------------------- -/
 /- Is NOT supported by the coq backend! -/
 
- partial def leastFixedPointUnbounded {a : Type} [SetType a] (f : Pset a → Pset a) (x : Pset a) : Pset a :=
-   let fx := f x;
-   lem_if (setSubsetBy (@setElemCompare a _) fx x) then x
-    else leastFixedPointUnbounded f ((setUnionBy (@setElemCompare a _) fx x))
+partial def leastFixedPointUnbounded { a : Type } [SetType a] (f : Pset a → Pset a) (x : Pset a) :
+    Pset a :=
+  let fx := f x;
+  lem_if (setSubsetBy (@setElemCompare a _) fx x) then
+    x
+  else
+    leastFixedPointUnbounded f ((setUnionBy (@setElemCompare a _) fx x))
 end Lem_Set_extra

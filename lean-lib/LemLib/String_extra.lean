@@ -56,20 +56,19 @@ def stringFromNatural (n : Nat) : String :=
 def stringFromInt (i : Int) : String :=
   lem_if intLtb i ((0 : Int)) then
     String.append "-" (stringFromNat (Int.natAbs i))
-   else
+  else
     stringFromNat (Int.natAbs i)
 def stringFromInteger (i : Int) : String :=
   lem_if intLtb i ((0 : Int)) then
     String.append "-" (stringFromNatural (Int.natAbs i))
-   else
+  else
     stringFromNatural (Int.natAbs i)
 /- **************************************************************************** -/
 /- List-like operations                                                       -/
 /- **************************************************************************** -/
 
 def nth (s : String) (n : Nat) : Char := listGetBang (String.toList s) n
-def stringConcat (s : List String) : String :=
-  lemListFoldr String.append "" s
+def stringConcat (s : List String) : String := lemListFoldr String.append "" s
 /- **************************************************************************** -/
 /- String comparison                                                          -/
 /- **************************************************************************** -/

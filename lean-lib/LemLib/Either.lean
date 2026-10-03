@@ -28,10 +28,16 @@ abbrev  either  (a : Type) (b : Type) := Sum
 /- Equality.                                                                  -/
 /- -------------------------------------------------------------------------- -/
 
-def eitherEqualBy {a b : Type} (eql : a → a → Bool) (eqr : b → b → Bool) (left : Sum a b) (right : Sum a b) : Bool :=
-  match left, right with | Sum.inl l, Sum.inl l' => eql l l' | Sum.inr r, Sum.inr r' => eqr r r' | _, _ => false
+def eitherEqualBy { a b : Type } (eql : a → a → Bool) (eqr : b → b → Bool) (left : Sum a b)
+    (right : Sum a b) :
+    Bool :=
+  match left, right with
+  | Sum.inl l, Sum.inl l' => eql l l'
+  | Sum.inr r, Sum.inr r' => eqr r r'
+  | _, _ => false
 
-def eitherEqual {a b : Type} [Eq0 a] [Eq0 b] : Sum a b → Sum a b → Bool := eitherEqualBy (fun x y => x == y) (fun x y => x == y)
+def eitherEqual { a b : Type } [Eq0 a] [Eq0 b] : Sum a b → Sum a b → Bool :=
+  eitherEqualBy (fun x y => x == y) (fun x y => x == y)
 
 instance (a b : Type) [Eq0 a] [Eq0 b] : Eq0 (Sum a b) where
 
@@ -39,8 +45,14 @@ instance (a b : Type) [Eq0 a] [Eq0 b] : Eq0 (Sum a b) where
 
     isInequal x y := not (eitherEqual x y)
 
-def either_setElemCompare {a b c d : Type} (cmpa : d → b → LemOrdering) (cmpb : c → a → LemOrdering) (x : Sum d c) (y : Sum b a) : LemOrdering :=
-  match x, y with | Sum.inl x', Sum.inl y' => cmpa x' y' | Sum.inr x', Sum.inr y' => cmpb x' y' | Sum.inl _, Sum.inr _ => LemOrdering.LT | Sum.inr _, Sum.inl _ => LemOrdering.GT
+def either_setElemCompare { a b c d : Type } (cmpa : d → b → LemOrdering)
+    (cmpb : c → a → LemOrdering) (x : Sum d c) (y : Sum b a) :
+    LemOrdering :=
+  match x, y with
+  | Sum.inl x', Sum.inl y' => cmpa x' y'
+  | Sum.inr x', Sum.inr y' => cmpb x' y'
+  | Sum.inl _, Sum.inr _ => LemOrdering.LT
+  | Sum.inr _, Sum.inl _ => LemOrdering.GT
 
 instance (a b : Type) [SetType a] [SetType b] : SetType (Sum a b) where
 
@@ -50,8 +62,19 @@ instance (a b : Type) [SetType a] [SetType b] : SetType (Sum a b) where
 /- Utility functions.                                                         -/
 /- -------------------------------------------------------------------------- -/
 
-def either0 {a b c : Type} (fa : a → c) (fb : b → c) (x : Sum a b) : c := match x with | Sum.inl a1 => fa a1 | Sum.inr b1 => fb b1
+def either0 { a b c : Type } (fa : a → c) (fb : b → c) (x : Sum a b) : c :=
+  match x with
+  | Sum.inl a1 => fa a1
+  | Sum.inr b1 => fb b1
 
- def partitionEither {a b : Type} (l : List (Sum a b)) : (List a × List b) := match l with | [] => ([], []) | x :: xs => (match partitionEither xs with | (ll, rl) => (match x with | Sum.inl l => ((l :: ll), rl) | Sum.inr r => (ll, (r :: rl))))
+def partitionEither { a b : Type } (l : List (Sum a b)) : (List a × List b) :=
+  match l with
+  | [] => ([], [])
+  | x :: xs =>
+    (match partitionEither xs with
+     | (ll, rl) =>
+       (match x with
+        | Sum.inl l => ((l :: ll), rl)
+        | Sum.inr r => (ll, (r :: rl))))
 
 end Lem_Either

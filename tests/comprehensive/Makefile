@@ -14,7 +14,7 @@ LAKE = "$(CAPPED)" lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-comments lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
+.PHONY: all lean lean-comments lean-layout lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -23,7 +23,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-version lean-constants-required lean-parity-admission lean-generate lean-comments lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+lean: lean-version lean-constants-required lean-parity-admission lean-generate lean-comments lean-layout lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
 
 # The reserved-name list is required (linksem 2026-09-28, B10): with the
 # library's lean_constants missing, lem must refuse to generate Lean (it used
@@ -119,6 +119,15 @@ lean-no-sorry-proofs:
 lean-comments: lean-generate
 	@echo "=== Comments and layout (gate) ==="
 	@python3 check_comments.py test_comments.lem Test_comments.lean
+
+# The layout pass (src/lean_layout.ml, output-niceness S3-A): in the
+# generated Test_layout.lean every `|` starts its line, a let's body starts
+# a new line, lines without a string or comment fit the width, no code
+# follows a multi-line comment, and the file is not vacuous (L1-L5; plants
+# recorded in doc/lean-backend/2026-10-03_output-niceness-arc-plan.md §11).
+lean-layout: lean-generate
+	@echo "=== Layout (gate) ==="
+	@python3 check_layout.py Test_layout.lean
 
 lean-no-fuel-numerals:
 	@echo "=== No fuel numerals in LemLib or generated code (gate) ==="

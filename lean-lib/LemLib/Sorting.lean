@@ -28,7 +28,13 @@ open Lem_Num
 /- permutations              -/
 /- ------------------------- -/
 
- def isPermutationBy {a : Type} (eq : a → a → Bool) (l1 : List a) (l2 : List a) : Bool := match l1 with | [] => List.isEmpty l2 | (x :: xs) => (match lemListDeleteFirst (eq x) l2 with | none => false | some ys => isPermutationBy eq xs ys)
+def isPermutationBy { a : Type } (eq : a → a → Bool) (l1 : List a) (l2 : List a) : Bool :=
+  match l1 with
+  | [] => List.isEmpty l2
+  | (x :: xs) =>
+    (match lemListDeleteFirst (eq x) l2 with
+     | none => false
+     | some ys => isPermutationBy eq xs ys)
 
 /- ------------------------- -/
 /- isSorted                  -/
@@ -44,7 +50,13 @@ open Lem_Num
 -/
 
 /- DPM: rejigged the definition with a nested match to get past Coq's termination checker. -/
- def isSortedBy {a : Type} (cmp : a → a → Bool) (l : List a) : Bool := match l with | [] => true | x1 :: xs => (match xs with | [] => true | x2 :: _ => (cmp x1 x2 && isSortedBy cmp xs))
+def isSortedBy { a : Type } (cmp : a → a → Bool) (l : List a) : Bool :=
+  match l with
+  | [] => true
+  | x1 :: xs =>
+    (match xs with
+     | [] => true
+     | x2 :: _ => (cmp x1 x2 && isSortedBy cmp xs))
 
 /- ----------------------- -/
 /- insertion sort          -/
@@ -55,13 +67,17 @@ open Lem_Num
  def  insertBy  {a : Type}  (cmp : a → a → Bool) (e : a) (l : List a)  : List a :=  match  l with  |  [] =>  [e] |  x  ::  xs => ( lem_if  cmp  x  e then  x  ::  (lemInsertBy  cmp  e  xs)  else  (e  ::  x  ::  xs))
  -/
 
-def insertSortBy {a : Type} (cmp : a → a → Bool) (l : List a) : List a := List.foldl (fun (l : List a) (e : a) => lemInsertBy cmp e l) [] l
+def insertSortBy { a : Type } (cmp : a → a → Bool) (l : List a) : List a :=
+  List.foldl (fun (l : List a) (e : a) => lemInsertBy cmp e l) [] l
 
 /- ----------------------- -/
 /- general sorting         -/
 /- ----------------------- -/
 
-def predicate_of_ord {a : Type} (f : a → a → LemOrdering) (x : a) (y : a) : Bool :=
-  match f x y with | LemOrdering.LT => true | LemOrdering.EQ => true | LemOrdering.GT => false
+def predicate_of_ord { a : Type } (f : a → a → LemOrdering) (x : a) (y : a) : Bool :=
+  match f x y with
+  | LemOrdering.LT => true
+  | LemOrdering.EQ => true
+  | LemOrdering.GT => false
 
 end Lem_Sorting
