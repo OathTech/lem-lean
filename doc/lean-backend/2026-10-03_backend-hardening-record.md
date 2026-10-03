@@ -1179,3 +1179,28 @@ every measurement, the three-row constant table, the theorem statements and
 the decision to spell the old instance terms out, the probe legs, the census
 instrument and its explanation criterion, the Cerberus patch, the cerberus-sl
 table, the TODO 45 disposition and this record.
+
+## Orchestrator verification of the BEq-lattice slice (2026-10-03)
+
+The orchestrator re-ran the gates independently on `e87056f`, from the same
+frozen inputs:
+```
+arc make exit 0   [tree clean after make]
+cerb: 0 differing files / linksem: 0 differing files   [generated text vs 5dfcd25's lem]
+lemlib exit 0  (Build completed successfully (39 jobs).)
+=== Generation: 73 passed, 0 failed, 0 skipped ===
+Build completed successfully (208 jobs).
+parity: 49 probes: 38 OK, 11 XFAIL (registered, Lean side pinned), 0 FAIL
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+upstream-drift: 944 upstream files; 198 differ   [library code rows all comments/whitespace only; cerberus-ocaml / linksem-ocaml absent]
+```
+Direct probes against the new LemLib:
+- `#synth BEq Nat` and `#synth BEq String` both give `instBEqOfDecidableEq`.
+- The operator's `example (a b : Nat) (h : (a == b) = true) : a = b := by simpa using h` compiles.
+- `#print axioms` on `BeqLattice.nat_old_eq_new`, `string_old_eq_new` and `bitVec_old_eq_new` gives `[propext, Classical.choice, Quot.sound]`; on `ordering_old_eq_new` it gives `[propext]`.
+- With `pp.explicit`, `nat_old_eq_new` states
+  `@BEq.beq Nat (@instBEqOfSetType Nat (@instSetTypeOfOrd Nat instOrdNat)) a b = @BEq.beq Nat (@instBEqOfDecidableEq Nat instDecidableEqNat) a b`.
+  So it relates the old bridge instance to core's, and is not a vacuous `x = x`.
+- The orchestrator did not re-run the declaration census (675 Cerberus / 596
+  linksem changes, all explained). It is the pre-merge audit's to
+  re-derive.
