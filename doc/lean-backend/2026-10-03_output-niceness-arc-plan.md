@@ -706,3 +706,245 @@ lean_keyword_probe: 178 core keywords checked
 `| None ->`. Lem's constructor is `Nothing`, so `None` is a variable
 pattern there. It is the last arm and behaves as a wildcard, on OCaml as
 well. It is a candidate for linksem's upstream tray.
+
+## 13. Audit fixes (2026-10-03)
+
+The pre-merge audit of the arc at `c423e5c` (a fresh reviewer; notes,
+probes and driver in the orchestrator's `.tmp/audit/`) ruled "merge after
+fixes". The orchestrator reproduced MAJOR-1, MAJOR-2 and MINOR-2. Fixes
+on `arc/output-niceness-layout`, fast-forwarded to `c423e5c` first: the
+code, tests and regenerated LemLib in `131b922`, the documents (this
+section, DESIGN's layout claims, the three banners, TODO's line
+references, RECORDS) in the commit after it; the same gates as §11, all
+run on `131b922`'s tree. One finding per paragraph, with its evidence.
+
+Also found by the new test and fixed in `131b922`: the auto-import rule
+for dotted `target_rep` text (`collect_cr_simple_import`) accepted any
+prefix whose first byte is its own upper case, so `(fun (p : Nat × Nat)
+=> (p).1)` produced `import (fun (p : Nat × Nat) => p` and the module
+did not build. It now accepts only an identifier-shaped module name. No
+consumer text changes (such a rep would already have broken its build).
+
+**MAJOR-1 — `normalize_spacing` split tokens.** `(x).1` became `x .1`
+(the atom rule put a space before a following `.`), `'×'` became `' × '`
+(a character literal with a multi-byte character was not recognised, so
+the `×` rule spaced it) and `×'` became `× '` (the `×` rule did not know
+the `PProd` token). All three are reachable through `declare lean
+target_rep` text and Lean rejects them. Fixes in `src/lean_backend.ml`:
+a `char_literal_end` that accepts an escape or one UTF-8 character of one
+to four bytes; `×` followed by `'` is copied; a `.` after a removed atom
+stays attached; `«…»` names are copied as they are (a space inside is
+part of the name). Evidence (the auditor's `drv/t_spacing.lean`, run
+through the current spacing pass with a driver built from the worktree,
+`.tmp/layout/lay-driver2`; `<` after, `>` before):
+```
+< def a2 (x : Nat × Nat) := x.1
+> def a2 (x : Nat × Nat) := x .1
+< def a5 : Char := '×'
+< def a6 : Type := (_ : Nat) ×' Nat
+> def a5 : Char := ' × '
+> def a6 : Type := (_ : Nat) × ' Nat
+<   open Foo (bar)
+<   export Foo (bar)
+>   open Foo bar
+>   export Foo bar
+```
+Lean 4.32.2 on the two outputs: before, `5:20: error: missing end of
+character literal`, `2:26: error: Function expected at` (the `.1`) and
+`25:12: error: unexpected identifier; expected '('` (the indented
+`export`); after, none of the three (the probe's other errors are its
+undefined names, the same on both sides).
+
+**MAJOR-2 — the renderer altered token text.** `render` right-stripped
+and dropped empty lines over its whole buffer, so a multi-line string
+literal lost a blank line and trailing spaces (a value change) and a
+multi-line comment inside a laid-out body lost its blank lines; the lexer
+split `«a b»` at the space and the fill broke it over two lines. Fixes in
+`src/lean_layout.ml`: the renderer builds its lines between its own
+breaks and trims only those (a token never ends in a space; a line of
+nothing but indentation is dropped), a token holding line breaks is
+copied as it is and never fits a line (`MLText`, as comments already
+were), and `«…»` is one token. Evidence (the auditor's
+`drv/t_layout.lean` through the full pass, `cat -A`):
+```
+  "line one$
+  line two$
+$
+line four with trailing spaces   $
+end" ++ "and a long tail to push it over the width limit of one hundred columns for sure yes yes"$
+```
+and `«a b»` is kept whole at the line break (`… + «a b» +$` / `    «a b»$`).
+In the consumers this restores the blank and whitespace-only lines inside
+multi-line comments that the previous renderer had removed (see "what
+changed" below); Lean 4.32.2 accepts the whole `t_layout` output except
+the probe's own `/- a comment-led line -/ IO.println r` inside a `do`
+block, which is invalid Lean on any layout (the item starts at the
+comment's end column, so it continues the previous item; the error is
+the same on the text before the pass).
+
+**MINOR-1 — the fail-closed path was not "as it was".** Commands outside
+the keyword lists (`#eval`, `#check`) were swallowed into the previous
+declaration, and `verbatim_lines` re-spaced tokens, folded every
+multi-line comment that shared a line with code and joined every
+comment-led line to its predecessor (inside a swallowed `#eval do` block
+this joined `let r := b1 1` and `/- c -/ IO.println r`). Now a line
+starting with `#` is a unit boundary and it and the indented lines of its
+block are copied; a declaration left as it was is each line's original
+text, byte for byte, with exactly two inverses of what the backend does
+for the pass: a multi-line comment followed by another token on its line
+is folded (the backend no longer folds the comments inside expressions),
+and a column-0 line starting with a comment followed by code — the
+`Output.new_line` marker `inline_comments` writes before a comment that
+followed a line break in the source — is joined to the line before it.
+Without these two a left-as-is declaration would not be the text that
+built before the pass (a multi-line comment ahead of `| arm`, or the
+marker's line break, would end a match early). Evidence: in the
+`t_layout` output `#check b3`, `#eval b7 2` and `#eval b8 2` start their
+own lines at column 0 and the `#eval do` block's two lines are unchanged.
+DESIGN's "left exactly as it was" now says this.
+
+**MINOR-2 — `lean-lib/LemLib/Set.lean` stale at `c423e5c`.** `make`
+regenerates it (five `lem:` markers), and with this slice's text changes
+also `Basic_classes.lean` and `List.lean` (nested comments, one `(i : Nat)`).
+A second `make` changes nothing further. All three are committed.
+
+**MINOR-3 — `check_comments.py` C1 used a substring oracle.** The
+auditor's plant `c1_substring2.lean` (the comment `leading a field`
+removed, its text embedded in another comment) passed. C1 and C2 now count
+exact normalised-text matches over every comment of the generated file,
+nested comments counted on their own (a Lem comment nested in a comment is
+now a nested Lean comment, and the backend's `lem: replaced by its target
+representation` blocks quote source comments inside them). C4 ignores the
+lines inside a multi-line comment: they are the author's text, which the
+renderer now keeps. Plants (the auditor's set, 2026-10-03):
+```
+Test_comments      OK: Test_comments.lean: comments preserved, layout sound
+c1_substring2      FAIL: C1 test_comments.lem:23: comment missing: 'trailing a field'
+c1_substring       FAIL: C1 test_comments.lem:23: comment missing: 'trailing a field'
+c1_removed         FAIL: C1 test_comments.lem:23: comment missing: 'trailing a field'
+c1_knownlost       OK: c1_knownlost.lean: comments preserved, layout sound
+c1_knownlost2      FAIL: C1 test_comments.lem:46: comment tagged KNOWN-LOST now appears; remove the tag
+c2_dup             FAIL: C2 test_comments.lem:24: comment emitted 2 times: 'leading a field'
+c3_code_after      FAIL: C3 c3_code_after.lean:111: code after a multi-line comment: '| Green => 2 /- trailing an arm -/'
+c4_blank_run       FAIL: C4 c4_blank_run.lean:106: two consecutive blank lines
+```
+(`c1_knownlost` is the plant where the registered loss is absent, which is
+the required state.) On `Cabs_to_ail.lean` the three whitespace-only lines
+all lie inside comments and C4 reports none.
+
+**NITs taken.** Nested Lem comments: only the author's text is escaped
+(`escape_lean_comment_text`), a nested comment keeps real delimiters (with
+a space before `/-` when the text before it ends in `-`), so
+`/ - a nested / - twice - / comment - /` is now `/- a nested /- twice -/
+comment -/`. A lone `:` (not `::`, not `:=`) gets a space on each side:
+`(x :(Nat × Nat))` → `(x : (Nat × Nat))`, `(pc :parse_context)` →
+`(pc : parse_context)`. `in_export_or_open` skips the line's indentation,
+so an indented `open`/`export X (y)` keeps its parentheses (the evidence
+block of MAJOR-1). Not taken: NIT-2 of the notes (an expression's leading
+own-line comment trails `:=` because `take_comments` drops the whitespace
+that carried the line break) — a backend change with its own hazard
+surface, left for a slice of its own.
+
+**Regression gate `lean-text-fidelity`** (`tests/comprehensive/test_text_fidelity.lem`,
+`check_text_fidelity.py`, the hand-written `lean-test/TestTextFidelityHelper.lean`
+for `«a b»`, roots in the lakefile, rule in the `lean` target): `×'` (a
+`target_rep` type and function), `(p).1`, `'×'`, `«a b»` and the
+`assert`s' `#eval do` blocks, all through `target_rep` text; the module
+compiles and its asserts run in `lean-compile`. Rules T1–T6 are
+byte-checks on the code (comments and strings blanked), T6 is vacuity. A
+multi-line string literal is NOT reachable from Lem: a string literal's
+line breaks are emitted as `\n` (the auditor's `p_mlstring.lem` →
+`"line one\n  line two\n\nline four with trailing spaces   \nend"`), and
+Lem's lexer refuses a line break inside backquoted `target_rep` text
+(`Lexical error: unknown character \``, `.tmp/layout/fid/t_ml.lem`); the
+renderer's handling of one is covered by the driver evidence above.
+```
+  OK: Test_text_fidelity.lean Test_text_fidelity_auxiliary.lean: target_rep text intact
+```
+Plants (mutated copies of the generated modules):
+```
+t1     FAIL: T1 …/t1_main.lean:26: `× '` found
+t2     FAIL: T2 …/t2_main.lean:23: ` .1` found
+t3     FAIL: T1 …/t3_main.lean:26: `× '` found
+t4     FAIL: T4 …/t4_main.lean:37: `«a b»` broken over a line
+t5     FAIL: T5 …/t5_aux.lean:12: `#eval do` block changed: ['  if ((use_fst == …
+t5b    FAIL: T5 …/t5b_aux.lean:11: `#eval` not at the start of its line: '#eval
+```
+
+**What changed in the consumers' text** (against the `c423e5c` trees,
+`.tmp/layout/ref-c`; derived counts from `diff -r`): Cerberus 16 and
+linksem 124 lines where a lone `:` gained its space; 436 and 107 lines
+where a nested comment's escaped delimiters became real ones; 43 and 74
+blank or whitespace-only lines restored inside multi-line comments. No
+code token moved: `tokdiff` identical on both trees, with its
+normalisation extended to the whitespace next to a lone `:` (and no longer
+ignoring the space in `× '`, which is how MAJOR-1's third case had slipped
+past it).
+
+**Gates on the committed source** (verbatim tails).
+
+Gate 1, `check.sh` against `ref-c` (the `c423e5c` trees):
+```
+[cerb]
+tokdiff: identical modulo comments/whitespace (170 files)
+[linksem]
+tokdiff: identical modulo comments/whitespace (194 files)
+comment coverage: 62 of 4060 source comments missing (16 modules)
+comment coverage: 42 of 3833 source comments missing (11 modules)
+duplicated comments: 0
+duplicated comments: 2
+code after a multi-line comment: 0
+code after a multi-line comment: 0
+cur/cerb.log:4
+cur/linksem.log:0
+```
+(the four declarations left as they were are the `indreln` constructors of
+§11.)
+
+Gate 2, `census-run.sh f2` (both consumers built from the trees of the
+committed binary; erased census against S3-B's references; an earlier
+run `f1` on the binary before the auto-import fix gave the same lines):
+```
+linksem build exit 0
+linksem census exit 0
+linksem census (erased) diff lines vs B: 0
+cerberus build exit 0
+cerberus census exit 0
+cerberus census (erased) diff lines vs B: 0
+```
+(build log tails: `Build completed successfully (241 jobs).`,
+`Build completed successfully (252 jobs).`)
+
+Gate 3, `make -C tests/comprehensive lean`:
+```
+=== Generation: 70 passed, 0 failed, 0 skipped ===
+  OK: Test_comments.lean: comments preserved, layout sound
+  OK: Test_layout.lean: layout sound (15 alternatives, 2 lets, 14 comments, width 100)
+  OK: Test_text_fidelity.lean Test_text_fidelity_auxiliary.lean: target_rep text intact
+Build completed successfully (202 jobs).
+info: Test_text_fidelity_auxiliary.lean:12:0: PASS: fst_of_1
+info: Test_text_fidelity_auxiliary.lean:16:0: PASS: ab_is_7
+parity: 48 probes: 38 OK, 10 XFAIL (registered, Lean side pinned), 0 FAIL
+  OK: 11 proofs modules scanned; no sorry/admit/axiom/native_decide/bv_decide token
+  OK: 314 files scanned; no lemDefaultFuel, no LemFuel instance, no literal fuel (F1-F5)
+comprehensive exit 0
+```
+(a first run of the suite, before the auto-import fix, failed in
+`lean-compile` on exactly that bogus `import` line:
+`Test_text_fidelity.lean:5:7: expected identifier`.)
+
+LemLib, regenerated by `make` (`Set.lean`, `Basic_classes.lean`,
+`List.lean`; a second `make` changes nothing) and built with
+`scripts/capped lake build` in `lean-lib/`:
+```
+Build completed successfully (39 jobs).
+lemlib build exit 0
+```
+
+`nonlean-regress`:
+```
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+```
+`upstream-drift`: as in §11, left to the orchestrator (no pristine
+upstream Lem in the container; the slice's shared-code change is still
+the one added `Output` function).

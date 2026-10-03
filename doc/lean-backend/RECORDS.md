@@ -164,8 +164,12 @@ describe a design that is no longer current.
   measurement then used OCaml 5.4.0, opam 2.1.5 and Lean 4.28.0.
 - 2026-10-03: README.md, DESIGN.md, TODO.md and this index were
   reconciled by reading against the source at `2e54ff0`; no build was run
-  for that. The last recorded test-suite run is the one quoted in the
-  [output-niceness record](2026-10-03_output-niceness-arc-plan.md) §10.
+  for that.
+- 2026-10-03, later: after the arc's pre-merge audit, DESIGN.md's layout
+  claims, the three banners and TODO.md's line references were corrected
+  against the audit-fix commit `131b922`. The last recorded test-suite run
+  is the one quoted in the
+  [output-niceness record](2026-10-03_output-niceness-arc-plan.md) §13.
 
 ## Elsewhere
 

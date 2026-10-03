@@ -1,7 +1,8 @@
 # The Lean backend for Lem
 
-Last reconciled with the source at `2e54ff0` (2026-10-03); what was
-checked when is in [RECORDS.md](RECORDS.md#when-the-front-documents-were-checked).
+Last reconciled with the source at `131b922` (2026-10-03, the
+output-niceness arc with its audit fixes); what was checked when is in
+[RECORDS.md](RECORDS.md#when-the-front-documents-were-checked).
 This is an early experimental backend, not a general correctness proof.
 
 This fork adds a **Lean 4 backend** to [Lem](https://github.com/rems-project/lem):

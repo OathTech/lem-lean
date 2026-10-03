@@ -1,9 +1,11 @@
 # DESIGN: how the Lean backend works
 
-**Status of this document.** It describes the source at `2e54ff0`
-(reconciled 2026-10-03 by reading `src/lean_backend.ml`, LemLib and the
-records; no build was run for this document). The backend is early and
-experimental; nothing here is a general correctness proof.
+**Status of this document.** It describes the source at `131b922`
+(the output-niceness arc with its audit fixes; reconciled 2026-10-03 by
+reading `src/lean_backend.ml`, `src/lean_layout.ml`, LemLib and the
+records, and re-read against the audit-fix commit, whose gate run is in
+the output-niceness record §13). The backend is early and experimental;
+nothing here is a general correctness proof.
 
 This is for a newcomer to the code: what the backend emits, and why the
 load-bearing choices are what they are. How the backend came to be this
@@ -85,12 +87,15 @@ The output is meant to be read next to its source.
   copies a whitespace list into several arms, so the backend records the
   comments it has emitted and identifies them physically
   (`St.emitted_comments`).
-- **Comments cannot break Lean.** Comment text is escaped (`-/`, `/-`)
-  and padded, so it can neither end the Lean comment early nor form a
-  `/--` docstring or `/-!` module doc. A comment written on a line of its
+- **Comments cannot break Lean.** The author's text is escaped (a `-/` or
+  `/-` in it gets a space between the two characters) and the comment is
+  padded, so it can neither end the Lean comment early nor form a `/--`
+  docstring or `/-!` module doc; a Lem comment nested in a comment is
+  emitted as a nested Lean comment. A comment written on a line of its
   own, or spanning lines, is placed on lines of its own by the layout pass
-  (below); a comment is never folded, except inside a declaration the
-  layout pass leaves unchanged, where its line breaks become spaces
+  (below). A comment is never folded, except inside a declaration the
+  layout pass leaves as it was, where a multi-line comment followed by
+  another token on its line has its line breaks turned into spaces
   (Lean's layout is column-sensitive: a multi-line comment could otherwise
   put a later `|` arm left of the first and end the match early).
 - **The backend's own comments are marked.** Every comment the backend
@@ -118,12 +123,15 @@ The output is meant to be read next to its source.
   literals, character literals and comments, it removes
   trailing spaces, makes each run of blank lines a single blank line,
   makes each run of spaces inside a line one space, removes spaces after
-  `(`/`[` and before `)`/`]`/`,`, puts one space on each side of `×`, and
-  replaces `( atom )` by `atom` for a name or numeral (except a numeral
-  followed by `.`, and the name list of `export`/`open`, which needs its
-  parentheses), inserting a space where two tokens would otherwise join.
-  Line-start indentation is kept. It adds, removes or joins no other
-  token, so it changes no declaration.
+  `(`/`[` and before `)`/`]`/`,`, puts one space on each side of `×` and
+  of a lone `:`, and replaces `( atom )` by `atom` for a name or numeral
+  (except a numeral followed by `.`, and the name list of `export`/`open`,
+  which needs its parentheses), inserting a space where two tokens would
+  otherwise join (a following `.` stays attached: `(x).1` is `x.1`).
+  Line-start indentation is kept. Character literals (`'×'`, escapes),
+  `«…»` names and the token `×'` are copied as they are. Apart from those
+  parentheses it adds, removes, splits or joins no token, so it changes
+  no declaration.
   The layout step (`src/lean_layout.ml`) is a token-stream formatter over
   that text. It re-lays out each declaration from its tokens with
   Wadler/Leijen groups at width 100: match alternatives and `let` bodies
@@ -135,14 +143,25 @@ The output is meant to be read next to its source.
   alternative of a broken `match` on its own line, the first included, at
   one column (an alternative left of the first ends the match); a
   continuation deeper than the line it continues. A break is placed only
-  where the text had whitespace (or after `,`/`;`), so it adds, removes or
-  joins no token. A declaration it does not fully parse (an unknown
-  keyword, an unbalanced bracket, a `,` outside brackets, as in Cerberus's
-  `indreln` rules) is left exactly as it was (`LEM_LEAN_LAYOUT_DEBUG=1`
-  lists them). Checked on Cerberus and linksem by a declaration census
+  where the text had whitespace (or after `,`/`;`), and the text of a
+  token — a multi-line string literal or comment included — is copied as
+  it is, so it adds, removes or joins no token. Commands (`#eval`,
+  `#check`, …) and the indented lines of their blocks are copied. A
+  declaration it does not fully parse (an unknown keyword, an unbalanced
+  bracket, a `,` outside brackets, as in Cerberus's `indreln` rules) is
+  left as it was: each line's original text, except that a multi-line
+  comment followed by another token on its line is folded, and a
+  column-0 line that starts with a comment followed by code — the
+  backend's marker for a comment that followed a line break in the source
+  (`inline_comments`) — is joined to the line before it; that is the text
+  as it was before the pass (`LEM_LEAN_LAYOUT_DEBUG=1` lists such
+  declarations). Checked on Cerberus and linksem by a declaration census
   equal before and after, macro scopes erased (output-niceness record
-  §10, §11); gate: `tests/comprehensive/test_layout.lem` with
-  `check_layout.py` (suite phase `lean-layout`).
+  §10, §11, §13); gates: `tests/comprehensive/test_layout.lem` with
+  `check_layout.py` (suite phase `lean-layout`) and
+  `test_text_fidelity.lem` with `check_text_fidelity.py`
+  (`lean-text-fidelity`: `×'`, `(p).1`, `'×'`, `«a b»` and `#eval do`
+  blocks through `target_rep` text, byte-checked).
 - **Printer rules with the same aim.** A parenthesised type around an
   atom, a tuple or another parenthesised type is printed without the
   parentheses unless they hold a comment; each list of `open`s is one
