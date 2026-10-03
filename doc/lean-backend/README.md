@@ -318,8 +318,8 @@ hooks (item 6).
 Upstreaming intent: every extension is written to be plausibly
 acceptable to rems-project/lem (no fork-only hacks in the core). Draft
 reports of upstream Lem defects found along the way, each with a
-reproducer run on pristine upstream `3802cb0`, are in `doc/upstream-tray/`
-on the branch `docs/lem-upstream-tray`, which is not yet merged; nothing
+reproducer run on pristine upstream `3802cb0`, are in
+[`doc/upstream-tray/`](../upstream-tray/) (start with its README); nothing
 has been filed (TODO item 30). Cerberus and linksem keep their own earlier
 Lem drafts in their `upstream-tray/lem/` directories.
 
