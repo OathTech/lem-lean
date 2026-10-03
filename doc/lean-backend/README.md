@@ -1,8 +1,13 @@
 # The Lean backend for Lem
 
-**Checked 2026-09-25:** source implementation at `fd048dbaeed9e0031496aa6ae4a56bb20c07841a`;
-[follow-up evidence](2026-09-25_public-readiness-followup.md). This is an
-early experimental backend, not a general correctness proof.
+**What was checked when.** The public-readiness review checked this page
+end to end against `fd048db` on 2026-09-25
+([evidence](2026-09-25_public-readiness-followup.md)). On 2026-10-03 it
+was reconciled by reading against the source at `2e54ff0`; that
+reconciliation ran no build. The last recorded test-suite run is the one
+quoted in the [output-niceness record](2026-10-03_output-niceness-arc-plan.md)
+§10. This is an early experimental backend, not a general correctness
+proof.
 
 This fork adds a **Lean 4 backend** to [Lem](https://github.com/rems-project/lem):
 `lem -lean` compiles Lem definitions to Lean 4 source that builds
@@ -16,8 +21,8 @@ Cerberus.
 **Provenance.** The Lean backend was developed primarily by AI agents
 (Claude, Anthropic) operating under the direction and review of a
 human operator (Mike Dodds). Upstream Lem is by its own authors (see
-the [top-level README](../../README.md)); the dated design records in
-[`doc/notes/`](../notes/) are the working history of the backend.
+the [top-level README](../../README.md)); the dated records indexed in
+[RECORDS.md](RECORDS.md) are the working history of the backend.
 
 Who this is for:
 
@@ -34,10 +39,11 @@ Who this is for:
 Use this fork explicitly: the upstream opam release does not contain the
 Lean backend. The measured platform is Linux x86_64; other platforms are
 unverified. Prerequisites are Git, Bash, GNU make/coreutils/diffutils,
-a C toolchain, opam 2, and elan with the toolchain in `lean-lib/lean-toolchain` installed. The local
-measurement used OCaml 5.4.0, opam 2.1.5 and Lean 4.28.0; since 2026-09-28
-the pin is Lean 4.32.2, the toolchain Cerberus uses (record:
-[linksem findings](2026-09-28_linksem-findings.md), B9). Package constraints are in `opam`. Public repository/ref
+a C toolchain, opam 2, and elan with the toolchain in `lean-lib/lean-toolchain` installed
+(Lean 4.32.2, the toolchain Cerberus uses; record:
+[linksem findings](2026-09-28_linksem-findings.md), "Toolchain move to
+Lean 4.32.2"). The 2026-09-25 quickstart measurement used OCaml 5.4.0,
+opam 2.1.5 and Lean 4.28.0, the pin at that time. Package constraints are in `opam`. Public repository/ref
 availability and a fresh dependency download remain operator checks in
 the cleanup evidence; offline tests used preinstalled dependencies.
 
@@ -112,11 +118,15 @@ include the commit, toolchain, minimal `.lem` source and exact command.
    small client, and compiles/evaluates `double 21`. This checks installation
    and integration, not comprehensive language support.
 2. **Backend regression:** `make -C tests/comprehensive lean` checks generated
-   Lean, negative refusals, invariance and OCaml/Lean parity with panic-abort enabled
-   for native probes; four registered
-   parity XFAILs remain. A build/setup failure is a failure even on a registered
+   Lean, comment preservation and layout, negative refusals, invariance and
+   OCaml/Lean parity with panic-abort enabled for native probes; ten
+   registered parity expected failures remain (see Known limits). A build/setup failure is a failure even on a registered
    XFAIL probe. `make nonlean-regress` compares the nine other
    emitters' outputs and exit statuses with committed goldens.
+   `make upstream-drift DRIFT_OUT=<empty dir>` compares the fork's non-Lean
+   output (library, `tests/backends`, and linksem's and Cerberus's OCaml)
+   with a pristine upstream Lem build (`tests/upstream-drift/run.sh` gives
+   the required checkouts).
    `bash scripts/test_version.sh` checks the version recipe using isolated
    scratch tags. `make lean-tests` is an older, broader aggregate including
    historical examples; its existence is not a claim that all examples pass.
@@ -209,7 +219,7 @@ hash must reject that fallback.
   output is untouched. An inductive relation whose premise
   reaches the fuel takes `[LemFuel]` as an inductive parameter.
   Cerberus applies fuel declares across its whole execution path and
-  checks that slice is total in its own build.
+  checks that this part is total in its own build.
 - **Zero axioms; effects are explicit state.** The shipped runtime declares no axioms, and the backend adds no
   axiom declarations. A downstream proof still requires an axiom audit
   of its hand-written imports and target representations. Ambient counters are
@@ -239,18 +249,34 @@ hash must reject that fallback.
 
 ## Known limits
 
-The parity suite at the measured pin has four registered expected failures:
-`p_str_bytes` and `p_str_escapes` expose OCaml byte strings versus Lean
-Unicode strings; `f_int_of_big_num` and `f_int32_overflow` record deliberate
-numeric differences from the OCaml target. Failure tests compare reached
+The parity suite has ten registered expected failures
+(`tests/comprehensive/parity/expected_failures.txt`; the runner pins the
+exact Lean output of each):
+- awaiting a planned fix: `p_str_bytes` and `p_str_escapes`, OCaml byte
+  strings versus Lean Unicode strings (TODO item 31);
+- ruled OCaml-target deviations, where Lean follows Lem's own semantics:
+  `f_int_of_big_num`, `f_int32_overflow`, `p_mword_width`,
+  `p_word_bitwise_wide`, `p_word_bitwise_wide_mul` (see DESIGN.md);
+- open discrepancies awaiting an operator decision: `f_let_float_branch`
+  and `f_let_float_closure` (Lean's compiler moves a `let` whose value
+  fails into a branch or closure that never runs, so the failure is lost;
+  TODO item 24), and `p_fn_compare_same_closure` (OCaml's `compare` on one
+  closure object returns 0, Lean fails; TODO item 32).
+
+Failure tests compare reached
 failures under `LEAN_ABORT_ON_PANIC=1`; unused pure failures can be erased.
 Finite tests and local Pset/Pmap laws are not a general OCaml–Lean
 correspondence theorem. The runtime translations retain their source
 notices and license terms: [NOTICE](../../lean-lib/NOTICE.md).
 
 Lem theorems and lemmas are not translated: each leaves a
-`/- lem: theorem NAME not translated -/` marker, without its statement;
-Lem assertions become build-time evaluation checks.
+`/- lem: theorem NAME not translated -/` marker, without its statement
+(TODO item 29); Lem assertions become build-time evaluation checks.
+Comments before `and` in a recursive function group are lost (TODO item
+26). A comparison demanded at a function type is a Lean build error,
+where OCaml compiles and raises only if a closure is reached
+([linksem findings](2026-09-28_linksem-findings.md), "Comparison at a
+function type").
 
 General fuel-completion monotonicity and propagation are **not proved by
 the backend** (TODO item 13). A per-function `fuel_measure` obligation
@@ -279,26 +305,37 @@ same-typed swaps need value tests (see DESIGN).
 
 ## Status
 
-The backend generates Cerberus’s selected Lean model and the comprehensive
-suite. The consumer has a declared sequential execution profile, concurrency
-stubs, native boundaries and explicit exclusions; this is not support for
-every Cerberus model or C program. Known residual work, registered
-in [TODO.md](TODO.md): emission uses a single module-scoped mutable
-state (`St` in `src/lean_backend.ml`) with per-lifetime reset hooks —
-effect-free emission is a planned refactor; the Ott grammar
-in `language/lem.ott` carries the new declare forms, with
-machine-checking pending Ott tooling. Upstreaming intent: every
-extension is written to be plausibly acceptable to rems-project/lem
-(no fork-only hacks in the core).
+The backend generates Cerberus's selected Lean model, linksem's model
+(96 modules) and the comprehensive suite. The consumer Cerberus has a
+declared sequential execution profile, concurrency stubs, native
+boundaries and explicit exclusions; this is not support for every Cerberus
+model or C program.
 
-Pointers: [DESIGN.md](DESIGN.md) for how it works;
-[TODO.md](TODO.md) for the backlog register (registered follow-ups
-with sources and prices); the upstream-facing manual chapter
-[`doc/manual/backend_lean.md`](../manual/backend_lean.md);
-[`doc/notes/`](../notes/) for dated design records;
-`src/lean_backend.ml` for the backend itself; `lean-lib/` for the
-runtime. Defects in this backend are recorded here, as dated records
-in `doc/lean-backend/` with reproducers in `tests/comprehensive/`;
-reports we intend for upstream Lem itself are drafted downstream in
-cerberus-lean's `lean_frontend/docs/upstream-tray/lem/` (see that
-directory's README).
+Open work is registered in [TODO.md](TODO.md). The larger items are: the
+failure-monad translation, which would make strictness and evaluation
+order part of the generated semantics and remove the temporary
+`lemSeqImpl` native seam (item 24); strings as bytes (item 31);
+consolidating the Lean-only declares before a stable release (item 18);
+and general fuel monotonicity (item 13). Emission uses one module-level
+mutable state (`St` in `src/lean_backend.ml`) with per-lifetime reset
+hooks (item 6).
+
+Upstreaming intent: every extension is written to be plausibly
+acceptable to rems-project/lem (no fork-only hacks in the core). Draft
+reports of upstream Lem defects found along the way, each with a
+reproducer run on pristine upstream `3802cb0`, are in `doc/upstream-tray/`
+on the branch `docs/lem-upstream-tray`, which is not yet merged; nothing
+has been filed (TODO item 30). Cerberus and linksem keep their own earlier
+Lem drafts in their `upstream-tray/lem/` directories.
+
+Pointers:
+- [DESIGN.md](DESIGN.md): how the backend works and why.
+- [TODO.md](TODO.md): the open-work register.
+- [RECORDS.md](RECORDS.md): index of the dated records (history, rulings,
+  measurements).
+- [`doc/manual/backend_lean.md`](../manual/backend_lean.md): the
+  upstream-facing manual chapter.
+- `src/lean_backend.ml`: the backend; `lean-lib/`: the runtime.
+
+Defects in this backend are recorded as dated records in
+`doc/lean-backend/`, with reproducers in `tests/comprehensive/`.

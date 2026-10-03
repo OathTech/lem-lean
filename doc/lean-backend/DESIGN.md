@@ -1,12 +1,14 @@
-# DESIGN — how the Lean backend works
+# DESIGN: how the Lean backend works
 
-**Checked 2026-09-25:** source implementation at `fd048dbaeed9e0031496aa6ae4a56bb20c07841a`;
-[follow-up evidence](2026-09-25_public-readiness-followup.md). This is an
-early experimental backend, not a general correctness proof.
+**Status of this document.** It describes the source at `2e54ff0`
+(reconciled 2026-10-03 by reading `src/lean_backend.ml`, LemLib and the
+records; no build was run for this document). The backend is early and
+experimental; nothing here is a general correctness proof.
 
-For a newcomer to the code. What the backend emits, and why the
-load-bearing choices look the way they do. History lives in the dated
-records under [`doc/notes/`](../notes/), not here.
+This is for a newcomer to the code: what the backend emits, and why the
+load-bearing choices are what they are. How the backend came to be this
+way is in the dated records, indexed in [RECORDS.md](RECORDS.md); open
+work is in [TODO.md](TODO.md).
 
 ## The pipeline
 
@@ -15,12 +17,14 @@ the `-lean` target (`src/main.ml`). It runs after Lem's ordinary
 front end — parsing, typechecking, target-specific transformations —
 and renders each `.lem` source as a Lean module:
 
-- `Foo.lean` — the definitions: inductive types, defs, instances.
-  User-module definitions are emitted at top level; the Lem library
-  modules are wrapped in `Lem_`-prefixed namespaces (`LemLib.Set` →
-  `namespace Lem_Set`) to keep them clear of Lean's own names.
+- `Foo.lean` — the definitions: inductive types, structures, defs,
+  instances. User-module definitions are emitted at top level; the Lem
+  library modules are wrapped in `Lem_`-prefixed namespaces
+  (`LemLib.Set` → `namespace Lem_Set`) to keep them clear of Lean's own
+  names.
 - `Foo_auxiliary.lean` — the auxiliary file Lem emits per source
-  (assertion/lemma stubs), importing the main module.
+  (assertion checks, `fuel_measure` obligations), importing the main
+  module.
 
 Generated files import the **LemLib runtime** (`lean-lib/`): the
 `LemOrdering` comparison type, comparator-keyed set and finite-map
@@ -64,6 +68,95 @@ theorem fuel_countdown_lemFuel_zero (n : Nat) :
 -- a caller: def uses_countdown [LemFuel] (k : Nat) : Nat := fuel_countdown k + 1
 ```
 
+### Comments and layout
+
+The output is meant to be read next to its source.
+
+- **The author's comments are carried over.** Every Lem `(* … *)`
+  comment at a position the backend lays out is emitted as a Lean
+  `/- … -/` comment next to the item it was written next to: in front of
+  a removed `val` and inside its type, at every `declare`, on
+  constructors (trailing comments stay on the line), on record fields
+  (including between `=` and `<|` and before `|>`), at `and` in type
+  groups, between match arms, and in front of any expression (an
+  expression's leading comments are taken out of its whitespace in one
+  place, so no rendering path can drop them).
+- **Each comment appears once per file.** Lem's pattern compilation
+  copies a whitespace list into several arms, so the backend records the
+  comments it has emitted and identifies them physically
+  (`St.emitted_comments`).
+- **Comments cannot break Lean.** Comment text is escaped (`-/`, `/-`)
+  and padded, so it can neither end the Lean comment early nor form a
+  `/--` docstring or `/-!` module doc. Inside a definition printed on one
+  line, a comment's line breaks become spaces, because Lean's layout is
+  column-sensitive and a multi-line comment could end a `|` arm early.
+- **The backend's own comments are marked.** Every comment the backend
+  writes starts with `lem:` (`/- lem: … -/`), for example
+  `/- lem: theorem NAME not translated -/`,
+  `/- lem: replaced by its target representation: … -/`, and the
+  explanatory blocks above derived comparisons and sizes.
+- **Comment bytes are decoded as the author wrote them.** Upstream Lem's
+  lexer reads comment bytes as Latin-1, which turns a UTF-8 `§` into
+  `Â§` (upstream report draft 02 in the tray, see [TODO.md](TODO.md) item
+  30). The Lean output undoes that on each comment fragment when the
+  result is valid UTF-8 (`undo_latin1_reading`). OCaml output is
+  untouched.
+- **Known loss:** comments before `and` in a recursive function group,
+  because upstream's clause regrouping rebuilds those separators (TODO
+  item 26). A few comments inside rewritten expressions are also lost
+  (measured 2026-10-03: 62 of 4060 in Cerberus, 42 of 3833 in linksem).
+- **Layout pass.** Every generated file goes through `normalize_layout`.
+  Outside string literals, character literals and comments, it removes
+  trailing spaces, makes each run of blank lines a single blank line,
+  makes each run of spaces inside a line one space, removes spaces after
+  `(`/`[` and before `)`/`]`/`,`, puts one space on each side of `×`, and
+  replaces `( atom )` by `atom` for a name or numeral (except a numeral
+  followed by `.`, and the name list of `export`/`open`, which needs its
+  parentheses), inserting a space where two tokens would otherwise join.
+  Line-start indentation is kept. It adds, removes or joins no other
+  token, so it changes no declaration.
+- **Printer rules with the same aim.** A parenthesised type around an
+  atom, a tuple or another parenthesised type is printed without the
+  parentheses unless they hold a comment; each list of `open`s is one
+  statement wrapped at about 80 columns (`open_line`); adjacent implicit
+  binders of one kind share a binder, `{a b : Type}`
+  (`merge_implicit_binders`; only adjacent ones, so argument order and
+  declaration types are unchanged).
+
+The test is `tests/comprehensive/test_comments.lem` with
+`check_comments.py` (suite phase `lean-comments`): every comment present
+exactly once, the registered loss tagged `KNOWN-LOST` and absent, no code
+after a multi-line comment on its last line, no whitespace-only lines and
+no runs of blank lines. Each change to this machinery was checked with a
+declaration census of Cerberus and linksem (every constant's name, kind
+and type and value hashes unchanged, up to Lean's renumbering of
+inaccessible hygienic helper names); see the
+[output-niceness record](2026-10-03_output-niceness-arc-plan.md) §7, §8,
+§10.
+
+### Records
+
+A Lem record becomes a Lean `structure`, and that includes a record in a
+mutual block of types: Lean 4 admits `inductive` and `structure`
+declarations in one `mutual` block, recursive through `List`/`Option`,
+with the usual `{ r with f := v }` update. Field projections are Lean's
+own, literals are `{ f := v, … }`, updates are `{ r with f := v }`.
+
+The exception is a mutual block whose members have **different numbers
+of type parameters**. Such a block is emitted with the parameters as
+indices, in `Type 1` (`type_def_indexed`), and a Lean structure cannot
+have indices. There a record is a single-constructor inductive with
+generated accessor functions, and its literals and updates are built
+positionally in field-declaration order (`St.mutual_records`,
+`mutual_record_path`). Tests: `tests/comprehensive/test_mutual_record_order.lem`
+covers both kinds of block.
+
+A field named like a type is renamed by Lem (`forest : list forest`
+becomes `forest0`). The rename is needed: in a Lean structure a field's
+name is in scope in the types of the later fields, so an unrenamed
+`forest` field would capture the type name
+([output-niceness record](2026-10-03_output-niceness-arc-plan.md) §8).
+
 ## Load-bearing design choices
 
 **Totality is opt-in, and structural when opted; the fuel is the
@@ -86,16 +179,17 @@ so the kernel sees a total function, and the wrapper starts the counter
 from the AMBIENT fuel — `LemFuel.fuel`, the one field of the LemLib class
 `LemFuel`, which every fuel'd function and every definition that
 (transitively) reaches one takes as an instance-implicit `[LemFuel]`
-binder (the FUEL LIFTING: the reader-lifting fixpoint with an
-instance-implicit binder, so call sites are textually unchanged and
+binder (the *fuel lifting*: the same fixpoint as the reader lifting, with
+an instance-implicit binder, so call sites are textually unchanged and
 bare/higher-order references need no repair). A worker takes `[LemFuel]`
 only when it passes the ambient on (every fuel'd callee starts its own
 counter from the FULL ambient, never from the caller's remaining
 counter); a leaf worker's only fuel is its counter. No instance exists
 in the library or in generated code, by design: the entry point supplies
 it once (`@f ⟨n⟩ …`, `letI : LemFuel := ⟨n⟩` at a CLI parse) and a
-theorem quantifies over it — `@f ⟨n⟩ = f_lemFuel n` by rfl, and stability above a sufficient bound is a per-function theorem
-(the exemplar `tests/comprehensive/lean-test/TestFuelParamCheck.lean`
+theorem quantifies over it — `@f ⟨n⟩ = f_lemFuel n` by rfl, and stability
+above a sufficient bound is a per-function theorem (the hand-proved
+exemplar `tests/comprehensive/lean-test/TestFuelMonoExemplar.lean`
 proves `spin_fuel_irrelevant`). General completion and propagation remain
 unproved by the backend (TODO item 13). The fuel bounds recursion *depth* at the
 declared points, never value size. At counter zero the worker returns
@@ -106,17 +200,18 @@ kernel-transparent exhaustion lemma `f_lemFuel_zero` (`f_lemFuel 0 … =
 sentinel := rfl`) per fuel'd function. Fuel composes with truly-mutual
 blocks — every member fuel'd (all-or-none), sibling calls pass the
 decremented counter, the wrappers follow `end` — and with reader
-lifting, INCLUDING inside a mutual block: a mutual `Val_def` is lifted
+lifting, including inside a mutual block: a mutual `Val_def` is lifted
 all-or-none by the reader fixpoint and every member's worker, wrapper,
-obligation and `_zero` lemma carries the reader binders exactly as the
-single-def case always did (the arc-3 B2 refusal was lifted 2026-09-20,
-`2026-09-20_fuel-mutual-reader-record.md`; `test_fuel_mutual_reader.lem`).
+obligation and `_zero` lemma carries the reader binders as in the
+single-definition case (`test_fuel_mutual_reader.lem`;
+[record](2026-09-20_fuel-mutual-reader-record.md)).
 The remaining composition gaps are refused at generation: supply lifting
-in a truly-mutual block, `reader_seed` in a mutual block. A hand-written Lean rep that
-reads the ambient declares `{lean} fuel_consumer` so its callers are
-lifted (the library's `Relation.transitiveClosureByCmp` is the one
-library case: `Pset.tc` runs pset.ml's unbounded `lfp` on the caller's
-fuel). A fuel'd function whose recursion is bounded by its data but not
+in a truly-mutual block, `reader_seed` in a mutual block. A hand-written
+Lean rep that reads the ambient declares `{lean} fuel_consumer` so its
+callers are lifted. The library declares no `fuel_consumer`: `Pset.tc`
+bounds its fixpoint iteration by a bound derived from the relation
+(form (c) under "No magic values" below). A fuel'd function whose
+recursion is bounded by its data but not
 in the structural checker's shape adds ``declare {lean} fuel_measure
 val f = `List.length xs + 1` ``: the worker is unchanged and the WRAPPER
 instantiates the counter from that computable Lean expression over the
@@ -141,15 +236,15 @@ transparent, every other field a leaf 0 — a leaf's weight never affects
 the bound: what makes a derived size INSUFFICIENT is a field under an
 unsupported head (`set t`, a user type applied to `t`) that the same
 recursion descends into; there the sufficiency obligation is the backstop,
-unprovable with the opaque sentinel) — the same-module case (cerberus
+unprovable with the opaque sentinel). The same-module case (Cerberus
 `ctypeEqual`/`eq_core_base_type`) cannot be served by a hand-written size
 (import cycle) and Lean's `sizeOf` is noncomputable; non-recursive types
 get none (constant size; a measure over it is refused), and the emission
 policy is "every recursive block" because the measure that needs a size
-may live in a module of a later invocation (measured on cerberus: 81 of
+may live in a module of a later invocation (measured on Cerberus: 81 of
 290 inductives, 1.6% of the tree's bytes). An inductive relation whose
 premise reaches the ambient fuel takes `[LemFuel]` as an inductive
-PARAMETER and is fuel-lifted like a def (cerberus `monTrace`). The
+PARAMETER and is fuel-lifted like a def (Cerberus `monTrace`). The
 ruling behind the mechanism, [USER 2026-09-04], verbatim: "I think
 sticking to our principle that we don't change the lem structure for
 ocaml is a very good design rule. That's available here with (2) right,
@@ -157,27 +252,27 @@ and the effect is that we have to do more work, but it's just bounded
 kernel checked work. [...] we should do the [hard for us in terms of
 work] but [trust=surface preserving] one" and "we maintain the lem
 structure, and we get additional properties we want without any trust
-decrease". Measures are checked fail-closed at generation (only the
+decrease" ([fuel-measure record](2026-09-04_fuel-measure-record.md)).
+Measures are checked fail-closed at generation (only the
 function's parameters and QUALIFIED Lean names; `sizeOf` refused —
 Lean's `SizeOf` instances are noncomputable; `LemFuel` refused; a
 numeral or any parameter-free measure refused as a magic value; every
 dotted component of a name is tested and `_root_` is refused) — speedbumps;
 the theorem is the certificate. Fail-closed: a fuel'd/fuel-lifted definition referenced where no
-instance is in scope (a lem `assert`/lemma, an instance method) is a
+instance is in scope (a lem `assert`, an instance method) is a
 generation-time error — there is no default to inject (an indreln rule
-is not such a site: the relation takes the binder itself). The
-former per-declaration numeric budget (`declare {lean} fuel val f = N`)
-and the library default `lemDefaultFuel = 10^6` were DELETED by the
-fuel-parameter arc as magic values (below); the numeric form is refused
-with its reason. Tests: `tests/comprehensive/test_fuel_param.lem`, `test_lem_size.lem`
-(derived sizes; the D2 `Eq`-instance shape), the
+is not such a site: the relation takes the binder itself). There is no
+per-declaration numeric budget and no library default fuel: the form
+`declare {lean} fuel val f = N` is refused with its reason, because such
+a number is a magic value (below). Tests: `tests/comprehensive/test_fuel_param.lem`, `test_lem_size.lem`
+(derived sizes; an `Eq`-instance equality measured by `lemSize`), the
 kernel pins `lean-test/TestFuelParamCheck.lean`, `TestLemSizeCheck.lean`, the compiled phase
 `lean-fuel-param` (two sufficient fuels agree; loud exhaustion
 fail-stops), the two-target probe `parity/probes/p_fuel.lem` (Lean at two
 fuels vs the fuel-free OCaml reference), the gate
 `check_no_fuel_numerals.sh`, and the `neg_fuel_*` probes. Cerberus
 applies fuel declares across its entire execution path and checks that
-slice's totality in its own build. A measure ranges over the head's PARAMETERS; a
+path's totality in its own build. A measure ranges over the head's PARAMETERS; a
 recursion argument bound by a trailing lambda (the head binds fewer
 parameters than its type has arrows — a trailing `function`, or a user
 `fun k ->`) is made a parameter by the Lean emission alone — every
@@ -186,31 +281,28 @@ scrutinee as `lemTail`, a user binder under its own name — for measured
 and structural definitions only, so the `.lem` keeps its shape and the
 OCaml text never moves (the declare table's "point-free tails" row).
 
-**The effect boundary is RETIRED: zero axioms, effects as explicit
-state.** Lem's model allows target-representation functions with pure
-types but effectful implementations (fresh-name counters, mutable tag
-state). Lean both type-checks purity and *optimizes on it* — the
-compiler will common-subexpression-eliminate two calls to a "pure"
-`fresh () : Nat` into one, which breaks effectful implementations.
-The historical resolution (`declare {lean} effectful`) implemented
-such reps as `BaseIO` externs crossed back into pure types by a
-single library axiom with call-site thunk wraps and
-`never_extract`/`noinline` armour. The effect-retirement arc DELETED
-that mechanism end-to-end — the axiom from `lean-lib/LemLib.lean`
-(HISTORY note remains there), the wrap emission and the attribute
-machinery from the backend — because its erasure claim was an
-unprovable trust boundary in every downstream proof cone. The
-`{lean} effectful` annotation now gets a fail-closed generation-time
-refusal naming the migration path. Consequence for consumers:
-neither the library nor generated code declares ANY axiom; a
-downstream proof's axiom set comes from Lean itself. Effect state is
-modeled explicitly instead: counters via the supply lifting (below),
-ambient configuration via the reader lifting — the Cerberus consumer
-completed exactly this migration, targeting cones of exactly the
-three standard Lean axioms.
+**Zero axioms; effects as explicit state.** Lem's model allows
+target-representation functions with pure types but effectful
+implementations (fresh-name counters, mutable tag state). Lean both
+type-checks purity and *optimizes on it* — the compiler will
+common-subexpression-eliminate two calls to a "pure" `fresh () : Nat`
+into one, which breaks effectful implementations. The backend therefore
+models effect state explicitly: counters via the supply lifting (below),
+ambient configuration via the reader lifting. Neither the library nor
+generated code declares ANY axiom; a downstream proof's axiom set comes
+from Lean itself and from the consumer's own hand-written code. An
+earlier mechanism (`declare {lean} effectful`: `BaseIO` externs crossed
+back into pure types by a library axiom) was removed because that
+crossing was an unprovable trust boundary in every downstream proof
+cone; the annotation now gets a fail-closed generation-time refusal
+naming the supply lifting as the migration path (history note at the top
+of `lean-lib/LemLib.lean`;
+[deletion record](2026-09-01_L2-deletion-record.md)). The Cerberus
+consumer completed this migration, targeting proof cones of exactly
+the three standard Lean axioms.
 
-**Supply lifting: the state analog of the reader, and the retired
-axiom's replacement for counters.** `declare {lean} supply val c`
+**Supply lifting: the state analog of the reader, and the replacement
+for effectful counters.** `declare {lean} supply val c`
 declares `c : unit -> nat` a lifted SUPPLY: every definition that
 (transitively) draws from it takes the current supply as an extra
 explicit parameter — after any reader binders — and returns the final
@@ -230,8 +322,7 @@ compiled two-target probe before it was implemented
 `p_supply_shapes.lem`; the pins are the OCaml binaries' outputs). The
 transform is DETERMINISTIC state-passing only: it emits
 let-bindings, tuples, and `supplySplit`, never a nondeterminism
-constructor (the effect-retirement charter's obligation O7 is
-structural, not asserted). Drawing arguments of a target_rep'd head
+constructor, so determinism holds by construction. Drawing arguments of a target_rep'd head
 (library constructors `Just`/`Left`/`Right`, rep'd functions) are
 bound to variables and passed to the ordinary application renderer.
 Where the reader lifting survives higher-order code by type-preserving
@@ -241,9 +332,9 @@ or over-saturated applications, infix uses, instance methods, indreln
 rules, monadic positions, and drawing TOP-LEVEL VALUE bindings (the
 OCaml reference evaluates those once at module initialisation, which
 per-use state passing cannot mirror) are all fail-closed
-generation-time errors with named messages (guards G-λ, G-bare,
-G-arity, G-infix, G-inst, G-rel, G-value in `src/lean_backend.ml`; the
-honest boundary is that state-lifting a monadic region is a model
+generation-time errors with named messages (the guards are labelled
+G-λ, G-bare, G-arity, G-infix, G-inst, G-rel and G-value in
+`src/lean_backend.ml`; state-lifting a monadic region would be a model
 change, not a backend transform). Entry points seed the supply
 explicitly and receive the final value in the returned pair; with
 several declared supplies every lifted def threads all of them,
@@ -308,7 +399,7 @@ backend emits no live placeholder for a missing implementation; arbitrary
 raw Lean text and hand-written imports still require compilation and
 consumer axiom checks.
 
-**`Inhabited` is derived fail-closed; the unsound fallback is gone.**
+**`Inhabited` is derived fail-closed.**
 Lem programs have failure sites (incomplete matches, `failwith`) whose
 Lean emission needs an inhabitant of the result type. The backend
 derives real bounded `Inhabited` instances per generated type
@@ -319,9 +410,9 @@ sites as `LemLib.failwithI` — a loud panic that then returns the
 derived default, so library-call semantics survive while harnesses
 running with `LEAN_ABORT_ON_PANIC=1` fail-stop. If no instance is
 derivable the backend refuses at generation time, naming the type and
-the escape hatches. (An earlier design used an axiom-valued
-inhabitant; it was logically inconsistent and is deleted — see the
-history note at the top of `lean-lib/LemLib.lean`.)
+the escape hatches. There is no axiom-valued fallback inhabitant: one
+would make the logic inconsistent (history note at the top of
+`lean-lib/LemLib.lean`).
 
 **Comparisons mirror OCaml's polymorphic compare.** `BEq`/`Ord` (and
 the set/map instance trio) are derived structurally with OCaml parity
@@ -331,11 +422,16 @@ field declaration order. Lean's own `deriving Ord` ranks constructors
 by declaration index, which coincides with OCaml's rank unless a
 nullary constructor is declared after a block constructor; exactly
 those variants (single or mutual) are emitted through the backend's
-`ctor_rank_ocaml` derivation instead of `deriving` (parity-fix F4,
-2026-09-03; two-target pin
-`tests/comprehensive/parity/probes/p_cmp_order.lem`). Types carrying
-functions — where OCaml's compare raises at runtime — get loud
-`failwithI` residual bodies rather than fake instances. Finite comparison probes exercise these choices; the failure-erasure
+`ctor_rank_ocaml` derivation instead of `deriving` (two-target pin
+`tests/comprehensive/parity/probes/p_cmp_order.lem`). Comparisons at a
+type with an unconstrained type variable get `[Ord a]`/`[BEq a]` binders
+threaded by a fixpoint guided by Lem's instances; there are no fallback
+instances, so a missed demand is a compile error
+([design](../notes/2026-09-29_comparison-dictionaries-design.md)).
+Function-typed positions are compared structurally with
+`lemFunctionalCompare`/`lemFunctionalBeq`, which fail loudly with
+OCaml's message `compare: functional value` when they reach a closure.
+Finite comparison probes exercise these choices; the failure-erasure
 limits below still apply.
 
 **Set comprehensions: expanded where possible, rejected otherwise.**
@@ -351,16 +447,20 @@ enclosing definition a `target_rep`. Library definitions in that
 corner render only as comments behind their Lean inlines/target reps
 (`set.lem`'s `sigma`).
 
-**Numeric and list operations aim at OCaml parity, with registered exceptions.** The Lean reps of lem's numeric library mirror
-`ocaml-lib/nat_num.ml` and zarith one function at a time (parity-fix
-slice 2026-09-03): `int`/`int32`/`int64` division and remainder are
+**Numeric and list operations aim at OCaml parity, with registered
+exceptions.** The Lean reps of lem's numeric library mirror
+`ocaml-lib/nat_num.ml` and zarith one function at a time
+([parity-fix record](2026-09-03_parity-fix-record.md)):
+`int`/`int32`/`int64` division and remainder are
 `Nat_num.int_div`/`int_mod` (truncating with the sign adjustment — NOT
 Euclidean for a negative divisor; `integer` stays Euclidean), `int32`/
 `int64` are Lean's `Int32`/`Int64` and WRAP like OCaml's — and so do the
-conversions INTO them (`…FromInteger`/`…FromNatural`/numerals are
-`Int32.ofInt`/`Int32.ofNat`): lem's own reps are `word_of_int`/`n2w`,
-modular, and zarith's `Overflow` raise at those conversions is an
-OCaml-execution artifact not mirrored ([USER 2026-09-04], D4 below) —
+conversions INTO them (`…FromInteger`/`…FromNatural`/numerals are LemLib
+wrappers over `Int32.ofInt`/`Int32.ofNat` and the `Int64` pair): lem's
+own prover-side reps are `word_of_int`/`n2w`, modular, and zarith's
+`Overflow` raise at those conversions is an OCaml-execution artifact not
+mirrored ([USER 2026-09-04], adopting the recommendation recorded as D4 in the
+[exception-case rulings](2026-09-03_exception-case-rulings.md)) —
 every division by zero fails loudly instead of
 totalising to 0, `integerSqrt` of a negative fails, and
 `integerOfString`/`naturalOfString` parse zarith's `Z.of_string`
@@ -371,43 +471,64 @@ Deep lists: every library list/string function that overflowed the
 native stack at 300 000 elements has an explicitly tail-recursive LemLib
 rewrite with a kernel-checked equality theorem to the definition it
 replaced (`lean-lib/LemLibTheorems.lean`) — Lean must not fail where the
-OCaml reference succeeds (exception class (b)). The one open
+OCaml reference succeeds (exception class (b) of the
+[exception-case rulings](2026-09-03_exception-case-rulings.md), resource
+limits: "Lean must not fail where OCaml succeeds"). The one open
 representation gap is strings (bytes on OCaml, Unicode scalars on
-Lean): `doc/lean-backend/2026-09-03_string-representation-design.md`,
-still open; its two parity probes are registered expected failures.
-The full expected-failure register also includes `f_int_of_big_num` and
-`f_int32_overflow`, the deliberate numeric differences below.
+Lean): [string-representation design](2026-09-03_string-representation-design.md),
+still open (TODO item 31).
 
-Two OCaml-target behaviours are deliberately NOT mirrored, because they
-are the OCaml backend's own deviations from lem's semantics and the Lean
-target follows lem's prover-side reading ([USER 2026-09-03] ruling,
-`doc/lean-backend/2026-09-03_exception-case-rulings.md`): `nat`/`int`
-are unbounded on Lean where OCaml's 63-bit `int` wraps silently above
-2^62 (`library/num.lem:104-111` documents the OCaml choice as a
-compromise; the conversions `natFromNatural`/`intFromInteger` are the
-identity — the 63-bit checks that once mirrored `Nat_big_num.to_int`'s
-raise were removed as an OCaml-execution limit, [USER 2026-09-03] "the
-real thing is the logical semantics"; the parity row `f_int_of_big_num`
-is a registered OCaml-target deviation; likewise the `int32`/`int64`
-conversions wrap where `Nat_big_num.to_int32/to_int64` raise `Overflow`
-— D4, [USER 2026-09-04], parity row `f_int32_overflow`), and structural `BEq`/`Ord` on values
-containing a `Pset`/`Pmap` compute where OCaml's polymorphic compare
-raises on the comparator closure (`lean-lib/LemLib.lean:741-748`).
+The parity suite's expected-failure register
+(`tests/comprehensive/parity/expected_failures.txt`) has ten entries in
+three classes, and the runner pins the exact Lean side of each:
+- `fix` — a fix is planned: `p_str_bytes`, `p_str_escapes` (strings).
+- `ruled` — an OCaml-target deviation ruled by the operator, where the
+  Lean target follows lem's own semantics: `f_int_of_big_num`,
+  `f_int32_overflow`, `p_mword_width`, `p_word_bitwise_wide`,
+  `p_word_bitwise_wide_mul`.
+- `open` — a discrepancy awaiting an operator decision:
+  `f_let_float_branch`, `f_let_float_closure` (TODO item 24),
+  `p_fn_compare_same_closure` (TODO item 32).
+
+The ruled deviations follow one rule. OCaml-target behaviours that are
+the OCaml backend's own departures from lem's semantics are NOT
+mirrored; the Lean target follows lem's prover-side reading ([USER
+2026-09-03] "the real thing is the logical semantics";
+[exception-case rulings](2026-09-03_exception-case-rulings.md)):
+`nat`/`int` are unbounded on Lean where OCaml's 63-bit `int` wraps
+silently above 2^62 (`library/num.lem:104-111` documents the OCaml
+choice as a compromise; the conversions `natFromNatural`/`intFromInteger`
+are the identity, `f_int_of_big_num`); the `int32`/`int64` conversions
+wrap where `Nat_big_num.to_int32/to_int64` raise `Overflow`
+([USER 2026-09-04], `f_int32_overflow`); `int`/`nat` bitwise operations
+and shifts are unbounded where OCaml's are 63-bit, and a machine word's
+width comes from its type where OCaml takes it from the value at run time
+([USER 2026-09-30] "Yes, agree on 1-3. Go ahead";
+[library-parity record](2026-09-30_library-parity-coverage.md) LP4,
+OM4); and structural `BEq`/`Ord` on values containing a `Pset`/`Pmap`
+compute where OCaml's polymorphic compare raises on the comparator
+closure (the note above the `Pset` `BEq`/`Ord` instances in
+`lean-lib/LemLib.lean`). Further machine-word differences are
+unregistered because their inputs are excluded from the probes and
+await rulings (TODO item 33).
 
 **Unsupported constructs are refused at generation time, by a
 library-side marker.** A lem constant or type whose Lean target_rep
 identifier lives in the reserved `LemUnsupported.` namespace has no Lean
 implementation; the backend (`lean_unsupported_check_cref`/`_type`,
 `src/lean_backend.ml`) refuses any reference to it from a non-library
-module with an error naming the constant or type — the [USER
-2026-09-03] class-(c) form. Library modules render the marker names
+module with an error naming the constant or type (exception class (c)
+of the [exception-case rulings](2026-09-03_exception-case-rulings.md),
+[USER 2026-09-03]: missing features refused at generation time). Library modules
+render the marker names
 (LemLib defines them, so the library's own instance code compiles), and
 user code cannot reach those instances without naming the type or an
 entry point. Adding a construct is a one-line library change, no backend
 table. Today: `Debug.print_string`/`print_endline`, `rational`, `real`,
 `float64`, `float32` and their value entry points. A runtime panic is
 NOT an acceptable substitute: a `Unit`-valued refusal was measured to be
-dead-code-eliminated (parity-fix audit F1).
+dead-code-eliminated ([parity-fix record](2026-09-03_parity-fix-record.md),
+audit response).
 
 **Reserved-name avoidance: root constants and constructors, not
 fields.** `library/lean_constants` (Lean tokens + root-namespace
@@ -416,17 +537,23 @@ values, types AND variant constructors — constructors are exported to
 the root scope (`export T (C …)`) and a root constant of the same name
 makes every pattern on them ambiguous (`ambiguous pattern … [_root_.One,
 two.One]`, measured) — but not by record fields, which are only ever
-emitted as projections and labels (keyword «»-escaping aside).
+emitted as projections and labels (keyword «»-escaping aside). A missing
+`lean_constants` file is a generation error (suite phase
+`lean-constants-required`).
 
 **Instance priorities come from one table.** Every generated or
 library instance takes its priority from a single normative lattice
 (model-provided and derived `BEq`/`Ord` at default, the automatic
-set/map trio at 500, generic fallbacks low) so that a model's own
-instance beats the automatic one *by priority*, never by
+set/map trio and the comparator-derived `BEq` bridges at 500, generic
+defaults and residual failure-bodied instances at `low`) so that a
+model's own instance beats the automatic one *by priority*, never by
 declaration-order accident. The table is
-`doc/notes/2026-08-22_arc14-instance-priority-lattice.md` (normative,
-current); a build-failing resolution probe in `tests/comprehensive`
-pins it.
+[`doc/notes/2026-08-22_arc14-instance-priority-lattice.md`](../notes/2026-08-22_arc14-instance-priority-lattice.md);
+its row for priority-50 fallbacks over open type variables is obsolete:
+those instances were deleted with the comparison-binder threading above,
+and the backend emits no priority 50 (checked by grep of
+`src/lean_backend.ml`, 2026-10-03). A build-failing resolution probe,
+`tests/comprehensive/test_instance_priority.lem`, pins the table.
 
 **Sets and maps translate the OCaml AVL algorithms.** Lem `set`/`map`
 use LemLib's `Pset`/`Pmap`, translated from `ocaml-lib/pset.ml` and
@@ -434,22 +561,21 @@ use LemLib's `Pset`/`Pmap`, translated from `ocaml-lib/pset.ml` and
 from `setElemCompare`/`mapKeyCompare`). Lean needs different termination
 and representation machinery; these are not verbatim copies. Source
 citations, finite parity probes and local kernel-checked laws support
-specific claims about ordering, representatives and lookup. There is no
+specific claims about ordering, representatives and lookup
+(`lean-lib/LemLibPmapLaws.lean`). There is no
 general cross-language correspondence theorem. See the runtime
 [notice](../../lean-lib/NOTICE.md) for source attribution and licensing.
 Two-target parity probes (`tests/comprehensive/parity/probes/p_set_ops.lem`,
 `p_map_ops.lem`, `p_map_beq.lem`) pin the observables; AVL invariants
 over bounded-exhaustive operation sequences live in
-`lean-lib/LemLibTest.lean`. (History: a comparator-keyed insertion-order
-list and a `Std.TreeMap`-indexed map reproduced the retired Lean
-assoc-list observables — the parity-fix slice 2026-09-03 replaced them.)
+`lean-lib/LemLibTest.lean`.
 
 **Backend state and callbacks.** The emitter's state is grouped in `St`
 (`src/lean_backend.ml`), with per-file / per-invocation / per-render
 lifetimes and reset hooks. `Backend_common.on_cr_simple_applied` is a
 separate process-global callback, installed on entry to `lean_defs`;
 `process_file.ml` supplies `St.current_module_name` before emission.
-Threading these through explicit arguments remains TODO 6.
+Threading these through explicit arguments is TODO item 6.
 
 ## No magic values
 
@@ -494,21 +620,21 @@ generated code and in a target_rep:
   outside `H` the wrapper may exhaust — admissible because the oracle's
   behaviour there is not the semantics anyone relies on, and the
   consumer's theorems carry `H` as they carry well-formedness already
-  (`2026-09-05_measure-hypothesis-record.md`). `Pset.tc`'s
-  `(2|r|)² + 1` (the finite square of the relation's endpoints) is a
-  data-DERIVED bound classified (c) by the worker; whether "computed from
-  the data" and "stored in the data" draw the same line is decision D1,
-  pending the operator (`2026-09-04_fuel-parameter-record.md` §9).
+  ([measure-hypothesis record](2026-09-05_measure-hypothesis-record.md)).
+  `Pset.tc`'s `(2|r|)² + 1` (the finite square of the relation's
+  endpoints) is a data-DERIVED bound classified (c) [AGENT]; whether
+  "computed from the data" and "stored in the data" draw the same line is
+  an open operator decision (TODO item 41).
 
 Everything else is forbidden: a numeral may live only in a caller's
 command-line default or a test suite, never in LemLib, in generated code
 or in a target_rep; a mechanism that mints such numerals per declaration
-is itself the defect (the deleted numeric fuel budget). Constants that
+is itself the defect (hence no numeric fuel form). Constants that
 mirror lem's own definitions are not magic (`Set.leastFixedPoint`'s
 `| 0 -> x`). A limit that exists only because the OCaml target's runtime
 imposes it (a 63-bit `int`) is forbidden too — "the real thing is the
-logical semantics". Records: `2026-09-03_fuel-parameter-design.md` (+ R1),
-`2026-09-04_fuel-parameter-record.md`.
+logical semantics". Records: [fuel-parameter design](2026-09-03_fuel-parameter-design.md),
+[fuel-parameter record](2026-09-04_fuel-parameter-record.md).
 
 ## The declare vocabulary
 
@@ -523,16 +649,16 @@ unaffected:
 | ``declare {lean} extra_import `MyModule` `` | add an explicit module import, including hand-written instances or computable measures; Lean validates availability and types at build time. |
 | `declare {lean} skip_instances type t` | suppress all instance generation for `t` (pair with hand-written instances) |
 | `declare {lean} rename module = Name` | rename the generated module |
-| ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total worker recursing on a fuel counter (returning `sentinel` at zero) + a wrapper `f [LemFuel] := f_lemFuel LemFuel.fuel` starting the counter from the ambient fuel + the exhaustion lemma `f_lemFuel_zero`; `f` and everything reaching it take `[LemFuel]` (the fuel lifting). The numeric form `= N` is refused (a magic value). Composes with truly-mutual blocks (all members fuel'd, all-or-none; wrappers after `end`) and with reader lifting — also inside a mutual block, every member lifted together and each worker/wrapper/obligation/`_zero` lemma carrying the reader binders (S1.5, `2026-09-20_fuel-mutual-reader-record.md`); supply lifting in a truly-mutual block and `reader_seed` in a mutual block remain refused |
+| ``declare {lean} fuel val f = `sentinel` `` | emit `f` as a total worker recursing on a fuel counter (returning `sentinel` at zero) + a wrapper `f [LemFuel] := f_lemFuel LemFuel.fuel` starting the counter from the ambient fuel + the exhaustion lemma `f_lemFuel_zero`; `f` and everything reaching it take `[LemFuel]` (the fuel lifting). The numeric form `= N` is refused (a magic value). Composes with truly-mutual blocks (all members fuel'd, all-or-none; wrappers after `end`) and with reader lifting — also inside a mutual block, every member lifted together and each worker/wrapper/obligation/`_zero` lemma carrying the reader binders ([record](2026-09-20_fuel-mutual-reader-record.md)); supply lifting in a truly-mutual block and `reader_seed` in a mutual block remain refused |
 | `declare {lean} fuel_consumer val f` | `f`'s hand-written Lean implementation reads the ambient fuel (`LemFuel.fuel`): its callers are fuel-lifted; call sites unchanged (requires a Lean target_rep) |
 | ``declare {lean} fuel_measure val f = `List.length xs + 1` `` | for a fuel'd `f`: the wrapper binds the parameters and starts the worker's counter from the computable measure (`def f (xs : …) := f_lemFuel (<measure>) xs`) — no `[LemFuel]`, `f` fuel-free for its callers, the kernel computes through it; the obligation `f_measure_sufficient` (fuel-stability: worker = wrapper at every fuel ≥ measure) is emitted into the auxiliary file with its proof delegated to the hand-written `<Module>_lemMeasureProofs` (a missing/mistyped theorem fails the build; a `sorry` is caught by the token gate). Requires `fuel`; refused with `fuel_consumer`, `structural`, on a supply-lifted def, in a library module; the measure may mention only the parameters, qualified Lean names and `lemSize x` (the backend-derived structural size of parameter `x`'s inductive type, emitted as `t.lemSize` for every recursive type block — `sizeOf`, `LemFuel`, free variables, numerals/parameter-free measures, `lemSize` on a non-recursive/non-inductive type, a projection on a non-parameter refused) |
-| ``declare {lean} fuel_measure val f = `n + 1` assuming `2 ≤ b` `` | the HYPOTHESIS-carrying measure ([USER 2026-09-05], D-C2-1 option 1): `H` is a Lean Prop over the same parameters, same scope rules and forbidden names as the measure (plus: a hypothesis mentioning no parameter — `True`, a closed proposition — is refused as vacuous, so the two forms stay distinct; the fuel may not be mentioned). The wrapper is UNCHANGED (fuel-free, hypothesis-free); the obligation gains the binder `lemHyp : H` immediately before `lemFuel` — `theorem f_measure_sufficient (xs…) (lemHyp : (H)) (lemFuel : Nat) (lemMeasureLe : (μ) ≤ lemFuel) : f_lemFuel lemFuel xs… = f xs… := <Module>_lemMeasureProofs.f_measure_sufficient xs… lemHyp lemFuel lemMeasureLe` — i.e. `H → μ ≤ fuel → worker = wrapper`; a consumer gate recognises the conditional form by the binder NAMED `lemHyp` before `lemFuel` (reserved: a fuel'd def's parameter may not be called `lemHyp`). Operationally, outside `H` the wrapper may exhaust (loud sentinel). Whether `H` is a Prop is Lean's build-time check; whether `H` is SATISFIABLE is nobody's check at generation (a contradictory `H` makes the obligation vacuously provable — audit F1), so the consumer's gate must report every hypothesis in force (`hyp=<H>`) and a reviewed register must name each with its frontend invariant: a REQUIREMENT of the cerberus half. `assuming` is a contextual keyword |
+| ``declare {lean} fuel_measure val f = `n + 1` assuming `2 ≤ b` `` | the HYPOTHESIS-carrying measure ([USER 2026-09-05]; [record](2026-09-05_measure-hypothesis-record.md)): `H` is a Lean Prop over the same parameters, same scope rules and forbidden names as the measure (plus: a hypothesis mentioning no parameter — `True`, a closed proposition — is refused as vacuous, so the two forms stay distinct; the fuel may not be mentioned). The wrapper is UNCHANGED (fuel-free, hypothesis-free); the obligation gains the binder `lemHyp : H` immediately before `lemFuel` — `theorem f_measure_sufficient (xs…) (lemHyp : (H)) (lemFuel : Nat) (lemMeasureLe : (μ) ≤ lemFuel) : f_lemFuel lemFuel xs… = f xs… := <Module>_lemMeasureProofs.f_measure_sufficient xs… lemHyp lemFuel lemMeasureLe` — i.e. `H → μ ≤ fuel → worker = wrapper`; a consumer gate recognises the conditional form by the binder NAMED `lemHyp` before `lemFuel` (reserved: a fuel'd def's parameter may not be called `lemHyp`). Operationally, outside `H` the wrapper may exhaust (loud sentinel). Whether `H` is a Prop is Lean's build-time check; whether `H` is SATISFIABLE is nobody's check at generation (a contradictory `H` makes the obligation vacuously provable — [pre-merge audit](2026-09-05_measure-hypothesis-audit-premerge.md) F1), so a consumer's gate must report every hypothesis in force (`hyp=<H>`) and a reviewed register must name each with its frontend invariant (Cerberus has both). `assuming` is a contextual keyword |
 | `declare {lean} structural val f` | emit the recursive `f` as an ordinary `def` with `termination_by structural <param>` (the parameter designated by the backend's analysis; Lean's checker is the build-time backstop; the well-founded fallback is forbidden, so the kernel computes through `f`). Refused with `fuel`, with `termination_argument`, on a rep'd val, on a non-recursive or multi-clause def, on part of a mutual block |
-| (emission rule, no declare) point-free tails | for a `fuel_measure`d or `structural` definition whose clause body ends in lambdas with plain-variable binders — a trailing `function` (after lem's pattern compilation `fun x -> match x with …`), a user `fun k ->` with or without a `function` beneath it, possibly under the single-arm match of a destructuring parameter — the Lean emission hoists EVERY such trailing binder into the head — a `function` scrutinee as `lemTail` (deterministic, nameable from the `.lem` measure), user binders under their names — so the measure renderer and the structural analysis see named parameters (the generated def's arity grows by the hoisted binders; extensionally the same function); the fuel sentinel is applied to the hoisted binders (`((payload) lemTail)`). Hygiene, fail-closed: refused if `lemTail` is a parameter, a body binder, a free variable or a referenced constant's name, if a hoisted user binder would shadow a parameter / be captured by the destructuring pattern, or if any constant the body references RENDERS on Lean as a reserved synthesized name (the generic capture check `lean_reserved_capture_check`, also run for every fuel'd/reader/supply def: `lemFuel`, `lemMeasureLe`, `LemFuel`, `lemTail`, `_lemReader_*`, `_lemSupply*`); refused on a supply-lifted def. The `.lem` and every non-Lean emitter are untouched ([USER 2026-09-04] "we don't change the lem structure for ocaml"; `2026-09-05_tails-and-pmap-laws-record.md`) |
+| (emission rule, no declare) point-free tails | for a `fuel_measure`d or `structural` definition whose clause body ends in lambdas with plain-variable binders — a trailing `function` (after lem's pattern compilation `fun x -> match x with …`), a user `fun k ->` with or without a `function` beneath it, possibly under the single-arm match of a destructuring parameter — the Lean emission hoists EVERY such trailing binder into the head — a `function` scrutinee as `lemTail` (deterministic, nameable from the `.lem` measure), user binders under their names — so the measure renderer and the structural analysis see named parameters (the generated def's arity grows by the hoisted binders; extensionally the same function); the fuel sentinel is applied to the hoisted binders (`((payload) lemTail)`). Hygiene, fail-closed: refused if `lemTail` is a parameter, a body binder, a free variable or a referenced constant's name, if a hoisted user binder would shadow a parameter / be captured by the destructuring pattern, or if any constant the body references RENDERS on Lean as a reserved synthesized name (the generic capture check `lean_reserved_capture_check`, also run for every fuel'd/reader/supply def: `lemFuel`, `lemMeasureLe`, `LemFuel`, `lemTail`, `_lemReader_*`, `_lemSupply*`); refused on a supply-lifted def. The `.lem` and every non-Lean emitter are untouched ([USER 2026-09-04] "we don't change the lem structure for ocaml"; [record](2026-09-05_tails-and-pmap-laws-record.md)) |
 | `declare {lean} termination_argument f = automatic` | lem's upstream termination vocabulary, honoured: a plain `def` with no clause (Lean tries structural, then well-founded recursion — total either way, kernel computability not promised) |
-| `declare {lean} effectful val f` | RETIRED (effect-retirement arc): refused fail-closed with an error naming supply lifting as the migration path; the annotation is retained in the grammar for other targets' potential use |
+| `declare {lean} effectful val f` | refused fail-closed with an error naming supply lifting as the migration path; the annotation stays in the grammar for other targets' potential use |
 | `declare {lean} reader val c` | reader-lift the ambient constant `c`: every function that (transitively) reads it takes its value as a leading parameter |
-| `declare {lean} reader_seed val f` | do not lift `f`; with N declared readers its first N arguments are the seeds — one per reader, positionally in the GLOBAL SORTED reader order (the binder order of every lifted def and consumer stub; one order everywhere) — and supply the reader values to lifted callees and consumer calls in its body (N-ary rule, `2026-09-19_nary-reader-seed-record.md`; the seeds are referenced by name, so the seed positions must be simple variables). Refused fail-closed: no reader declared (nothing to seed), fewer than N arguments (the error names N and the order), a seed position that is not a simple variable, and — unchanged — a multi-clause or mutual def, an instance, combination with `fuel` |
+| `declare {lean} reader_seed val f` | do not lift `f`; with N declared readers its first N arguments are the seeds — one per reader, positionally in the GLOBAL SORTED reader order (the binder order of every lifted def and consumer stub; one order everywhere) — and supply the reader values to lifted callees and consumer calls in its body ([record](2026-09-19_nary-reader-seed-record.md); the seeds are referenced by name, so the seed positions must be simple variables). Refused fail-closed: no reader declared (nothing to seed), fewer than N arguments (the error names N and the order), a seed position that is not a simple variable, a multi-clause or mutual def, an instance, combination with `fuel` |
 | `declare {lean} supply val c` | supply-lift the counter `c : unit -> nat`: every function that (transitively) draws takes the current supply as an extra parameter and returns the successor supply paired with its result (deterministic state-passing; draws are `LemLib.supplySplit`) |
 | `declare {lean} reader_consumer val f` | pass all reader parameters as extra leading arguments at `f`'s call sites (callers get reader-lifted); `f` must carry an identifier-form Lean target_rep whose implementation takes the leading reader parameters explicitly |
 
@@ -542,7 +668,8 @@ heads already provided by Lean's prelude (including `Nat`) do not. This is
 not general Lean name resolution. For a namespace nested in a differently
 named module, import that module explicitly with `extra_import` and use a
 Lean expression representation if the automatic first-component import
-would be wrong. The S11 regression checks applied and bare `Nat.succ`.
+would be wrong. A regression test in `tests/comprehensive/test_target_reps.lem`
+checks applied and bare uses of `Nat.succ`.
 
 ## Why this makes generated code trustworthy
 
