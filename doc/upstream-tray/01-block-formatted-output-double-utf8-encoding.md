@@ -97,7 +97,7 @@ it).
 A silent change of string values on the OCaml target, only in code that
 Lem rewrote (compiled patterns, and on Coq the other `is_pp_exp` sites).
 Any non-ASCII text that reaches a formatted block is affected the same
-way. The library itself is ASCII at those sites (the patch leaves all 150
+way. The library itself is ASCII at those sites (the patch leaves all 145
 generated library files byte-identical).
 
 ## Proposed remedy
