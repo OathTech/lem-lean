@@ -30,8 +30,8 @@ you.
 Nothing here asks you to adopt the Lean backend. Every report stands on a
 reproducer run on unmodified upstream `3802cb0`, needing only `lem`, the
 OCaml compiler and zarith. Where the fork had already fixed something in
-target-independent code, the fix is offered as an ordinary patch against
-your tree (section 5). The classifications are our reading; where we could
+target-independent code, the draft proposes that fix as its remedy
+(section 5). The classifications are our reading; where we could
 not tell what you intended, the draft is a question.
 
 ## 3. How to read a draft
@@ -90,9 +90,9 @@ fix as a proposed remedy.
 
 | Draft | Summary | Class |
 |---|---|---|
-| 01 | Block-formatted output decoded as Latin-1; OCaml string literals in compiled patterns change value | TRUE BUG (patch) |
+| 01 | Block-formatted output decoded as Latin-1; OCaml string literals in compiled patterns change value | TRUE BUG (fix proposed) |
 | 02 | Comments decoded as Latin-1: `§` → `Â§` on every backend | TRUE BUG |
-| 03 | A missing `<target>_constants` silently disables renaming | TRUE BUG (patch) |
+| 03 | A missing `<target>_constants` silently disables renaming | TRUE BUG (fix proposed) |
 | 04 | `Assert_extra.fail "msg"` prints as invalid OCaml | TRUE BUG |
 | 05–09 | OCaml `mword` runtime: `getBit`, negation of 0, `setBit` beyond width, rotations/shifts raising, widths from arguments | TRUE BUG |
 | 10 | OCaml `int` div/mod by a negative divisor; `integer` convention | TRUE BUG + UNCLEAR |
