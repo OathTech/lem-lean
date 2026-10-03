@@ -87,16 +87,18 @@ The output is meant to be read next to its source.
   (`St.emitted_comments`).
 - **Comments cannot break Lean.** Comment text is escaped (`-/`, `/-`)
   and padded, so it can neither end the Lean comment early nor form a
-  `/--` docstring or `/-!` module doc. Inside a definition printed on one
-  line, a comment's line breaks become spaces, because Lean's layout is
-  column-sensitive and a multi-line comment could end a `|` arm early.
+  `/--` docstring or `/-!` module doc. A comment written on a line of its
+  own, or spanning lines, is placed on lines of its own by the layout pass
+  (below); a comment is never folded, except inside a declaration the
+  layout pass leaves unchanged, where its line breaks become spaces
+  (Lean's layout is column-sensitive: a multi-line comment could otherwise
+  put a later `|` arm left of the first and end the match early).
 - **The backend's own comments are marked.** Every comment the backend
-  writes starts with `lem:` (`/- lem: … -/`), with one exception: inside
-  library code that is itself rendered as a comment (a definition kept
-  only as text behind its target representation), an unsupported set
-  comprehension prints as `(sorry /- Lean backend: set comprehension … not
-  supported -/)` (`src/lean_backend.ml:7379`, `:7385`); outside such a
-  comment the same construct is a generation error. Examples of the
+  writes starts with `lem:` (`/- lem: … -/`). (Inside library code that is
+  itself rendered as a comment, a definition kept only as text behind its
+  target representation, an unsupported set comprehension prints as
+  `(sorry /- lem: set comprehension … not supported -/)`; outside such a
+  comment the same construct is a generation error.) Examples of the
   marker:
   `/- lem: theorem NAME not translated -/`,
   `/- lem: replaced by its target representation: … -/`, and the
@@ -111,8 +113,9 @@ The output is meant to be read next to its source.
   because upstream's clause regrouping rebuilds those separators (TODO
   item 26). A few comments inside rewritten expressions are also lost
   (measured 2026-10-03: 62 of 4060 in Cerberus, 42 of 3833 in linksem).
-- **Layout pass.** Every generated file goes through `normalize_layout`.
-  Outside string literals, character literals and comments, it removes
+- **Layout pass.** Every generated file goes through `normalize_layout`,
+  in two steps. The spacing step (`normalize_spacing`): outside string
+  literals, character literals and comments, it removes
   trailing spaces, makes each run of blank lines a single blank line,
   makes each run of spaces inside a line one space, removes spaces after
   `(`/`[` and before `)`/`]`/`,`, puts one space on each side of `×`, and
@@ -121,6 +124,25 @@ The output is meant to be read next to its source.
   parentheses), inserting a space where two tokens would otherwise join.
   Line-start indentation is kept. It adds, removes or joins no other
   token, so it changes no declaration.
+  The layout step (`src/lean_layout.ml`) is a token-stream formatter over
+  that text. It re-lays out each declaration from its tokens with
+  Wadler/Leijen groups at width 100: match alternatives and `let` bodies
+  one per line, application arguments filling the line, a trailing
+  `(fun … =>` kept on the line of the call (so a chain of monadic binds
+  costs two columns per level), the fields of a structure instance, a
+  `let` and a `match` aligned to their own column. It honours the column
+  rules of Lean's parser that the generated code depends on: every
+  alternative of a broken `match` on its own line, the first included, at
+  one column (an alternative left of the first ends the match); a
+  continuation deeper than the line it continues. A break is placed only
+  where the text had whitespace (or after `,`/`;`), so it adds, removes or
+  joins no token. A declaration it does not fully parse (an unknown
+  keyword, an unbalanced bracket, a `,` outside brackets, as in Cerberus's
+  `indreln` rules) is left exactly as it was (`LEM_LEAN_LAYOUT_DEBUG=1`
+  lists them). Checked on Cerberus and linksem by a declaration census
+  equal before and after, macro scopes erased (output-niceness record
+  §10, §11); gate: `tests/comprehensive/test_layout.lem` with
+  `check_layout.py` (suite phase `lean-layout`).
 - **Printer rules with the same aim.** A parenthesised type around an
   atom, a tuple or another parenthesised type is printed without the
   parentheses unless they hold a comment; each list of `open`s is one

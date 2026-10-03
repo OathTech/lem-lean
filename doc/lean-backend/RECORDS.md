@@ -153,7 +153,7 @@ describe a design that is no longer current.
 - 2026-10-03 [Output-niceness record](2026-10-03_output-niceness-arc-plan.md):
   a Lem developer's feedback on the output; comments carried over, the
   `lem:` marker, the layout pass, mutual records as structures, the
-  printer cleanup; package A (layout engine) approved and in progress (TODO item 42); packages C and D deferred (TODO items 27, 28); the
+  printer cleanup; package A (layout engine, §11; TODO item 42, closed); packages C and D deferred (TODO items 27, 28); the
   upstream report tray scope.
 
 ## When the front documents were checked

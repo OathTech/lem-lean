@@ -7393,13 +7393,13 @@ type pat_style = FunParam | MatchArm
                  decision log D1 ruling 3 — formerly an opaque `(sorry ...)`
                  stub). *)
               if !St.rendering_comment then
-                from_string "(sorry /- Lean backend: set comprehension binding not supported -/)"
+                from_string "(sorry /- lem: set comprehension binding not supported -/)"
               else
                 raise (Reporting_basic.err_general true (exp_to_locn e)
                   "Lean backend: set comprehensions ({ e | bindings ... }) are not supported by the Lean backend; workarounds: rewrite using explicit Set/List library functions (e.g. Set.filter / Set.map / Set.cross, which have Lean target reps), or give the enclosing definition a 'declare lean target_rep'")
           | Setcomp (_, _, _, _, _, _) ->
               if !St.rendering_comment then
-                from_string "(sorry /- Lean backend: set comprehension not supported -/)"
+                from_string "(sorry /- lem: set comprehension not supported -/)"
               else
                 raise (Reporting_basic.err_general true (exp_to_locn e)
                   "Lean backend: set comprehensions ({ e | condition }) are not supported by the Lean backend; workarounds: rewrite using explicit Set/List library functions (e.g. Set.filter / Set.map, which have Lean target reps), or give the enclosing definition a 'declare lean target_rep'")
