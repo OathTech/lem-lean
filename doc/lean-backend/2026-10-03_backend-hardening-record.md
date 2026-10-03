@@ -1,4 +1,4 @@
-# Backend hardening, package A: correctness and fail-closed (2026-10-03)
+# Backend hardening: package A (correctness and fail-closed) and package C (cleanup) (2026-10-03)
 
 Branch `arc/backend-hardening` from mainline `mdd/lean-backend` at
 `5dfcd25`. This record covers package A of the arc that acts on two
@@ -452,3 +452,244 @@ on": `Co-Authored-By` trailers name the model that actually did the work.
   `0885bf6` say Claude Opus 5.5, because the orchestrator's brief prescribed
   that line. They are merged and pushed, so they stay as they are; this note
   is the correction.
+
+## Package C: cleanup, no output change (2026-10-03)
+
+Ruling, verbatim [USER 2026-10-03]: "C: cleanup, no output change
+(Recommended)". Worked on `arc/backend-hardening` from `a1fdf6e` (package A
+verified). Every decision below not quoted as a ruling is [AGENT]. The
+source is the code review of 2026-10-03 (`REPORT.md` §3–§7 and its notes);
+every claim acted on was re-verified first (grep, build, or a run).
+
+Commits: `a6c63aa` (1/4: dead code, the reserved-name table, the priority
+constant, the debug variables), `35e893e` (2/4: LemLib deletions), `cff6663`
+(3/4: comments and messages, the TODO 39 test), the commit that adds this section (4/4: TODO
+register and this record). Gates ran on every commit's tree, with the lem
+binary built from it (§"Gates" below).
+
+### 1. Dead code (backend and the fork's shared-file edits)
+
+Each deletion had zero callers over `src/`, `library/`, `tests/`,
+`lean-lib/` (grep; counts are of hits other than the definition itself):
+
+| Deleted | Evidence |
+|---|---|
+| `is_fuelled_cref` (`lean_backend.ml`) | 0 hits |
+| `tv_reason` + `let _ = tv_reason`, `fallback_beq_ord`, `fallback_trio` and their "RETIRED" comments | both `fallback_*` were `emp` spliced into the instance output: 0 bytes of output; `tv_reason` read only by `let _` |
+| `block`/`block_hov` no-op wrappers and their three call sites (`Fun`, `Set`, `Vector` renderers), plus the `is_user_exp` binding only they read | wrappers were `fun _ _ t -> t` (shadowing `Output.block`); unwrapped in place |
+| `let _ = t in` (`derived_comparison_single`: the pattern variable is now `_`), `let _ = if … in` (now a statement) | no value read |
+| `open Backend_common` | every use qualified (compiles without it) |
+| `Output.flatten_newlines`, `flatten_newlines_in_comment` (`src/output.ml`, `.mli`) | fork-introduced (`git show 3802cb0:src/output.ml` has neither); the backend aliases `flatten_newlines_keep_comments` — 0 callers |
+
+Not deleted: `St.reset_invocation` (no caller, but TODO item 6's threading
+work is its home; unchanged since package A).
+
+### 2. LemLib deletions (consumer-visible)
+
+Read-only greps over all consumers — `cerberus-lean/lean_frontend/*.lean`
+(49 files), `cerberus-sl` (12 301 `.lean` files outside `.lake`),
+`linksem-lean/linksem/lean/{handwritten,driver}` — and over lem-lean itself
+(`library/`, `tests/`, `lean-lib/`, `src/`). Counts are hits per consumer
+(cerberus-lean / cerberus-sl / linksem):
+
+| Deleted | Consumer hits | lem-lean hits |
+|---|---|---|
+| `natDiv`, `natMod` (silently total `a / b`, `a % b`) | 0 / 0 / 0 | 0 — `num.lem` points every rep at `lemNatDiv`/`lemNatMod` |
+| `unsupportedRationalFromNumeral/FromInt/FromFrac`, `unsupportedRealFromNumeral/FromInt/FromFrac` (root duplicates of `LemUnsupported.*`) | 0 / 0 / 0 | 0 — `num.lem` uses the `LemUnsupported.` twins; the `*Less/LessEq/Greater/GreaterEq/Abs` wrappers stay (used by the generated `Num.lean`) |
+| `lemBoolToProp` | 0 / 0 / 0 | 0 |
+| `apply` | 53 / 209 / 0 — all the tactic `apply` or prose (filtered by hand; `function.lem:59` inlines lem's `apply` on Lean, so no generated code can reference the root def) | 0 |
+| `listGet?`, `listGet!` | 0 / 0 / 0 | 0 (`listGetOpt`/`listGetBang` are the live pair, `list.lem:495`, `list_extra.lem:122`) |
+| `listSet` (its comment "replaces removed List.set" was false: the body called `List.set`) | 0 / 0 / 0 | 0 |
+| `setPartitionBy` | 0 / 0 / 0 | 0 (`set.lem` has no `partition` rep) |
+| `Pmap.mem`, `maxBinding?`, `exists_`, `filter`/`filterAux`, `partition`/`partitionAux`, `compare`/`compareAux` | 0 / 0 / 0 (the consumers' `Pmap.` uses: `Empty`, `Node`, `find?`, `find`, `bindings(Aux)`, `add`, `map`, `fold`, `empty`, `CmpLaws`) | 0 outside their own recursion; `map.lem:233`'s `Pmap.mem` is the OCaml rep |
+| `lemListMapiAux` and its theorem `lemListMapiAux_eq` (`LemLibTheorems.lean`) | 0 / 0 / 0 | only the theorem |
+
+Also: the stale `LemLibPmapLaws.lean` comment that explained writing
+`Ord.compare` to avoid `Pmap.compare` (gone). The regenerated
+`lean-lib/LemLib/*.lean` are unchanged (they come from `library/*.lem`,
+untouched).
+
+Kept, deliberately: `lemNatLnot`/`lemNatLsr` (TODO item 33 is an operator
+decision; `lemNatLsr` added to the row); `lemStringFromNatHelper`/
+`NaturalHelper` and the `partial` `natSqrtAux` (TODO item 38: merging or
+totalising changes a definition, not a deletion); the `OfNat` instances on
+the unsupported types (review suspicion, unmeasured). Comments in
+`library/*.lem` (jargon at `set.lem:350`, `relation.lem:629`, `map.lem:80`,
+`word.lem:855`, `function.lem`'s wrong line number) were NOT touched: every
+`.lem` comment is carried into the nine non-Lean outputs, so the change
+would move `nonlean-regress`'s goldens and need a rebaseline — left for a
+slice that rebaselines.
+
+### 3. Comments
+
+`src/lean_backend.ml`: 184 replacements (a scripted sweep, each old text
+matched exactly once), plus `src/lean_layout.ml` (4), `src/parser.mly`
+(3 comment/message sites), `lean-lib/LemLib.lean` (48, plus the `fmapUnionBy` binder),
+`LemLibTest.lean` (8), `LemLibTheorems.lean` (3), `LemLibPmapLaws.lean`
+(4), `lakefile.lean` (3), `lean-lib/README.md` (1). What changed: arc,
+slice, charter, audit and finding tags (`arc-14 S2 B1 (be:G3)`, `linksem
+2026-09-28 (B13)`, `parity-fix F5/F6`, `D2-enablers slice`), dates that
+narrated history, the `A' witness: use2 100 (1,2) = 5` style of evidence,
+the two `HISTORY` blocks of `LemLib.lean` (now one plain "no axiom, no
+unsafe inhabitant" note naming what was removed and why), "verbatim port"
+(the translations are not verbatim: NOTICE/DESIGN). Kept: every `[USER …]`
+ruling quote and every pointer to a design note or to a record where a
+ruling is the reason (`2026-08-22_arc14-instance-priority-lattice.md`,
+`arc8-inhabited-threading-design.md`, `2026-09-05_measure-hypothesis-record.md`,
+`2026-09-01_L2-deletion-record.md`, `2026-09-03_exception-case-rulings.md`),
+and the mechanism comments the review named as the model.
+
+Corrected claims: the stale "sorry" wording — the `lean_cmp_shape`
+parameter `sorried` and the derivation's `sorried`/`sorried0` variables
+are `residual`/`residual0` (the instances are loud `failwithI` residuals,
+not `sorry`), and the comment for `lean_cmp_shape` now sits on its
+function (it was separated from it by `lean_typ_has_fn`); "the proof is by
+sorry anyway" (theorem marker), "sorry-based opaque type instances",
+"skip sorry BEq/Ord instances", "sorried residual instances",
+"sorry-based instances are useless" — all rewritten to what the code does.
+The wrong claim at the `Infix` renderer ("this Infix path has NONE of the
+reader/fuel hooks" while `fuel_scope_check` is called four lines below) now
+says which checks run there (unsupported construct, supply, fuel scope,
+reader_consumer) and which injection hooks are absent (reader arguments,
+the fuel worker rewrite), and why a fuel'd constant still resolves (the
+`[LemFuel]` binder is instance-implicit). The header's "BEq is derived for
+types without function-typed constructor args" and "Block formatting is
+disabled" rows describe the current derivation and layout passes.
+
+### 4. User-facing messages
+
+Rewritten to plain, actionable English; every negative probe's `EXPECT`
+substring kept unless noted:
+
+| Site | Was | Now |
+|---|---|---|
+| `declare {lean} effectful` refusal | "deleted by the effect-retirement arc (charter: cerberus-lean lean_frontend/docs/2026-08-31_effect-retirement-design.md @64dd6efeb, section 7.1)" | "…crossed from BaseIO back into pure types through a library axiom, which is gone (doc/lean-backend/DESIGN.md, \"Zero axioms; effects as explicit state\")"; EXPECT `'declare {lean} effectful' is retired on the lean target` kept |
+| FM-literal (numeral measure) | quoted the [USER 2026-09-03] ruling verbatim | "a literal fuel is a magic value, forbidden by design — doc/lean-backend/DESIGN.md, \"No magic values\""; EXPECT `FM-literal` kept |
+| reserved-name capture | "(pre-merge audit 2026-09-05, probe p11b)"; listed five names | the names come from the table (now including `lemRecBase`); the cite is gone; EXPECTs `renders on Lean as \`lemFuel\` — a reserved synthesized binder name` / `\`lemTail\`` kept |
+| reserved binder | listed the names inline | from the table (the same three names and two prefixes); EXPECTs kept |
+| Type-1 comparison refusal | "(the historical sorry-bodied residual instances are deleted, arc-10 audit fix)" | "…in the Type 1 universe, where the comparison classes are not defined; escape hatches: …". `neg_type1_comparison.lem`'s EXPECT was the WHOLE old message; it is now the diagnosis `cannot derive BEq/Ord instances for type 't1': heterogeneous type-parameter counts put its mutual block in the Type 1 universe` (justification: the removed clause was the process history itself; the new substring still pins the reason and the type name) |
+| `Te_opaque` internal error | "(opaque types are fail-closed, arc-8 S2)" | "internal error — … (opaque types are fail-closed)" |
+| tuple-instance walk depth, confusable tuple-instance demand (×3), numeric type variable | "B14" | plain ("the tuple-instance walk", "local instance binding") |
+| `let _ = e1`/`let () = e1` in a supply-threaded body | "(B15: e1 would be dropped; …)" | "(e1 would be dropped; …)" |
+| `parser.mly` numeric fuel budget | "was removed (fuel-parameter arc, 2026-09-04) … [USER 2026-09-03] \"…\"" | "is not accepted: a per-declaration fuel literal is a magic value (doc/lean-backend/DESIGN.md, \"No magic values\") … Use the sentinel form"; EXPECT `numeric fuel-budget form` kept |
+| `parser.mly` numeric fuel measure | quoted the ruling; suggested `` `sizeOf x` `` (which the backend refuses: FM-sizeOf) | cites DESIGN; suggests `` `List.length xs + 1` ``; EXPECT `a numeral is not a fuel measure` kept |
+
+### 5. TODO register
+
+- 39 closed: `is_lean_pat_direct` exists (`src/patterns.ml`), the path is
+  reachable, and `tests/comprehensive/test_multiclause.lem` + the suite
+  phase `lean-multiclause` pin the equation form (`def f : Nat → Nat | (0 :
+  Nat) => 1 | (n : Nat) => n`, the cons form for `len2`) and the single
+  `match` for a constructor-pattern group, with asserts for the values.
+- 38 rewritten: four `partial def`s (the generated
+  `Lem_Set_extra.leastFixedPointUnbounded` added; `natSqrtAux` marked
+  avoidably partial), the helper duplication, and what package C deleted.
+- 34 measured: 18 of 259 root-level declarations of `LemLib.lean` are in
+  `lean_constants`, 241 absent (awk over the file, before the deletions;
+  the review's "about 300" overstated it); `LemLib` itself is the exposed
+  root of `supplySplit`.
+- 36: (e) `initial_env.ml` and (f) `type_defs_rename_type` added, with the
+  (b)↔(d) coupling.
+- 33: `lemNatLsr` added, with why (`transform.lem` is not in `LIBS`).
+- 3/4/6/29: line references re-derived by grep after the sweep; 4 lists
+  the review's further name-keyed sites; 6 notes the callback fires on
+  every target.
+
+### 6. Debug variables
+
+`LEM_INH_DEBUG`, `LEM_THREAD_DEBUG`, `LEM_LEAN_LAYOUT_DEBUG` are documented
+in DESIGN ("Debugging the analyses": what each prints). The two backend
+ones are read with `Sys.getenv_opt … <> None` like the layout one, so all
+three mean "set to any value" (before, `LEM_INH_DEBUG=` — set but empty —
+was off; a debug knob, no output effect).
+
+### 7. Small duplications
+
+- The reserved-name contract is one table (`lean_reserved_*` in
+  `lean_backend.ml`, with `lean_starts_with`): the binder check, the
+  capture check, `lemLetRhs_`, `_lemIfTail`, `lemSize`/`lemSize_aux` and the
+  `lemTail`/`lemRecBase` literals read from it; the inline prefix-length
+  literals (`11`, `10`) are gone. Behaviour: UNCHANGED. The five sites had
+  not drifted by accident: the binder check deliberately omits `lemTail`,
+  because the tail hoisting (`lean_hoist_tail_binders`, which runs first)
+  synthesizes that binder into the very clause the check scans — the first
+  attempt at a full union refused Cerberus's `are_compatible`
+  (`ailTypesAux.lem:784`, "binder 'lemTail' collides…"). The table records
+  the two populations (`lean_reserved_binder_names` ⊂
+  `lean_reserved_exact_names`) and the reason. The capture check's message
+  gained `lemRecBase`, which it checked but did not list.
+- `(priority := 500)` at six sites is `lean_instance_kw_auto`
+  (`lean_instance_auto_priority = 500`); the emitted text is byte-identical
+  (consumer trees). The BEq-lattice slice changes one constant.
+- `fmapUnionBy`'s unused comparator binder is `_cmp` (one LemLib build
+  warning fewer; no term change).
+
+### Gates (verbatim tails)
+
+Reference trees: `.tmp/hardening/v-arc/` (package A's output from the
+frozen inputs). Builds of `lem` are the worktree's; every Lean run through
+`cerberus-lean/scripts/capped`.
+
+Commit 1 (`a6c63aa`), binary built from it:
+```
+cerb: 0 differing files
+linksem: 0 differing files
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+=== Generation: 72 passed, 0 failed, 0 skipped ===
+Build completed successfully (206 jobs).
+parity: 49 probes: 38 OK, 11 XFAIL (registered, Lean side pinned), 0 FAIL
+suite exit 0
+upstream-drift: upstream 3802cb0, fork lean-backend-v0.1.0-alpha.1-51-ga1fdf6e-dirty; clients compared: linksem cerberus
+upstream-drift: 944 upstream files; 198 differ (list: …/v-drift-c1/differences.txt)
+```
+(115 negative probes "OK (rejected as declared)", 10 invariance witnesses;
+the drift library code rows: 32, all "comments/whitespace only";
+`cerberus-ocaml`/`linksem-ocaml` absent, i.e. byte-identical.)
+
+Commit 2 (`35e893e`), LemLib only (the lem binary is commit 1's, so the
+consumer trees, nonlean-regress and the drift check are unchanged by
+construction):
+```
+Build completed successfully (39 jobs).
+=== Generation: 72 passed, 0 failed, 0 skipped ===
+Build completed successfully (206 jobs).
+parity: 49 probes: 38 OK, 11 XFAIL (registered, Lean side pinned), 0 FAIL
+suite exit 0
+```
+(115 negative probes rejected as declared, 10 invariance witnesses; the
+LemLib build's 5 unused-variable warnings are the pre-existing ones.)
+
+Commit 3 (`cff6663`), binary rebuilt from it:
+```
+cerb: 0 differing files
+linksem: 0 differing files
+Build completed successfully (39 jobs).
+=== Generation: 73 passed, 0 failed, 0 skipped ===
+=== Multi-clause definitions render as Lean equations (TODO item 39 pin) ===
+  OK: equation form for f and len2, match form for g
+Build completed successfully (208 jobs).
+  OK (rejected as declared): negative/neg_type1_comparison.lem
+parity: 49 probes: 38 OK, 11 XFAIL (registered, Lean side pinned), 0 FAIL
+suite exit 0
+nonlean-regress: OK (893 artifact rows, 216 exit rows, 9 emitters, byte-identical to golden)
+upstream-drift: upstream 3802cb0, fork lean-backend-v0.1.0-alpha.1-53-g35e893e-dirty; clients compared: linksem cerberus
+upstream-drift: 944 upstream files; 198 differ (list: …/v-drift-c3/differences.txt)
+```
+(115 negative probes rejected as declared, 10 invariance witnesses, the
+five `mc_*` asserts PASS; LemLib 4 warnings, was 5; the drift library code
+rows: 32, all "comments/whitespace only", `cerberus-ocaml`/`linksem-ocaml`
+absent. The "FAIL:" lines the parity runner prints inside the registered
+XFAIL probes are its own reporting of the pinned Lean side.)
+
+Compiler warnings (clean `ocamlbuild -clean` + `make`, default flags):
+29 before (`a1fdf6e`), 29 after; none in `lean_backend.ml`,
+`lean_layout.ml`, `output.ml`, `parser.mly` (the 29 are upstream's). LemLib:
+5 "variable not explicitly referenced" warnings before, 4 after
+(`fmapUnionBy`'s `cmp`; the other four are copied from `.lem` pattern
+variables, review L3).
+
+### Provenance
+
+[USER 2026-10-03]: the package ruling. [AGENT]: every deletion decision,
+the reserved-name-table population split, the message wordings, the TODO
+texts, the kept items and this record.

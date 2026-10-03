@@ -167,6 +167,10 @@ describe a design that is no longer current.
   run-time limit refused, the `termination_argument` promise corrected,
   fail-open spots and state fixes; the `min`/`max` OCaml-target deviation
   registered ([USER 2026-10-03] "Register as deviation", rulings X5).
+  Its "Package C" section (same day) is the cleanup slice: dead code and
+  LemLib's dead definitions deleted with per-name consumer-grep evidence,
+  one reserved-name table, one instance-priority constant, the comment and
+  message sweep, the TODO 39 test, and the gate tails per commit.
 
 ## When the front documents were checked
 
