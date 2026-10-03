@@ -185,42 +185,51 @@ let mk_pre_x_l sk1 (sk2,id) sk3 l =
 
 %%
 
-x:
+/* A bare identifier token: `X`, or one of the Lean-backend annotation
+   words. Those words are CONTEXTUAL keywords: the lexer always tokenizes
+   them, but they act as keywords only in the `declare` productions (the
+   sole grammar positions expecting these tokens, and positions where an
+   identifier can never occur, so no LR conflict arises). Everywhere else
+   they reduce to ordinary identifiers, so `let fuel = 1` etc. keep parsing
+   for every target (blast-radius containment for non-Lean lem users).
+   Every production that takes a bare identifier token goes through this
+   nonterminal: `x` below, and the `target_rep` parameter list `x_ls`
+   (which took the raw `X` token until 2026-10-03, so `declare ocaml
+   target_rep function f fuel = ...` was a syntax error that upstream Lem
+   accepts; backend-hardening record). */
+x_tok:
   | X
-    { X_l($1, loc ()) }
-  /* The Lean-backend annotation words are CONTEXTUAL keywords: the lexer
-     always tokenizes them, but they act as keywords only in the `declare`
-     productions (the sole grammar positions expecting these tokens, and
-     positions where `x` can never occur, so no LR conflict arises).
-     Everywhere else they reduce to ordinary identifiers, so `let fuel = 1`
-     etc. keep parsing for every target (blast-radius containment for
-     non-Lean lem users). */
+    { $1 }
   | SkipInstances
-    { X_l(($1, r"skip_instances"), loc ()) }
+    { ($1, r"skip_instances") }
   | ExtraImport
-    { X_l(($1, r"extra_import"), loc ()) }
+    { ($1, r"extra_import") }
   | Effectful
-    { X_l(($1, r"effectful"), loc ()) }
+    { ($1, r"effectful") }
   | Reader
-    { X_l(($1, r"reader"), loc ()) }
+    { ($1, r"reader") }
   | Fuel
-    { X_l(($1, r"fuel"), loc ()) }
+    { ($1, r"fuel") }
   | GroundRep
-    { X_l(($1, r"ground_rep"), loc ()) }
+    { ($1, r"ground_rep") }
   | ReaderSeed
-    { X_l(($1, r"reader_seed"), loc ()) }
+    { ($1, r"reader_seed") }
   | Supply
-    { X_l(($1, r"supply"), loc ()) }
+    { ($1, r"supply") }
   | ReaderConsumer
-    { X_l(($1, r"reader_consumer"), loc ()) }
+    { ($1, r"reader_consumer") }
   | FuelConsumer
-    { X_l(($1, r"fuel_consumer"), loc ()) }
+    { ($1, r"fuel_consumer") }
   | Structural
-    { X_l(($1, r"structural"), loc ()) }
+    { ($1, r"structural") }
   | FuelMeasure
-    { X_l(($1, r"fuel_measure"), loc ()) }
+    { ($1, r"fuel_measure") }
   | Assuming
-    { X_l(($1, r"assuming"), loc ()) }
+    { ($1, r"assuming") }
+
+x:
+  | x_tok
+    { X_l($1, loc ()) }
   | Lparen Eq Rparen
     { mk_pre_x_l $1 $2 $3 (loc ()) }
   | Lparen IN Rparen
@@ -1014,7 +1023,7 @@ target_rep_rhs_type :
 x_ls :
   |
     { [] }
-  | X x_ls
+  | x_tok x_ls
     { (Ast.X_l ($1, loc()))::$2 }
 
 sort :

@@ -156,6 +156,18 @@ describe a design that is no longer current.
   printer cleanup; package A (layout engine, §11; TODO item 42, closed); packages C and D deferred (TODO items 27, 28); the
   upstream report tray scope.
 
+## Correctness and fail-closed hardening
+
+- 2026-10-03 [Backend-hardening record](2026-10-03_backend-hardening-record.md):
+  package A of the arc that acted on the read-the-code review and the
+  behavioural noodler of 2026-10-03 — the Lean annotation words as
+  `target_rep` parameters, keyword and generated-name record fields, type
+  variables renamed on collision, the mutual-record update base bound
+  once, the layout printer's exponential re-decision, the 128-field
+  run-time limit refused, the `termination_argument` promise corrected,
+  fail-open spots and state fixes; the `min`/`max` OCaml-target deviation
+  registered ([USER 2026-10-03] "Register as deviation", rulings X5).
+
 ## When the front documents were checked
 
 - 2026-09-25: the public-readiness work checked README.md end to end
@@ -170,6 +182,14 @@ describe a design that is no longer current.
   against the audit-fix commit `131b922`. The last recorded test-suite run
   is the one quoted in the
   [output-niceness record](2026-10-03_output-niceness-arc-plan.md) §13.
+- 2026-10-03, backend hardening (package A): DESIGN.md (records and
+  fields, the field-count limit, type-variable renaming, the
+  `termination_argument` row, the deviation register, the layout printer's
+  sharing), the manual chapter's three matching claims and TODO.md were
+  updated for the changes in the
+  [backend-hardening record](2026-10-03_backend-hardening-record.md), whose
+  gate run is quoted there; README.md was not touched (its claims were
+  checked against the change list and none moved).
 
 ## Elsewhere
 

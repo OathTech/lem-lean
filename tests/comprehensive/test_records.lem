@@ -77,3 +77,31 @@ let updated_state : my_state =
   <| init_state with
      field_b = (42 : nat)
   |>
+
+(* ================================================================ *)
+(* Field names that are Lean keywords (backend-hardening 2026-10-03, *)
+(* item 2): escaped «at» on every side — declaration, projection,   *)
+(* literal, update, pattern (compiled to projections), derived      *)
+(* Inhabited. The declaration side used to be emitted bare, a Lean  *)
+(* parse error.                                                     *)
+(* ================================================================ *)
+
+type kw_fields = <| at : nat; from : nat; by : bool; show : string; where : nat;
+                    deriving : nat; structure : nat; def : nat; have : nat;
+                    calc : nat; sorry : nat; namespace : nat; variable : nat |>
+
+let kw_v : kw_fields =
+  <| at = 1; from = 2; by = true; show = "s"; where = 3; deriving = 4; structure = 5;
+     def = 6; have = 7; calc = 8; sorry = 9; namespace = 10; variable = 11 |>
+
+let kw_w : kw_fields = <| kw_v with at = 100; from = 200 |>
+
+let kw_pat (x : kw_fields) : nat = match x with <| at = a; where = w |> -> a + w end
+
+assert kw_fields_proj_ok :
+  (kw_v.at + kw_v.from + kw_v.where + kw_v.deriving + kw_v.structure + kw_v.def
+     + kw_v.have + kw_v.calc + kw_v.sorry + kw_v.namespace + kw_v.variable = (66:nat))
+assert kw_fields_update_ok :
+  (kw_w.at = (100:nat) && kw_w.from = (200:nat) && kw_w.by = true && kw_w.show = "s")
+assert kw_fields_pat_ok : (kw_pat kw_w = (103:nat))
+assert kw_fields_eq_ok : (kw_v <> kw_w)

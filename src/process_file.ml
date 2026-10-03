@@ -371,11 +371,26 @@ let output1 env (out_dir : string option) (targ : Target.target) avoid m =
               let parts = String.split_on_char '.' name in
               String.concat Filename.dir_sep parts
             in
+            (* Create the output directory and its parents; a failure is a
+               fatal error naming the directory (it used to be an ignored
+               `mkdir -p` exit code, so lem went on and failed later with the
+               temp-file rename's message; backend-hardening record,
+               2026-10-03). *)
+            let rec mkdir_p d =
+              if d = "" || d = Filename.current_dir_name || Sys.file_exists d then ()
+              else begin
+                let parent = Filename.dirname d in
+                if parent <> d then mkdir_p parent;
+                try Sys.mkdir d 0o777 with
+                | Sys_error msg ->
+                  raise (Reporting_basic.Fatal_error (Reporting_basic.Err_general (false, Ast.Unknown,
+                    Printf.sprintf "Lean backend: cannot create the output directory %s: %s" d msg)))
+              end
+            in
             let ensure_parent_dir filename =
               let full_path = Filename.concat dir filename in
               let parent = Filename.dirname full_path in
-              if not (Sys.file_exists parent) then
-                ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote parent)))
+              if not (Sys.file_exists parent) then mkdir_p parent
             in
             let main_file = lean_module_path module_name ^ ".lean" in
             let aux_file = lean_module_path module_name ^ "_auxiliary.lean" in

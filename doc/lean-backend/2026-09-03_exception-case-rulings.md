@@ -195,3 +195,36 @@ instead of refused — was not put to the operator today and stays in
 the decision to keep the conversion checks, the upstream-note plan.
 [AGENT] (parity-fix worker, `3c88f0d`): the measurements quoted from the
 parity record. Nothing was merged or pushed in this slice.
+
+## 4. Addendum 2026-10-03 — X5: `min`/`max` default methods on the OCaml target
+
+Found by the behavioural noodler of 2026-10-03 (`p_user_ord_instance`):
+with a user `Ord` instance whose `<=` reverses the order and no
+`OrdMaxMin` instance of its own, `min (T 1 0) (T 2 0)` is `T 1 0` on the
+OCaml target and `T 2 0` on Lean; `<`, `compare`, `Sorting.sort`,
+`isSorted`, `insert` and the set operations agree.
+
+- Cause: `library/basic_classes.lem` defines `defaultMax = maxByLessEqual
+  (<=)` and `defaultMin = minByLessEqual (<=)` — lem's semantics follows
+  the instance — and gives them the OCaml representations
+  ``declare ocaml target_rep function defaultMax = `max` `` /
+  ``… defaultMin = `min` ``: Stdlib's structural `max`/`min`, correct only
+  when the instance coincides with OCaml's structural order. HOL4, Isabelle,
+  Coq and Lean use lem's definition (Lean emits `maxByLessEqual (fun x y =>
+  not (tcmp x y == GT))`). Upstream report: `doc/upstream-tray/11-default-max-min-structural-on-ocaml.md`
+  (LP1; the record `2026-09-30_library-parity-coverage.md` §2 had
+  classified it as a question).
+- Ruling, verbatim: [USER 2026-10-03] "Register as deviation". The same
+  class as X1 and X3: an OCaml-backend deviation from lem's own semantics;
+  the Lean target follows lem; parity is not required in the OCaml→Lean
+  direction. No OCaml representation is changed.
+- Register: `tests/comprehensive/parity/probes/p_user_ord_minmax.lem`,
+  class `ruled` in `parity/expected_failures.txt`; the OCaml pin
+  `expected/p_user_ord_minmax.out` records the deviating reference output
+  (`min: (1, 0)`, `max: (2, 0)`), the Lean pin
+  `expected/p_user_ord_minmax.lean.out` lem's semantics (`min: (2, 0)`,
+  `max: (1, 0)`); the explicit `maxByLessEqual (<=)`/`minByLessEqual (<=)`
+  lines of the probe agree on both targets. DESIGN's deviation list carries
+  the entry. Record: `2026-10-03_backend-hardening-record.md` item 10.
+- Provenance: [USER 2026-10-03] the ruling; [AGENT] (backend-hardening
+  worker) the probe, the register entry and this addendum.

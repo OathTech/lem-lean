@@ -109,6 +109,8 @@ lean_lib LemComprehensiveTest where
     `Test_tuple_let_once, `Test_tuple_let_once_auxiliary,
     `TupleLetTick,  -- hand-written m7 single-evaluation counter
     `Test_types_basic, `Test_types_basic_auxiliary,
+    `Test_tyvar_collision, `Test_tyvar_collision_auxiliary,  -- type variables renamed on collision (backend-hardening item 3)
+    `Test_wide_patterns, `Test_wide_patterns_auxiliary,  -- wide patterns generate in bounded time (backend-hardening item 5)
     `Test_vectors, `Test_vectors_auxiliary,
     `TestExtraImportHelper  -- hand-written helper for extra_import test
   ]

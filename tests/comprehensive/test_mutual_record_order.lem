@@ -43,3 +43,25 @@ let upd_hbox = <| (mk_hbox 1 2) with hb_hi = 9 |>
 assert mro_h_lo : ((mk_hbox 1 2).hb_lo = 1)
 assert mro_h_hi : ((mk_hbox 1 2).hb_hi = 2)
 assert mro_h_upd : (upd_hbox.hb_lo = 1 && upd_hbox.hb_hi = 9 && upd_hbox.hb_val = "v")
+
+(* backend-hardening 2026-10-03, item 4: in the heterogeneous block the
+   update's base is bound once (`let lemRecBase := …`). An UNPARENTHESISED
+   application as the base used to be rendered per unchanged field without
+   parentheses — `(hbox.mk 9 (mk_hbox 1 2.hb_hi) …)`, which Lean reads as
+   `2.hb_hi` — and a conditional base likewise. Keyword-named fields of a
+   mutual record take the same escaping as structure fields (item 2). *)
+let upd_hbox_app = <| mk_hbox 1 2 with hb_hi = 9 |>
+let upd_hbox_if (b : bool) = <| (if b then mk_hbox 1 2 else mk_hbox 3 4) with hb_lo = 7 |>
+
+assert mro_h_upd_app : (upd_hbox_app.hb_lo = 1 && upd_hbox_app.hb_hi = 9 && upd_hbox_app.hb_val = "v")
+assert mro_h_upd_if : ((upd_hbox_if true).hb_lo = 7 && (upd_hbox_if true).hb_hi = 2 && (upd_hbox_if false).hb_hi = 4)
+
+type kbox 'a = <| at : nat; from : 'a; kb_items : list kitem |>
+and kitem = KItem of nat
+declare {lean} skip_instances type kbox
+declare {lean} skip_instances type kitem
+
+let mk_kbox (n : nat) : kbox string = <| at = n; from = "f"; kb_items = [KItem n] |>
+let upd_kbox = <| mk_kbox 1 with at = 5 |>
+
+assert mro_k_upd : (upd_kbox.at = 5 && upd_kbox.from = "f" && (mk_kbox 1).at = 1)

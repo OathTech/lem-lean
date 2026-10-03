@@ -417,10 +417,21 @@ module St = struct
      arc-10 set-comprehension rejection) must not fire for such dead
      text; they emit the historical inert placeholder instead. *)
   let rendering_comment = ref false
-  (* B3: unique suffixes for `_lemIfTailN` continuations *)
-  (* B4: the type paths of the type_def group being emitted *)
-  let current_type_block : Path.t list ref = ref []
+  (* [invocation] B3: unique suffixes for the `_lemIfTailN` continuations
+     (let-bound inside one expression, so uniqueness is only needed within
+     it; the counter is never reused within an invocation). *)
   let if_tail_counter = ref 0
+  (* [file] B4: the type paths of the type_def group being emitted. *)
+  let current_type_block : Path.t list ref = ref []
+  (* [render] Type-variable renames for the value definition being
+     rendered (lean_tyvar_renames_for; mechanism comment there): Lem
+     name -> Lean binder name. Empty between definitions. *)
+  let tyvar_renames : (string * string) list ref = ref []
+  (* [invocation] Comparison-binder demands per generated definition
+     (lean_cmp_prepass; mechanism comment there): cref -> (Lean class,
+     type-variable name) list. Grows across the modules of one invocation
+     in dependency order, like reader_lifted. *)
+  let lean_cmp_bounds : (Types.const_descr_ref, (string * string) list) Hashtbl.t = Hashtbl.create 256
   (* [invocation] Threaded-def census: cref -> ([Inhabited]-bound
      type-parameter positions (indices into const_tparams, for call-site
      propagation), bound tyvar names in parameter-declaration order (for
@@ -448,7 +459,8 @@ module St = struct
     deferred_opens := [];
     measure_obligations := [];
     tail_hoisted := [];
-    emitted_comments := []
+    emitted_comments := [];
+    current_type_block := []
 
   (* Full reset — the reentrancy hook (be:G3): a second lem invocation in
      one process starts from a fresh backend. Not called on the normal
@@ -481,7 +493,10 @@ module St = struct
     rendering_comment := false;
     failwith_threaded := Types.Cdmap.empty;
     size_census := [];
-    fresh_name_counter := 0
+    fresh_name_counter := 0;
+    if_tail_counter := 0;
+    tyvar_renames := [];
+    Hashtbl.reset lean_cmp_bounds
 
   (* Warning-32 suppression for the reentrancy hook (no in-tree caller
      yet by design). *)
@@ -2381,7 +2396,7 @@ let lean_thread_debug = (try Sys.getenv "LEM_THREAD_DEBUG" <> "" with Not_found 
    the text named. Run for every fuel'd/reader/supply group
    (reserved_binder_check) and whenever a `function` tail is hoisted
    (lean_hoist_tail_binders). *)
-let lean_reserved_exact_names = ["lemFuel"; "lemMeasureLe"; "lemHyp"; "LemFuel"; "lemTail"]
+let lean_reserved_exact_names = ["lemFuel"; "lemMeasureLe"; "lemHyp"; "LemFuel"; "lemTail"; "lemRecBase"]
 let lean_reserved_prefixes = ["_lemReader_"; "_lemSupply"]
 let lean_is_reserved_name (n : string) : bool =
   List.mem n lean_reserved_exact_names
@@ -2444,8 +2459,8 @@ let rec exp_backend_idents (e : exp) : string list =
      demands them at the instantiated types (transitively; fixpoint).
    The binders are emitted after the definition's Lem constraints
    (val_def). There is no fallback: a demand this analysis misses is a Lean
-   compile error, never the retired runtime-panicking residual instance. *)
-let lean_cmp_bounds : (Types.const_descr_ref, (string * string) list) Hashtbl.t = Hashtbl.create 256
+   compile error, never the retired runtime-panicking residual instance.
+   The demand table is St.lean_cmp_bounds. *)
 
 let rec exp_constants (e : exp) : const_descr_ref id list =
   let seplist_exps sl = Seplist.to_list sl in
@@ -2486,6 +2501,102 @@ let lean_cmp_class_of_lem (p : Path.t) : string option =
   | _ -> None
 
 let tnvar_name (tv : Types.tnvar) : string = Ulib.Text.to_string (Types.tnvar_to_rope tv)
+
+(* ---- Type-variable capture (backend-hardening record, 2026-10-03, item 3)
+   A value definition's type variables are Lean implicit binders
+   (`{a : Type}`), which shadow every global of that name in the
+   definition's signature and body: `type t = …` with
+   `let f (x : 't) (y : t)` made `(y : t)` refer to the binder, and
+   `let a : nat = 3` with `let f (x : 'a) : nat = a` made `a` the Type.
+   Lem already renames a PARAMETER that collides with a type variable (the
+   local `a` of p_tyvar_shadow becomes `a1`); the backend does the same for
+   the type variable. Every name the definition refers to is collected —
+   the Lean name of each constant it mentions, and the Lean name (plus the
+   components of a Lean target representation) of each type constructor in
+   the type of any sub-expression or pattern — and a type variable equal to
+   one of them is rendered under a fresh name (`t'`, `t''`, …) that is none
+   of those names, none of the definition's other type variables, none of
+   its binders and not reserved. The primed shape is deliberate: Lem's own
+   renamer (default_avoid_f, Name.fresh) renames a colliding local binder
+   to `t1`, `t2`, … at render time, after this map is computed, so a
+   digit-suffixed fresh name here could meet a renamed binder (measured:
+   `let t = tn y` in the body became `t1`); the renamer never produces a
+   prime. The map is [render]-scoped
+   (St.tyvar_renames) and consulted by every renderer of a type variable
+   reached from a value definition: the implicit binders
+   (let_type_variables), the two source-type renderers (pat_typ, typ), the
+   class-constraint and comparison-dictionary binders (val_def). Numeric
+   type variables are not renamed (no collision shape is known). Type
+   DEFINITIONS are not renamed: a type parameter's name is part of the
+   generated API (`inductive t (a : Type)`, named arguments), so a
+   collision there is refused instead (lean_check_type_block). *)
+let lean_tyvar_text (s : string) : string =
+  match List.assoc_opt s !St.tyvar_renames with Some s' -> s' | None -> s
+
+(* every type-constructor path in a type; the flag marks a Tbackend path,
+   whose components are the Lean text itself *)
+let rec lean_typ_type_paths (ty : Types.t) : (Path.t * bool) list =
+  match ty.Types.t with
+  | Types.Tvar _ | Types.Tne _ | Types.Tuvar _ -> []
+  | Types.Tfn (t1, t2) -> lean_typ_type_paths t1 @ lean_typ_type_paths t2
+  | Types.Ttup ts -> List.concat_map lean_typ_type_paths ts
+  | Types.Tapp (ts, p) -> (p, false) :: List.concat_map lean_typ_type_paths ts
+  | Types.Tbackend (ts, p) -> (p, true) :: List.concat_map lean_typ_type_paths ts
+
+let rec lean_src_t_type_paths (t : src_t) : (Path.t * bool) list =
+  match t.term with
+  | Typ_wild _ | Typ_var _ | Typ_len _ -> []
+  | Typ_fn (t1, _, t2) -> lean_src_t_type_paths t1 @ lean_src_t_type_paths t2
+  | Typ_tup ts -> List.concat_map lean_src_t_type_paths (Seplist.to_list ts)
+  | Typ_app (p, ts) -> (p.descr, false) :: List.concat_map lean_src_t_type_paths ts
+  | Typ_backend (p, ts) -> (p.descr, true) :: List.concat_map lean_src_t_type_paths ts
+  | Typ_paren (_, t1, _) | Typ_with_sort (t1, _) -> lean_src_t_type_paths t1
+
+(* the type of every pattern node / expression node (the renderers print
+   parameter and binder types from these) *)
+let rec lean_types_of_pat (p : pat) : Types.t list =
+  p.typ :: (match p.term with
+    | P_wild _ | P_var _ | P_lit _ | P_var_annot _ | P_num_add _ -> []
+    | P_as (_, p', _, _, _) | P_typ (_, p', _, _, _) | P_paren (_, p', _) -> lean_types_of_pat p'
+    | P_tup (_, ps, _) | P_list (_, ps, _) | P_vector (_, ps, _) ->
+      List.concat_map lean_types_of_pat (Seplist.to_list ps)
+    | P_vectorC (_, ps, _) | P_const (_, ps) | P_backend (_, _, _, ps) -> List.concat_map lean_types_of_pat ps
+    | P_record (_, fps, _) -> List.concat_map (fun (_, _, p') -> lean_types_of_pat p') (Seplist.to_list fps)
+    | P_cons (p1, _, p2) -> lean_types_of_pat p1 @ lean_types_of_pat p2)
+
+let rec lean_types_of_exp (e : exp) : Types.t list =
+  let sub = lean_types_of_exp in
+  let pats ps = List.concat_map lean_types_of_pat ps in
+  let qbs_types qbs = List.concat_map (function
+      | Qb_var _ -> []
+      | Qb_restr (_, _, p, _, e1, _) -> lean_types_of_pat p @ sub e1) qbs in
+  Typed_ast.exp_to_typ e :: (match ExpW.exp_to_term e with
+  | Var _ | Nvar_e _ | Constant _ | Backend _ | Lit _ -> []
+  | Fun (_, ps, _, e1) -> pats ps @ sub e1
+  | Function (_, arms, _) ->
+    List.concat_map (fun (p, _, e1, _) -> lean_types_of_pat p @ sub e1) (Seplist.to_list arms)
+  | App (e1, e2) -> sub e1 @ sub e2
+  | Infix (e1, e2, e3) -> sub e1 @ sub e2 @ sub e3
+  | Record (_, fes, _) -> List.concat_map (fun (_, _, e1, _) -> sub e1) (Seplist.to_list fes)
+  | Recup (_, e0, _, fes, _) -> sub e0 @ List.concat_map (fun (_, _, e1, _) -> sub e1) (Seplist.to_list fes)
+  | Field (e1, _, _) -> sub e1
+  | Vector (_, es, _) | Tup (_, es, _) | List (_, es, _) | Set (_, es, _) ->
+    List.concat_map sub (Seplist.to_list es)
+  | VectorSub (e1, _, _, _, _, _) | VectorAcc (e1, _, _, _) -> sub e1
+  | Case (_, _, e0, _, arms, _) ->
+    sub e0 @ List.concat_map (fun (p, _, e1, _) -> lean_types_of_pat p @ sub e1) (Seplist.to_list arms)
+  | Typed (_, e1, _, _, _) | Paren (_, e1, _) | Begin (_, e1, _) -> sub e1
+  | Let (_, (lb, _), _, body) ->
+    (match lb with
+     | Let_val (p, _, _, rhs) -> lean_types_of_pat p @ sub rhs
+     | Let_fun (_, ps, _, _, rhs) -> pats ps @ sub rhs) @ sub body
+  | If (_, e1, _, e2, _, e3) -> sub e1 @ sub e2 @ sub e3
+  | Setcomp (_, e1, _, e2, _, _) -> sub e1 @ sub e2
+  | Comp_binding (_, _, e1, _, _, qbs, _, e2, _) -> sub e1 @ qbs_types qbs @ sub e2
+  | Quant (_, qbs, _, e1) -> qbs_types qbs @ sub e1
+  | Do (_, _, dls, _, e1, _, _) ->
+    List.concat_map (fun (Do_line (p, _, rhs, _)) -> lean_types_of_pat p @ sub rhs) dls @ sub e1)
+
 
 (* Lem's polymorphic-comparison PRIMITIVES (library basic_classes.lem): no
    class constraint in Lem (they ARE OCaml's polymorphic compare), but their
@@ -2549,7 +2660,15 @@ let lean_cmp_prepass env (ds : def list) =
              | _ ->
                let default_all () =
                  List.iter (fun fv -> add cls (tnvar_name fv)) (Types.TNset.elements (Types.free_vars ty)) in
-               if depth > 50 then default_all () else
+               (* Depth bound, loud like its twin in lean_tuple_inst_demands
+                  (it used to fall back to default_all, which silently
+                  over-approximates the binders and so changes a
+                  declaration's type). A bound, not a proof: no chain near it
+                  is known. *)
+               if depth > 50 then
+                 raise (Reporting_basic.err_general true c.id_locn
+                   (Stdlib.(^) "Lean backend: internal error — comparison-binder demand walk exceeded depth 50 at class "
+                      (Path.to_string lem_p)));
                (match Types.get_matching_instance env.t_env (lem_p, ty) env.i_env with
                 | Some (inst, subst) when not inst.Types.inst_is_default ->
                   List.iter (fun (p', tv') ->
@@ -2574,7 +2693,7 @@ let lean_cmp_prepass env (ds : def list) =
         (match lean_cmp_primitive cd, cd.const_tparams with
          | Some cls, tv :: _ -> demand ~lem_p:None cls tv
          | _ -> ());
-        (match Hashtbl.find_opt lean_cmp_bounds c.descr with
+        (match Hashtbl.find_opt St.lean_cmp_bounds c.descr with
          | Some bs ->
            List.iter (fun (cls, tvn) ->
              List.iter (fun tv -> if tnvar_name tv = tvn then demand ~lem_p:None cls tv) cd.const_tparams) bs
@@ -2587,10 +2706,10 @@ let lean_cmp_prepass env (ds : def list) =
     List.iter (fun vd ->
       let ds' = demands_of vd in
       List.iter (fun c ->
-        let old = Option.value ~default:[] (Hashtbl.find_opt lean_cmp_bounds c) in
+        let old = Option.value ~default:[] (Hashtbl.find_opt St.lean_cmp_bounds c) in
         let merged = List.fold_left (fun acc x -> if List.mem x acc then acc else acc @ [x]) old ds' in
         if List.length merged <> List.length old then begin
-          Hashtbl.replace lean_cmp_bounds c merged; changed := true end)
+          Hashtbl.replace St.lean_cmp_bounds c merged; changed := true end)
         (match vd with
          | Let_def(_, _, (_, nm, _, _, _)) -> List.map snd nm
          | Let_inline(_,_,_,_,c,_,_,_) -> [c]
@@ -3256,7 +3375,9 @@ let lean_analysis_prepass_all env (mods : checked_module list) =
           (Backend_common.get_module_name env (Target.Target_no_ident Target.Target_lean) mod_path mod_name) in
       St.current_module_name := module_name;
       let (ds, _) = m.typed_ast in
+      (* the same passes as lean_defs runs per output module, in its order *)
       lean_reader_prepass env ds;
+      lean_cmp_prepass env ds;
       lean_fuel_prepass env ds;
       lean_supply_prepass env ds;
       lean_inhabited_prepass env ds;
@@ -3737,6 +3858,50 @@ let lean_escape_keyword s =
     String.concat "" ["\xC2\xAB"; s; "\xC2\xBB"]  (* «name» *)
   else s
 
+(* Record field names (backend-hardening record, 2026-10-03). A field is
+   emitted in six places — the structure or single-constructor-inductive
+   declaration, the projection, the literal, the update, the mutual-record
+   accessor and the positional update of a mutual record — and every one
+   goes through lean_escape_keyword, so a field named like a Lean keyword
+   («at», «from», «by», «show», …) is spelled the same way everywhere (the
+   declaration used to be emitted bare, a Lean parse error).
+
+   Names that Lean itself declares in every structure's or inductive's
+   namespace cannot be fields at all: `mk` is "the name of the structure
+   constructor", the others make the kernel report "constant has already
+   been declared" (`below`/`brecOn` for recursive records; measured on Lean
+   4.32.2 for a structure, a recursive structure and the single-constructor
+   inductive with accessors, in the three shapes the backend emits).
+   Escaping cannot help («rec» is rec), the reserved-name pass does not
+   rename fields (DESIGN, "Reserved-name avoidance"), so such a field is
+   refused at generation, naming the field and the Lean declaration. *)
+let lean_structure_generated_names =
+  ["mk"; "rec"; "recOn"; "casesOn"; "noConfusion"; "noConfusionType"; "below"; "brecOn"]
+
+(* Lean 4.32.2 runtime limit (backend-hardening record, 2026-10-03, item
+   6): a binary built from a structure or constructor with 128 or more
+   fields segfaults when it allocates such an object at run time — the
+   object header plus 128 pointer-sized fields is 1032 bytes, past the
+   runtime allocator's 1024-byte small-object limit, and the allocation
+   path does not check it. Reproduced in plain Lean (no LemLib): a
+   128-field structure of Nat and a 128-argument constructor crash; 127
+   Nat fields work; 127 Nat fields plus one Bool (1025 bytes) crash; 128
+   or 200 Bool fields (one byte each) work. The refusal counts every field
+   at the pointer size, the upper bound of what a field can occupy, so it
+   admits exactly the widths that cannot reach the limit (over-refusing a
+   wide record of one-byte fields, loudly). Not a magic value in DESIGN's
+   sense: it mirrors a limit of the Lean runtime, not a choice about the
+   semantics. *)
+let lean_max_constructor_fields = 127
+
+let lean_check_constructor_width l (kind : string) (type_name : string) (ctor : string option) (n : int) =
+  if n > lean_max_constructor_fields then
+    raise (Reporting_basic.err_general true l
+      (Printf.sprintf
+        "Lean backend: %s `%s`%s has %d fields; a Lean 4.32.2 binary segfaults at run time when it allocates a constructor object of 128 or more fields (object header plus 128 pointer-sized fields = 1032 bytes exceeds the runtime allocator's 1024-byte small-object limit; reproduced in plain Lean), so the Lean target refuses more than %d — split the %s"
+        kind type_name (match ctor with Some c -> Printf.sprintf " (constructor `%s`)" c | None -> "")
+        n lean_max_constructor_fields kind))
+
 let lskips_t_to_output name =
   let stripped = Name.strip_lskip name in
   let s = Ulib.Text.to_string (Name.to_rope stripped) in
@@ -3989,8 +4154,72 @@ let field_ident_to_output fd ascii_alternative =
   let ident = B.const_id_to_ident fd ascii_alternative in
   let name = Ident.get_name ident in
   let stripped = Name.strip_lskip name in
-    from_string (Name.to_string stripped)
+    from_string (lean_escape_keyword (Name.to_string stripped))
 ;;
+
+(* The declaration-side spelling of a record field: the same escaping as
+   the projection/literal/update side above (lean_structure_generated_names). *)
+let field_decl_output n f_ref =
+  from_string (lean_escape_keyword (Name.to_string (Name.strip_lskip (B.const_ref_to_name n false f_ref))))
+;;
+
+(* the Lean names a type constructor path can print as: its Lean name, and
+   the components of its Lean target representation (an identifier, or the
+   type constructors of a substituted type, one level) *)
+let lean_type_path_names env ((p, backend) : Path.t * bool) : string list =
+  let components i = let (ms, n) = Ident.to_name_list i in List.map Name.to_string (n :: ms) in
+  if backend then (let (ms, n) = Path.to_name_list p in List.map Name.to_string (n :: ms))
+  else
+    let own = Name.to_string (Name.strip_lskip (B.type_path_to_name (Name.add_lskip (Path.get_name p)) p)) in
+    let rep_of q =
+      match Types.Pfmap.apply env.t_env q with
+      | Some (Types.Tc_type td) ->
+        Target.Targetmap.apply_target td.Types.type_target_rep (Target.Target_no_ident Target.Target_lean)
+      | Some (Types.Tc_class _) | None -> None in
+    own :: (match rep_of p with
+      | Some (Types.TYR_simple (_, _, i)) -> components i
+      | Some (Types.TYR_subst (_, _, _, st)) ->
+        List.concat_map (fun (q, b) ->
+            if b then (let (ms, n) = Path.to_name_list q in List.map Name.to_string (n :: ms))
+            else
+              Name.to_string (Name.strip_lskip (B.type_path_to_name (Name.add_lskip (Path.get_name q)) q))
+              :: (match rep_of q with Some (Types.TYR_simple (_, _, i)) -> components i | _ -> []))
+          (lean_src_t_type_paths st)
+      | None -> [])
+
+let lean_tyvar_renames_for env (tv_set : Types.TNset.t) (pats : pat list) (exps : exp list)
+    : (string * string) list =
+  let tyvars = List.filter_map (fun tv -> match tv with
+      | Types.Ty _ -> Some (tnvar_name tv) | Types.Nv _ -> None) (Types.TNset.elements tv_set) in
+  if tyvars = [] then [] else begin
+    let names = ref [] in
+    let add s = if not (List.mem s !names) then names := s :: !names in
+    let add_typ ty = List.iter (fun pb -> List.iter add (lean_type_path_names env pb)) (lean_typ_type_paths ty) in
+    List.iter (fun p -> List.iter add_typ (lean_types_of_pat p)) pats;
+    List.iter (fun e ->
+        List.iter add_typ (lean_types_of_exp e);
+        List.iter (fun (c : const_descr_ref id) ->
+            let cd = c_env_lookup Ast.Unknown env.c_env c.descr in
+            let n0 = Name.add_lskip (Path.get_name cd.const_binding) in
+            add (Name.to_string (Name.strip_lskip (B.const_ref_to_name n0 false c.descr))))
+          (exp_constants e))
+      exps;
+    let colliding = List.filter (fun tv -> List.mem tv !names) tyvars in
+    if colliding = [] then [] else begin
+      let bound =
+        List.concat_map exp_bound_names exps
+        @ List.concat_map (fun p -> List.map Name.to_string (NameSet.elements (Typed_ast.pat_to_bound_names p))) pats in
+      let chosen = ref [] in
+      let taken n =
+        List.mem n !names || List.mem n tyvars || List.mem n bound || List.mem n !chosen
+        || lean_is_reserved_name n in
+      List.map (fun tv ->
+          let rec pick c = let c = Stdlib.(^) c "'" in if taken c then pick c else c in
+          let c = pick tv in
+          chosen := c :: !chosen; (tv, c))
+        colliding
+    end
+  end
 
 (* Lean 4's greedy parser extends match/if/let/fun rightward, consuming
    subsequent tokens. These forms must be parenthesized when nested inside:
@@ -4472,6 +4701,7 @@ type pat_style = FunParam | MatchArm
     and def (inside_instance: bool) (callback : def list -> Output.t) (inside_module : bool) (m : def_aux) =
       match m with
       | Type_def (skips, def) ->
+          lean_check_type_block def;
           let type_output =
             if Seplist.length def = 1 then
               match Seplist.hd def with
@@ -4866,12 +5096,27 @@ type pat_style = FunParam | MatchArm
       | Declaration _ -> init_comments m  (* processed earlier; its comments stay *)
       | Lemma _ -> emp  (* Lemmas are handled by def_extra, not def *)
     and val_def inside_instance i_ref_opt is_recursive try_term def tv_set class_constraints =
+      (* type-variable renames for this definition (lean_tyvar_renames_for) *)
+      let renames =
+        if inside_instance || !St.rendering_comment then [] else
+        let (pats, exps) = match def with
+          | Let_def (_, _, (p, _, _, _, e)) -> ([p], [e])
+          | Fun_def (_, _, _, funs) ->
+            List.fold_left (fun (ps, es) ((_, _, pats, _, _, e) : funcl_aux) -> (ps @ pats, es @ [e]))
+              ([], []) (Seplist.to_list funs)
+          | Let_inline (_, _, _, _, _, _, _, e) -> ([], [e]) in
+        lean_tyvar_renames_for A.env tv_set pats exps in
+      let saved = !St.tyvar_renames in
+      St.tyvar_renames := renames;
+      Fun.protect ~finally:(fun () -> St.tyvar_renames := saved) @@ fun () ->
+      val_def_rendered inside_instance i_ref_opt is_recursive try_term def tv_set class_constraints
+    and val_def_rendered inside_instance i_ref_opt is_recursive try_term def tv_set class_constraints =
       begin
         let constraints =
           let body =
             Output.concat (from_string " ") (List.map (fun (path, tnvar) ->
               let name = from_string (Name.to_string (B.class_path_to_name path)) in
-              let var = from_string @@ Ulib.Text.to_string @@ Types.tnvar_to_rope tnvar
+              let var = from_string (lean_tyvar_text (Ulib.Text.to_string (Types.tnvar_to_rope tnvar)))
               in
                 Output.flat [
                   from_string "["; name; from_string " "; var; from_string "]"
@@ -4904,9 +5149,9 @@ type pat_style = FunParam | MatchArm
                 Seplist.to_list_map (fun ((_, c, _, _, _, _):funcl_aux) -> c) funs in
             List.fold_left (fun acc c ->
               List.fold_left (fun acc b -> if List.mem b acc then acc else acc @ [b]) acc
-                (Option.value ~default:[] (Hashtbl.find_opt lean_cmp_bounds c))) [] cs in
+                (Option.value ~default:[] (Hashtbl.find_opt St.lean_cmp_bounds c))) [] cs in
           let cmp_out = Output.concat (from_string " ") (List.map (fun (cls, a) ->
-            from_string (Printf.sprintf "[%s %s]" cls a)) cmp_binders) in
+            from_string (Printf.sprintf "[%s %s]" cls (lean_tyvar_text a))) cmp_binders) in
           let base =
             if List.length class_constraints = 0 && extra_tyr = [] then emp
             else body ^ format_tyr_constraints extra_tyr in
@@ -6753,7 +6998,7 @@ type pat_style = FunParam | MatchArm
       (* consecutive variables of one kind share a binder, `{a b : Type}`;
          the order of the implicit arguments is unchanged *)
       let named = List.map (fun tv -> match tv with
-          | Types.Ty tv -> ("Type", id Type_var (Tyvar.to_rope tv))
+          | Types.Ty tv -> ("Type", id Type_var (r (lean_tyvar_text (Ulib.Text.to_string (Tyvar.to_rope tv)))))
           | Types.Nv nv -> ("Nat", id Type_var (Nvar.to_rope nv)))
           (Types.TNset.elements tv_set) in
       let rec group = function
@@ -7080,7 +7325,7 @@ type pat_style = FunParam | MatchArm
                   ) const.instantiation in
                   (* + the threaded comparison binders (lean_cmp_prepass) *)
                   let num_classes = List.length c_descr.const_class
-                    + List.length (Option.value ~default:[] (Hashtbl.find_opt lean_cmp_bounds const.descr)) in
+                    + List.length (Option.value ~default:[] (Hashtbl.find_opt St.lean_cmp_bounds const.descr)) in
                   let class_holes = List.init num_classes (fun _ -> from_string " _") in
                   (* Parenthesize the @name (type) _ expression so it can safely
                      appear as an argument to another function *)
@@ -7202,6 +7447,26 @@ type pat_style = FunParam | MatchArm
                 Name.to_string (Path.get_name c_descr.const_binding)
               ) updated in
               let updated_map = List.map2 (fun name (_, _, e_val, _) -> (name, e_val)) updated_names updated in
+              (* The base is bound ONCE, `(let lemRecBase := e; T.mk v1
+                 lemRecBase.f2 …)`: it used to be re-rendered per unchanged
+                 field, unparenthesised — `<| mk n with f = 5 |>` came out as
+                 `(r.mk 5 (mk n.g))`, which Lean reads as `mk (n.g)` — and
+                 evaluated once per field. The binder is a reserved name
+                 (lean_reserved_exact_names): a free variable or a referenced
+                 constant of that name in the base or an updated value would
+                 be captured, so it is refused (backend-hardening record,
+                 2026-10-03). *)
+              let base = "lemRecBase" in
+              let locn = Typed_ast.exp_to_locn e in
+              let capture_check (e' : exp) =
+                Nfmap.iter (fun n _ ->
+                    if Name.to_string n = base then
+                      raise (Reporting_basic.err_general true locn
+                        (Printf.sprintf "Lean backend: variable '%s' is the reserved binder of a mutual-record update (the reserved-name contract) — rename the variable" base)))
+                  (C.exp_to_free e');
+                lean_reserved_capture_check A.env locn "record update" e' in
+              capture_check e;
+              List.iter (fun (_, _, e_val, _) -> capture_check e_val) updated;
               (* Look up the type's fields from the environment *)
               (match Types.type_defs_lookup_typ Ast.Unknown A.env.t_env e_typ with
                 | Some td ->
@@ -7213,13 +7478,14 @@ type pat_style = FunParam | MatchArm
                       Path.get_name c_descr.const_binding) in
                     match List.assoc_opt fname updated_map with
                       | Some e_val -> Output.flat [from_string " ("; exp inside_instance e_val; from_string ")"]
-                      | None -> Output.flat [from_string " ("; exp inside_instance e; from_string "."; from_string fname; from_string ")"]
+                      | None -> Output.flat [from_string " "; from_string base; from_string "."; from_string (lean_escape_keyword fname)]
                   ) all_fields in
                   let n0 = Name.add_lskip (Path.get_name path) in
                   let n = B.type_path_to_name n0 path in
                   let type_name_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip n)) in
                   Output.flat ([
-                    ws skips; from_string "("; from_string type_name_str; from_string ".mk"
+                    ws skips; from_string "(let "; from_string base; from_string " := "; exp inside_instance e;
+                    from_string "; "; from_string type_name_str; from_string ".mk"
                   ] @ field_vals @ [
                     from_string ")"
                   ])
@@ -7763,9 +8029,14 @@ type pat_style = FunParam | MatchArm
             in
             concat (from_string " ") (name :: List.map self ps)
         | P_num_add ((name, l), skips, skips', k) ->
-            (* n+k patterns should be desugared by is_lean_pattern_match before
-               reaching the backend. If one arrives here (e.g., in library code),
-               emit the pattern as (name + k) — invalid Lean but visible in output. *)
+            (* n+k patterns are desugared by is_lean_pattern_match before the
+               backend runs. One reaching the renderer is an internal error,
+               except inside a definition rendered as a comment (library text
+               behind a target representation), where it prints as
+               `(name + k)`. *)
+            if not !St.rendering_comment then
+              raise (Reporting_basic.err_general true p.locn
+                "Lean backend: internal error — an n+k pattern reached the Lean renderer (pattern compilation should have removed it)");
             let name = lskips_t_to_output name in
               Output.flat [
                 ws skips; from_string "("; name; from_string " + "; from_string (Z.to_string k); from_string ")"
@@ -7874,6 +8145,51 @@ type pat_style = FunParam | MatchArm
           from_string "structure"; name; tyvar_sep; tyvars';
           from_string " where\n"; body; from_string "\n"; deriving_clause;
         ]
+    (* Fail-closed checks on every type definition of a block, run before any
+       of it is rendered (from def's Type_def arm, so single records — which
+       def dispatches to type_def_record directly — are covered too):
+       lean_structure_generated_names, lean_check_constructor_width, and a
+       type parameter named like a type constructor the definition mentions
+       (see lean_tyvar_renames_for: value definitions rename, type
+       definitions refuse). *)
+    and lean_check_type_block defs =
+      List.iter (fun ((n0, l), tnvars, t_path, ty, _) ->
+          let tnm = Name.to_string (Name.strip_lskip (B.type_path_to_name n0 t_path)) in
+          let body_types = match ty with
+            | Te_record (_, _, fields, _) -> List.map (fun (_, _, _, t) -> t) (Seplist.to_list fields)
+            | Te_variant (_, ctors) ->
+              List.concat_map (fun (_, _, _, args) -> Seplist.to_list args) (Seplist.to_list ctors)
+            | Te_abbrev (_, t) -> [t]
+            | Te_opaque -> [] in
+          let mentioned = List.concat_map (fun t ->
+              List.concat_map (lean_type_path_names A.env) (lean_src_t_type_paths t)) body_types in
+          List.iter (fun tnv ->
+              let tv = tnvar_to_string tnv in
+              if List.mem tv mentioned then
+                raise (Reporting_basic.err_general true l
+                  (Printf.sprintf
+                    "Lean backend: type variable '%s of type `%s` is named like a type constructor its definition mentions; the Lean parameter `(%s : Type)` would shadow that type inside the definition — rename the type variable"
+                    tv tnm tv)))
+            tnvars;
+          match ty with
+          | Te_record (_, _, fields, _) ->
+            let fl = Seplist.to_list fields in
+            List.iter (fun ((fname, fl_), f_ref, _, _) ->
+                let fnm = Name.to_string (Name.strip_lskip (B.const_ref_to_name fname false f_ref)) in
+                if List.mem fnm lean_structure_generated_names then
+                  raise (Reporting_basic.err_general true fl_
+                    (Printf.sprintf
+                      "Lean backend: field `%s` of record type `%s` collides with `%s.%s`, a declaration Lean generates for every structure or inductive type (the constructor `mk` and the auxiliary declarations %s); the name cannot be escaped — rename the field"
+                      fnm tnm tnm fnm (String.concat ", " lean_structure_generated_names))))
+              fl;
+            lean_check_constructor_width l "record type" tnm None (List.length fl)
+          | Te_variant (_, ctors) ->
+            Seplist.iter (fun ((cn, cl), c_ref, _, args) ->
+                let cnm = Name.to_string (Name.strip_lskip (B.const_ref_to_name cn false c_ref)) in
+                lean_check_constructor_width cl "variant type" tnm (Some cnm) (Seplist.length args))
+              ctors
+          | _ -> ())
+        (Seplist.to_list defs)
     and type_def inside_module defs =
       St.current_type_block := List.map (fun (_, _, t_path, _, _) -> t_path) (Seplist.to_list defs);
       (* Collect type names and their constructor names for "export" declarations.
@@ -8051,7 +8367,7 @@ type pat_style = FunParam | MatchArm
               let n_fields = List.length field_list in
               let accessors = List.mapi (fun i ((fname, _), f_ref, _, src_t) ->
                 let field_name = B.const_ref_to_name fname false f_ref in
-                let field_str = Ulib.Text.to_string (Name.to_rope (Name.strip_lskip field_name)) in
+                let field_str = lean_escape_keyword (Ulib.Text.to_string (Name.to_rope (Name.strip_lskip field_name))) in
                 let pre_wildcards = String.concat "" (List.init i (fun _ -> " _")) in
                 let post = if i < n_fields - 1 then " .." else "" in
                 Output.flat [
@@ -8173,10 +8489,9 @@ type pat_style = FunParam | MatchArm
              (like constructor_indexed) since parameters are promoted to indices. *)
           let field_list = Seplist.to_list fields in
           let mk_args = flat @@ List.map (fun ((n, _), f_ref, _skips, t) ->
-            let fname = Name.add_lskip (Name.strip_lskip (B.const_ref_to_name n false f_ref)) in
             Output.flat [
               from_string "(";
-              Name.to_output Term_field fname;
+              field_decl_output n f_ref;
               from_string " :"; pat_typ t;
               from_string ") → "
             ]
@@ -8196,12 +8511,11 @@ type pat_style = FunParam | MatchArm
             from_string "  | mk : "; implicit_bindings; mk_args;
             name; ty_vars_names_space; ty_vars_names
           ]
-        | _ ->
-          (* Te_abbrev is filtered out before reaching here; this catch-all
-             handles any unexpected future type forms. *)
-          Output.flat [
-            from_string " "; name; from_string " : "; indices; universe; from_string " where"
-          ]
+        | Te_abbrev _ ->
+          (* Abbreviations are dispatched before this point (type_def);
+             reaching here is an internal error, as in tyexp. *)
+          raise (Reporting_basic.err_general true l
+            "Lean backend: internal error — an abbreviation reached type_def_indexed")
     and constructor_indexed ind_name (ty_vars : variable list) ty_vars_names ty_vars_names_space ((name0, _), c_ref, skips, args) =
       let ctor_name = B.const_ref_to_name name0 false c_ref in
       let ctor_name = Name.to_output (Type_ctor (false, false)) ctor_name in
@@ -8264,10 +8578,9 @@ type pat_style = FunParam | MatchArm
                (Lean 4 mutual blocks cannot contain structure definitions) *)
             let field_list = Seplist.to_list fields in
             let mk_args = flat @@ List.map (fun ((n, _), f_ref, _skips, t) ->
-              let fname = Name.add_lskip (Name.strip_lskip (B.const_ref_to_name n false f_ref)) in
               Output.flat [
                 from_string " (";
-                Name.to_output Term_field fname;
+                field_decl_output n f_ref;
                 from_string " :"; ctor_arg_typ t;
                 from_string ")"
               ]
@@ -8382,7 +8695,7 @@ type pat_style = FunParam | MatchArm
         | Typ_wild skips -> ws skips ^ from_string "_"
         | Typ_var (skips, v) ->
             Output.flat [
-              ws skips; id Type_var @@ Ulib.Text.(^^^) (r"") (Tyvar.to_rope v)
+              ws skips; id Type_var (r (lean_tyvar_text (Ulib.Text.to_string (Tyvar.to_rope v))))
             ]
         | Typ_fn (t1, skips, t2) ->
             if skips = Typed_ast.no_lskips then
@@ -8454,7 +8767,7 @@ type pat_style = FunParam | MatchArm
     and indreln_typ t =
       match t.term with
         | Typ_wild skips -> ws skips ^ from_string "_"
-        | Typ_var (skips, v) -> ws skips ^ (id Type_var @@ Ulib.Text.(^^^) (r"") (Tyvar.to_rope v))
+        | Typ_var (skips, v) -> ws skips ^ (id Type_var (r (lean_tyvar_text (Ulib.Text.to_string (Tyvar.to_rope v)))))
         | Typ_fn (t1, skips, t2) ->
           begin
             match t2.term with
@@ -8530,10 +8843,9 @@ type pat_style = FunParam | MatchArm
                    (if lead.(k) = [] then emp
                     else Output.flat [from_string "\n"; leading_comments ~indent:"  " lead.(k)])]
     and field ((n, _), f_ref, _skips, t) =
-      let fname = Name.add_lskip (Name.strip_lskip (B.const_ref_to_name n false f_ref)) in
       Output.flat [
           from_string "  ";
-          Name.to_output Term_field fname;
+          field_decl_output n f_ref;
           from_string " :"; pat_typ t
       ]
     (* --- Instance generation ---
@@ -9477,7 +9789,11 @@ type pat_style = FunParam | MatchArm
               incr ctr; let x = Printf.sprintf "x%d" !ctr in (x, [Printf.sprintf "%s.lemSize %s" nm x])
             | CSlist _ | CSoption _ | CSsum _ ->
               incr ctr; let x = Printf.sprintf "x%d" !ctr in (x, [Printf.sprintf "%s %s" (helper sh) x])
-            | CSbad _ -> assert false (* lean_size_shape never produces it *)
+            | CSbad _ | CSfn ->
+              (* lean_size_shape never produces either (a function-typed
+                 field is a leaf of size 0 there) *)
+              raise (Reporting_basic.err_general true l
+                "Lean backend: internal error — the derived-size builder met a shape lean_size_shape never produces (CSbad/CSfn)")
         and sum_terms (terms : string list) : string =
           String.concat "" (List.map (fun t -> String.concat "" [" + "; t]) terms)
         and helper (sh : cmp_shape) : string =

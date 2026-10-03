@@ -108,15 +108,24 @@ let rec be w k (stack : (int * mode * doc) list) : sdoc Seq.t = fun () ->
        (match m with
         | Flat_m -> be w k ((i, Flat_m, a) :: z) ()
         | Break_m ->
-          if fits (w - k) (be w k ((i, Flat_m, a) :: z))
-          then be w k ((i, Flat_m, a) :: z) ()
+          (* The candidate is memoized (call-by-need), which Wadler's
+             complexity argument assumes: [fits] scans it, and if it fits
+             the same stream is emitted, so every group decision on the line
+             is made once. Without the sharing a candidate's tail was
+             recomputed by each consumer, and each recomputation re-decided
+             every Break-mode group that followed on the line: exponential
+             in the number of sibling groups on a line that overflows the
+             width (backend-hardening record, 2026-10-03: a 47-wide
+             constructor pattern took over two minutes, 45 took none). *)
+          let flat = Seq.memoize (be w k ((i, Flat_m, a) :: z)) in
+          if fits (w - k) flat then flat ()
           else be w k ((i, Break_m, a) :: z) ())
      | Union (a, b) ->
        (match m with
         | Flat_m -> be w k ((i, Flat_m, a) :: z) ()
         | Break_m ->
-          if fits (w - k) (be w k ((i, Break_m, a) :: z))
-          then be w k ((i, Break_m, a) :: z) ()
+          let first = Seq.memoize (be w k ((i, Break_m, a) :: z)) in
+          if fits (w - k) first then first ()
           else be w k ((i, Break_m, b) :: z) ()))
 
 (* does the output fit in [w] columns up to the next line break? *)

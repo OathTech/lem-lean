@@ -129,3 +129,19 @@ declare {lean} fuel val count_list_bounded = `999`
 declare {lean} fuel_measure val count_list_bounded = `k + 1` assuming `List.length l ≤ k`
 
 assert ctx_kw_assuming_decl_ok : (count_list_bounded 5 [1; 2; 3] = (3:nat))
+
+(* === As target_rep parameter names (backend-hardening 2026-10-03, item 1):
+   the parameter list of `declare <target> target_rep function f <params>`
+   took the raw identifier token, so these words were a syntax error there
+   on every target, while upstream Lem accepts them. The OCaml form is only
+   parsed here (this file is generated for Lean); the Lean form is applied. *)
+val succ_fuel : nat -> nat
+let succ_fuel fuel = fuel + 1
+declare ocaml target_rep function succ_fuel fuel = `Stdlib.succ` fuel
+
+val add_reader_supply : nat -> nat -> nat
+let add_reader_supply reader supply = reader + supply
+declare lean target_rep function add_reader_supply reader supply = `Nat.add` reader supply
+
+assert ctx_kw_rep_param_ok : (succ_fuel 41 = (42:nat))
+assert ctx_kw_rep_param2_ok : (add_reader_supply 40 2 = (42:nat))

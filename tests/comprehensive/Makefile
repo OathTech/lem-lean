@@ -14,7 +14,7 @@ LAKE = "$(CAPPED)" lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-comments lean-layout lean-text-fidelity lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
+.PHONY: all lean lean-wide-patterns lean-outdir-refusal lean-comments lean-layout lean-text-fidelity lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-no-sorry-proofs lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -23,7 +23,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-version lean-constants-required lean-parity-admission lean-generate lean-comments lean-layout lean-text-fidelity lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
+lean: lean-version lean-constants-required lean-parity-admission lean-wide-patterns lean-outdir-refusal lean-generate lean-comments lean-layout lean-text-fidelity lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-fuel-numerals
 
 # The reserved-name list is required (linksem 2026-09-28, B10): with the
 # library's lean_constants missing, lem must refuse to generate Lean (it used
@@ -41,6 +41,34 @@ lean-constants-required:
 
 lean-parity-admission:
 	@bash parity/test_failure_admission.sh
+
+# Wide patterns generate in bounded time (backend-hardening 2026-10-03,
+# item 5): a 150-wide constructor pattern and 60-tuples. Before the layout
+# printer memoized its candidates, generation was exponential in the number
+# of sibling groups on an overflowing line (47 wildcards: over two minutes;
+# 150: killed after eleven minutes); measured 1.6 s after. The bound is
+# generous (a slow box, not a regression, must pass); a regression hangs
+# every later phase, so this one runs first and fails loudly instead.
+LEAN_WIDE_PATTERNS_SECONDS ?= 60
+lean-wide-patterns:
+	@echo "=== Wide patterns generate within $(LEAN_WIDE_PATTERNS_SECONDS) s (layout printer regression tripwire) ==="
+	@d=$$(mktemp -d); start=$$(date +%s); \
+	if timeout $(LEAN_WIDE_PATTERNS_SECONDS) $(LEM) $(LEMFLAGS) -lean -outdir $$d test_wide_patterns.lem > $$d/log 2>&1; then \
+		end=$$(date +%s); echo "  OK: test_wide_patterns.lem generated in $$((end - start)) s"; rm -rf $$d; \
+	else st=$$?; \
+		if [ $$st -eq 124 ]; then echo "  FAIL: generation of test_wide_patterns.lem exceeded $(LEAN_WIDE_PATTERNS_SECONDS) s (the layout printer's exponential re-decision is back?)"; \
+		else echo "  FAIL: generation of test_wide_patterns.lem failed (exit $$st):"; head -5 $$d/log; fi; rm -rf $$d; exit 1; fi
+
+# A failing output-directory creation is a fatal error naming the directory
+# (backend-hardening 2026-10-03, item 8; TODO item 37): the parent here is a
+# FILE, so the directory cannot be created. Before the fix the ignored
+# `mkdir -p` exit code let lem go on to fail on the temp-file rename.
+lean-outdir-refusal:
+	@echo "=== Output directory that cannot be created is refused loudly ==="
+	@out=$$($(LEM) $(LEMFLAGS) -lean -outdir Makefile/sub test_misc.lem 2>&1); st=$$?; \
+	if [ $$st -eq 0 ]; then echo "  FAIL: lem exited 0 with an uncreatable -outdir"; exit 1; \
+	elif ! echo "$$out" | grep -q "cannot create the output directory"; then echo "  FAIL: wrong error for an uncreatable -outdir:"; echo "$$out" | head -3; exit 1; \
+	else echo "  OK: refused: $$(echo "$$out" | grep -o 'cannot create the output directory.*' | head -1 | cut -c1-100)"; fi
 
 lean-version:
 	@bash ../../scripts/test_version.sh
