@@ -52,7 +52,7 @@ class MapKeyType (a : Type) where
 
 export MapKeyType (mapKeyCompare)
 
-instance (priority := 500) { a : Type } [MapKeyType a] : BEq a where
+instance (priority := 400) { a : Type } [MapKeyType a] : BEq a where
   beq x y :=
     match mapKeyCompare x y with
     | .EQ => true

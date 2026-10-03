@@ -29,7 +29,7 @@ class Eq0 (a : Type) where
 
 export Eq0 (isEqual isInequal)
 
-instance { a : Type } [Eq0 a] : BEq a where
+instance (priority := 450) { a : Type } [Eq0 a] : BEq a where
   beq := isEqual
 
 /- declare coq target_rep function isEqual = infix `=`
@@ -181,7 +181,7 @@ class SetType (a : Type) where
 
 export SetType (setElemCompare)
 
-instance (priority := 500) { a : Type } [SetType a] : BEq a where
+instance (priority := 400) { a : Type } [SetType a] : BEq a where
   beq x y :=
     match setElemCompare x y with
     | .EQ => true

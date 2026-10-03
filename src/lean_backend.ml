@@ -2435,15 +2435,25 @@ let lean_reserved_names_text (names : string list) : string =
     " prefixes"]
 
 (* Instance priorities come from one table, the lattice note
-   doc/notes/2026-08-22_arc14-instance-priority-lattice.md: model-declared
-   and derived BEq/Ord instances at Lean's default (1000); the automatic
-   SetType/Eq0/Ord0 trio and the comparator-derived BEq bridges at the
-   "auto" slot below it, so a model's own instance wins by priority and not
-   by declaration order; generic defaults and residual instances at `low`
-   (100). This is the auto slot. *)
+   doc/notes/2026-08-22_arc14-instance-priority-lattice.md (with its
+   2026-10-03 addendum): model-declared and derived BEq/Ord instances at
+   Lean's default (1000); the automatic SetType/Eq0/Ord0 trio at the "auto"
+   slot (500), so a model's own instance wins by priority and not by
+   declaration order; core's `[DecidableEq a] : BEq a` is also at 500
+   (Init/Prelude), so the two library bridges that make a `BEq` out of a Lem
+   dictionary sit BELOW it — `[Eq0 a] : BEq a` at 450 and the
+   comparator-derived `[SetType a]`/`[MapKeyType a] : BEq a` at 400 ([USER
+   2026-10-03] "(a) 450/400"): `==` at a base type is core's structural
+   equality, with `LawfulBEq` and the core simp set, and where no core
+   instance exists the Eq0 bridge still beats the comparator route, which can
+   be coarser than the type's own equality; generic defaults and residual
+   instances at `low` (100). *)
 let lean_instance_auto_priority = 500
-let lean_instance_kw_auto =
-  Printf.sprintf "\ninstance (priority := %d)" lean_instance_auto_priority
+let lean_instance_eq0_bridge_priority = 450
+let lean_instance_comparator_bridge_priority = 400
+let lean_instance_kw (priority : int) =
+  Printf.sprintf "\ninstance (priority := %d)" priority
+let lean_instance_kw_auto = lean_instance_kw lean_instance_auto_priority
 
 (* every `Backend` identifier (a target_rep's Lean text) in an expression *)
 let rec exp_backend_idents (e : exp) : string list =
@@ -4890,21 +4900,28 @@ type pat_style = FunParam | MatchArm
           ) (List.rev !method_names) in
           let beq_bridge =
             if has_isEqual then
+              (* The isEqual bridge ([Eq0 a] : BEq a) sits BELOW core's
+                 `[DecidableEq a] : BEq a` (500), so `==` at a base type is
+                 core's structural equality and a model Eq0 still gives `==`
+                 to a type that has no other BEq; and ABOVE the comparator
+                 bridge below (lean_instance_eq0_bridge_priority). *)
               Output.flat [
-                from_string "\ninstance {"; tv; from_string " : "; from_string tv_kind;
+                from_string (String.concat "" [lean_instance_kw lean_instance_eq0_bridge_priority; " {"]);
+                tv; from_string " : "; from_string tv_kind;
                 from_string "} ["; name; from_string " "; tv; from_string "] : BEq "; tv;
                 from_string " where\n  beq := isEqual\n"
               ]
             else match compare_method with
             | Some cmp_name ->
               (* The comparator-derived BEq bridge ([SetType a]/[MapKeyType a]
-                 : BEq a) sits in the lattice's auto slot, strictly BELOW
-                 the isEqual bridge and derived BEq (default = 1000): a
-                 comparator can be COARSER than a type's own equality, so
-                 when both apply the finer Eq0 route must win by PRIORITY,
-                 not by declaration order (lean_instance_kw_auto). *)
+                 : BEq a) sits strictly BELOW the isEqual bridge, derived BEq
+                 (default = 1000) and core's BEq (500): a comparator can be
+                 COARSER than a type's own equality, so when both apply the
+                 finer Eq0 route must win by PRIORITY, not by declaration
+                 order (lean_instance_comparator_bridge_priority). *)
               Output.flat [
-                from_string (String.concat "" [lean_instance_kw_auto; " {"]); tv; from_string " : "; from_string tv_kind;
+                from_string (String.concat "" [lean_instance_kw lean_instance_comparator_bridge_priority; " {"]);
+                tv; from_string " : "; from_string tv_kind;
                 from_string "} ["; name; from_string " "; tv; from_string "] : BEq "; tv;
                 from_string (String.concat "" [" where\n  beq x y := match "; cmp_name; " x y with | .EQ => true | _ => false\n"])
               ]

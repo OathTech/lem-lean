@@ -42,7 +42,8 @@ assert prio_auto_structural_ok : prio_auto_structural
 (* RG2 (arc-14 re-mark, professor A'): the de-tie probe. prio_coarse has
    a COARSE model SetType instance (first field only) beside the derived
    structural BEq. The comparator-derived [SetType a] : BEq a bridge
-   must NOT decide `=` here: derived BEq (1000) beats the bridge (500)
+   must NOT decide `=` here: derived BEq (1000) beats the bridge (400,
+   was 500 before the BEq-lattice slice of 2026-10-03)
    BY PRIORITY. The check lives in the separately-importing module
    TestInstancePriorityCheck.lean (build-failing). *)
 type prio_coarse = Prio_coarse of nat * nat
