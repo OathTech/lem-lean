@@ -1204,3 +1204,52 @@ Direct probes against the new LemLib:
 - The orchestrator did not re-run the declaration census (675 Cerberus / 596
   linksem changes, all explained). It is the pre-merge audit's to
   re-derive.
+
+## Pre-merge audit (2026-10-04)
+
+[USER 2026-10-03] "Fresh Fable audit, full range". Auditor: Claude Fable 5.1,
+fresh, on `5dfcd25..653ea3f`. Verdict: **merge after fixes**, all
+documentation; no BLOCKER, no MAJOR. Notes and probes are in scratch,
+`.tmp/audit-hardening/`.
+
+What the auditor re-derived independently:
+- **Gates:** green on every one.
+- **Lattice census:** Cerberus 675 changed / 675 explained / 0 unexplained;
+  linksem 596 / 596 / 0.
+- **Plants:** `TestInstancePriorityCheck` fails exactly the nine leg-5 lines
+  against base LemLib.
+- **Cerberus patch:** applies to `51a7402ce` and `d6c548847`, and the
+  library builds green with it.
+- **Package C deletions:** zero hits in all consumers and in both
+  regenerated trees.
+- **Parser conflicts:** unchanged, and the same as upstream.
+- **Package A plants:** each reproduces on base `lem`.
+
+Findings and fixes (this commit):
+- **MINOR-1.** DESIGN, TODO 47 and the manual said the renamed type variable
+  is digit-suffixed (`{t1 : Type}`). The code primes it, as the record says:
+  `{t' : Type}` (`Test_tyvar_collision.lean:52`). Corrected at all three
+  sites.
+- **MINOR-2.** TODO 45 still said "awaits the operator" after the ruling, and
+  DESIGN's `automatic` row and the manual posed the question as open. Both now
+  cite [USER 2026-10-03] "Leave open".
+- **MINOR-3.** The 127-field admission is a runtime bound only. A variant
+  constructor with 127 fields and derived comparisons exceeds Lean's
+  elaboration recursion depth (`maximum recursion depth has been reached`).
+  127-field structures, 120-field constructors, and 127-field constructors
+  under `skip_instances` build. Now stated in DESIGN; the variant bound is
+  TODO 49(a).
+- **MINOR-4.** `Fin n` also switches winner (from the map-key comparator
+  bridge to `instBEqOfDecidableEq`) and has no per-type theorem. It is covered
+  by the generic `BeqLattice.mapKeyBridge_eq_core`; the auditor's `example`
+  compiled. No consumer site is at `Fin`. "A kernel theorem for every type
+  whose winner switched" in §4 is to be read with this generic coverage.
+- **MINOR-5.** The type-variable rename does not collect constructors that
+  appear only in patterns, and does not rename inside instance methods. Both
+  are loud at the Lean build. DESIGN now names the two exclusions; TODO
+  49(b).
+- **NITs**, registered:
+  - TODO 50: a type named like its own parameter; type variables named like
+    reserved binders.
+  - TODO 51: deeply nested types are slow in Lem's typechecker on every
+    target, which makes the depth-50 refusal unreachable in practice.
