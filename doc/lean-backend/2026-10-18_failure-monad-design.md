@@ -2,8 +2,8 @@
 
 [USER 2026-10-18] Design pass only; no production/consumer edits.
 [AGENT 2026-10-18] Review `f91761f` invalidated `d60581a`'s indexed relation.
-This revision replaces it and clarifies effects. Backend base: `b25be8b`.
-**STOPPED on the initializer ruling in §5; not ready for implementation.**
+This revision completes the design under the initialization ruling (§5).
+Backend base: `b25be8b`. **Ready for fresh review; implementation is separate.**
 
 ## 1. Translation
 
@@ -82,26 +82,27 @@ compilation excluded. Zero-work success medians: 0.002835/0.002828; failure:
 1.073542/0.003380. Abort latency is noisy. Review `f91761f` independently
 reproduced the corrected benchmark. Whole-driver cost remains unmeasured.
 
-New contract witnesses: 19 empty axiom lists and fresh kernel replay, exit 0.
+Contract witnesses: 23 empty axiom lists and fresh kernel replay, exit 0.
 Source, commands and scope are in appendix §8.
 
 ## 4. Remaining limits
 
-Full backend correspondence, runner proofs and consumer migrations are not
-implemented. Other proposed rulings remain uniform lifting, explicit boundary
-contracts, staged-measure refusals, retained C-TF1 exceptions and preserved claim
-strength. Inherited quotation locations and baseline warnings remain disclosed
-in appendix §7; the separate consumer-agent list remains unlocated.
+Full backend correspondence, runner proofs and consumer migrations await
+implementation. Recommend uniform lifting, explicit boundary contracts,
+staged-measure refusals, retained C-TF1 exceptions and unchanged claim strength;
+these choices still need design acceptance. Appendix §7 discloses inherited
+quotations/warnings; the original separate consumer-agent list remains unlocated.
 
-## 5. Operator ruling needed: initialization
+## 5. Approved initialization policy
 
-The blanket reader/fuel initializer refusal would reject existing positive
-tests and three confirmed Cerberus module values. Withdraw that proposal.
-Recommend explicit context-parameterized initialization, once per environment:
-retain sources, migrate Lean exports/tests to projections, initialize a fresh
-environment for a new context, and never silently reinitialize at `reader_seed`.
+Appendix §5 records the operator's requirements: initialize only modules with
+eligible top-level computations; preserve unaffected APIs; supply per-value
+same-context projection equations; never reinitialize through `reader_seed`.
+A new context requires explicit initialization. The rollout is limited to the
+three named Cerberus values and four positive test cases with existing pins;
+new census findings require a separate disposition.
 
-This changes today's per-use context lifting. Approve that compatibility policy,
-or choose a narrower profile with named regressions? Appendix §5 gives concrete
-cases and migrations. Charter §3 requires stopping here for this fuel/reader
-ruling; further design work waits for the operator.
+The [consumer notice](2026-10-18_failure-monad-consumer-migration.md) names SL's
+`DriverGlobals.lean` and `DriverLoop.lean`, their exact fuel contexts and the
+supplied rewrite equations. Deliver the completed notice before any re-pin.
+Blanket refusal and permanent per-use lifting are rejected alternatives.

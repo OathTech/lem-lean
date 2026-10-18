@@ -1,18 +1,17 @@
-# Failure translation contracts — proposed revision
+# Failure translation contracts — design for review
 
 [AGENT 2026-10-18] This appendix is a proposed response to review `9a9b409` of
 `a331435`. It is an implementation contract, not an implemented backend. The
-detailed contracts remain proposed design choices. References below use backend
-base `b25be8b` and Cerberus `049eb9a0a` unless stated.
+detailed contracts remain proposals except for the initialization ruling in §5.
+References below use backend base `b25be8b` and Cerberus `049eb9a0a` unless stated.
 
 [USER 2026-10-18] The deliverable may include a detailed contract appendix alongside
 the short design note. This scope approval does not settle the open design choices.
 
 [AGENT 2026-10-18] Review `f91761f` invalidated the indexed relation in §6.
-Replace it with unindexed arrow relations and strictly positive inductive data
-relations, and make generated fuel/supply effects explicit. **STOPPED ON AN
-INITIALIZATION RULING:** §5 exposes the compatibility choice; its proposed
-resolution is not accepted policy. The design is not ready for implementation.
+The replacement uses unindexed arrows and strictly positive inductive data
+relations, with explicit generated fuel/supply effects. The initialization
+ruling and its requirements are in §5; design acceptance follows fresh review.
 
 ## 1. Preserve computations before target rewriting
 
@@ -39,6 +38,14 @@ generation and for the unchanged OCaml pipeline. The executable Lean path is:
    lowering must re-solve before emission. Existing backend scans supply
    dependency/traversal infrastructure, not the new failure-effect solver.
 
+The reusable scans are `lean_fuel_prepass` (:1193), `lean_reader_prepass`
+(:1243), and `lean_supply_prepass` (:3538); today's aggregation is
+`lean_analysis_prepass_all` (:3727). Move their inputs to the preserved IR
+without duplicating their reader names, binder order or existing refusal rules.
+Solve mutual groups together: use one canonical signature per member, join
+effects to a fixed point, and preserve the declared structural/fuel recursion
+scheme. No member gets a different type from caller-specific inference.
+
 For an inline constant function, `constant (checked n)` becomes
 `let v ← checked' n; pure 42`, even when `v` is unused. A later optimization may
 erase that bind only with a total, effect-free certificate. The witness is
@@ -51,6 +58,22 @@ schedule for an OCaml inline/representation is its expanded OCaml body, not an
 invented strict source-call schedule. Such overrides require a scheduling
 contract before Lean normalization; absence is a generation error. Ordinary
 calls use the strict rule above. This changes no OCaml output.
+
+The shipped probe source `FailureMonadSpike.lean` makes the repaired shapes
+explicit: `branch` binds the checked RHS before selecting the branch;
+`closure` binds it before constructing the returned lambda; `discarded` and
+`unused` bind computations whose values are ignored (B15/B15b); `unitPattern`
+binds before matching unit. `buildClosure` can fail during construction (A3),
+and `arguments` selects the right-hand failure first (A4). A failed first bind
+absorbs the continuation; the theorem `error_absorbs` pins that law.
+
+After all executable emission uses these binds, remove `lean_backend.ml`'s
+`lemSeq` emitter (:7448–7455) and `LemLib.lemSeqImpl`. The reference package
+keeps only the legacy logical second-thunk definition, without its native
+override. Removal requires the implementation's compiled parity/strictness
+checks and kernel correspondence, not this hand-written spike alone. The
+existing `failwithIImpl`/fuel overrides remain current boundaries until their
+own executable leaves have also become explicit errors; this design adds none.
 
 ## 2. Types, effects and boundary declarations
 
@@ -198,6 +221,12 @@ the oracle expansion, not merely the operator name.
 ## 4. ND, state and runner interfaces
 
 Use `C` for global failure, preserving domain kills as a different constructor.
+`Failure` distinguishes model failure (site/message) from budget exhaustion
+(site/budget description); preserve the oracle's diagnostic prefixes. Existing
+Lem `Exception` results remain data inside `C`: for instance, an explicitly
+constructed domain exception becomes `.ok (Exception.Exception e)`, while
+`failwith` becomes `.error (.model …)`. Do not conflate an ordinary result
+constructor with a raised failure or add an error-swallowing default.
 The raw seam interface, before canonical curried wrappers, is:
 
 ```text
@@ -320,74 +349,166 @@ measure needs a not-yet-supplied argument. This is an explicit proposed support
 limit, not a conflict silently resolved by moving evaluation. Measure hypotheses
 remain pure. Supporting the refused forms requires a later design/ruling.
 
-Top-level nonfunction computations use explicit environments, in source order:
+[USER 2026-10-18] The operator authorized initialization under an explicit
+context, with a narrowly bounded rollout. The following are requirements:
+
+1. Generate initialization machinery only where a module evaluates a top-level
+   nonfunction computation with possible failure or fuel/reader dependence.
+   A module with no such computation acquires no initializer or environment;
+   the initialization pass preserves its existing API.
+2. Supply a kernel-checked projection equation for each migrated value against
+   its current per-use definition at the same context. Implementation authors
+   deliver those equations and the consumer rewrite path; consumers are not
+   asked to invent compatibility proofs themselves.
+3. Creating an environment is an explicit operation for a particular context.
+   Reader seeding cannot create another one implicitly. A caller changing the
+   initialization context must perform initialization explicitly again.
+4. The authorized rollout is exactly the three Cerberus values and four positive
+   test cases listed below. Additional candidates from the implementation
+   census are reported for a new disposition; they do not enlarge this set.
+
+The operator rejected both refusing the existing inputs and continuing
+context-sensitive per-use evaluation as a permanent alternative. Before a
+consumer re-pin, deliver a migration note naming SL's `DriverGlobals.lean` and
+`DriverLoop.lean`; the draft is [beside this appendix](2026-10-18_failure-monad-consumer-migration.md).
+
+Eligibility is a computation-stage property: a function declaration's body is
+not run at initialization, and failure only in a stored callback does not make
+construction fallible. A nonfunction binding that executes a function-producing
+expression is checked at its construction stage. Existing refusals of
+supply-drawing top-level values and cyclic value initialization remain. No
+source value is converted into a unit function to defer its evaluation.
+Within an eligible module, only the affected values enter the environment;
+unrelated exports retain their API. Local initializers preserve source order,
+including discarded computations and a single RHS for destructuring bindings.
+
+For an eligible module, use this shape (illustrative, not another rollout item):
 
 ```text
-structure A.Env where answer : Nat
-def A.init : C A.Env := do
-  let _ ← checked' 0                 -- unused source binding still executes
-  pure ⟨7⟩
-structure B.Env where exported : Nat
-def B.init (a : A.Env) : C B.Env := pure ⟨a.answer + 1⟩
-def programInit : C (A.Env × B.Env) := do
-  a ← A.init
-  b ← B.init a
-  pure (a,b)
+structure M.Env where value : T
+def M.init [LemFuel] [ReaderInstances…] (explicitReaders…) (dependencies…) : C M.Env := do
+  value ← initializeValue …
+  pure ⟨value⟩
+def M.value (env : M.Env) : T := env.value
 ```
 
-Failure in A prevents B initialization and any export access. The generated
-entrypoint initializes each dependency once and passes its environment handle;
-imports provide types/initializers, not eager global executable values. Exported
-functions receive the environment plus their existing explicit/implicit reader
-and fuel binders, in their existing order. No hidden context is created.
-Retain the existing refusal of supply-drawing top-level values. Cyclic value
-initialization refuses. **Withdraw the blanket proposed reader/fuel refusal:**
-it removes supported inputs. The following compatibility decision needs an
-operator ruling under charter §3; do not implement either policy by default.
+The caller supplies fuel/readers in their existing binder order and initializes
+eligible dependencies first, once per program environment. Initialization
+failure prevents export access and subsequent initializers. Module definitions
+and imports themselves perform no hidden runtime initialization. ND-valued
+initializers build suspensions; they do not run model-state operations. An
+initialized suspension retains the fuel/readers captured at construction.
+Initialization context and an ND runner's depth budget remain separate.
 
-[AGENT 2026-10-18] Recommend retaining those source inputs with explicit
-context-parameterized initialization, evaluated once per environment. The
-entrypoint supplies the ambient fuel and readers before initialization, using
-the existing binder order; dependency initializers receive that same context
-and their predecessors' environments. Context is explicit data, never a new
-default instance. A fresh context requires a fresh explicit initialization;
-export access only projects from the resulting environment. Failure prevents
-access and later dependency initialization. ND-valued initializers construct
-suspensions without forcing them; forcing keeps its captured fuel/reader stage.
+Transport initialized values only through the affected definitions and their
+private workers; importing an eligible module is not a reason to add an
+environment argument to every export. Keep unrelated exports in that same
+module unchanged by this pass too. The live `get_thread_states` uses in Lem
+belong to `Driver.driver_globals` and `Driver.drive`; :493 is commented-out
+source and is not a dependency. `Mini_pipeline`'s use of `Driver.driver2`
+therefore does not, by itself, demand an environment parameter. The explicit
+hand-written entrypoints (`Main`/`CerbCall`, including `CerbCall.lean:277`) arrange
+initialization and capture the resulting handle for the run. They do not
+generate environments of their own. The implementation must not broaden
+ineligible-module APIs to make transport convenient: an actual new dependency
+requiring that change is a new finding under the fixed rollout rule.
 
-For example, `Test.init fuel sw : C Test.Env` stores `spin fuel 7` and `sw+1`.
-It yields `.ok ⟨0,6⟩` at `(100,5)` and `.ok ⟨999,6⟩` at `(7,5)`; 999 remains
-that test's declared successful sentinel. A discarded loud call during
-initialization aborts before either export can be read. The witness proves
-these cases. This preserves the cited positive cases across separate explicit
-environments, but changes their Lean API from per-use implicit parameters to
-initialized environment projections.
+[AGENT 2026-10-18] Separate initialization compatibility from the later effect
+representation change. First prove the initialization-only equations while
+retaining the old value types; after effect lifting, retain those equations in
+the proof-only compatibility package and supply the executable correspondence
+beside them. This avoids writing an ill-typed equality between old ND and new
+ND types, and does not keep a per-use executable compatibility path.
 
-| Existing accepted input | Proposed migration and test disposition |
+The required theorem family for **every** migrated field is:
+
+```text
+InitCompat.M.v_projection_eq (c) (env) (hinit : InitCompat.M.init c = .ok env) :
+  env.v = Reference.M.vAt c
+```
+
+`Reference.M.vAt c` is today's definition specialized to the actual instances
+and explicit readers in `c`, not an arbitrary new reference value. These are
+ordinary equalities, including for function- or ND-valued fields. For each
+paired binding emit one RHS initializer and a projection equation for each
+name. Dependency environments have matching initialization/equality premises;
+prove their compatibility in dependency order. Also supply initialization
+success facts for the approved successful contexts, so the equation cannot be
+used as a vacuous replacement for a positive test.
+
+Consumers first rewrite `env.v` with that equation at the exact context of the
+old use. For example, the initialization-only migration of SL's read theorem is:
+
+```text
+ndRun env.get_thread_states dr = (.NDactive dr.core_state0.thread_states, dr) := by
+  rw [InitCompat.Driver.get_thread_states_projection_eq c env hinit]
+  exact ndRun_get_thread_states (m := m) hm dr
+```
+
+Here `hm : c.fuel = m+1`; other readers are those explicitly supplied by `c`.
+This delivers the demanded rewrite before changing ND types. A proof about the
+old runner is not automatically a proof about the new runner.
+
+For the final executable environment, also ship a same-representation equation
+and the old-to-new relation for each value:
+
+```text
+Exec.M.init c = .ok env → Exec.M.initField_v c = .ok env.v
+InitCompat.M.init c = .ok old → Exec.M.init c = .ok env → R(T) old.v env.v
+```
+
+`initField_v` is the construction-stage expression in the preserved IR,
+parameterized by the same initialized dependencies and earlier fields as the
+module initializer. It is private initialization machinery, not a per-use
+export. Only the initializer invokes it at runtime. The proofs live in modules
+importing Reference and Exec; executable modules import neither their proofs
+nor Reference. The first equality and the compatibility projection equation
+remain deliverables; the relation is an additional obligation, not a substitute.
+Full runner equations/no-abort claims then migrate as specified in §6.
+In particular, deliver the final executable forcing equation for the SL-facing
+value, with the same positive-fuel premise as its existing theorem:
+
+```text
+Exec.Driver.init c = .ok env → c.fuel = m+1 →
+  Exec.force env.get_thread_states dr =
+    .ok (.active dr.core_state0.thread_states, dr)
+```
+
+This is a producer-supplied rewrite for the new ND interface, in addition to
+the required initialization-only projection equality. It preserves the full
+forcing result, including state, and does not ask the consumer to derive a
+useful equation from a generic success relation. Ship the zero-context typed
+kill equation too; never strengthen the positive-fuel hypothesis silently.
+
+| Authorized case | Required migration and retained pin |
 |---|---|
-| `test_fuel_param.lem:64`, `spun_value` | Retain the source; initialize separately at fuels 100 and 7 and pin the existing 0/999 results through the environment. Update `TestFuelParamCheck.lean:60–62` and signature pins. |
-| `parity/probes/p_fuel.lem:41`, `results` | Retain the source and OCaml bytes; the Lean driver explicitly initializes twice (200 and 100000), checks each result, then prints the same two blocks. Preserve the parity row. |
-| `test_instance_reader.lem:64–68`, `sw_plus_one`, `(sw_a,sw_b)` | Retain sources; initialize at `Sw=5`, pin 6/5/6, evaluate the destructuring RHS once. Migrate both kernel and compiled reader tests to projections. |
-| Cerberus `driver.lem:138`, `get_thread_states` | Store the initialized ND suspension in the module environment; migrate its uses, including :493, :1599 and :1619, without executing its state read during initialization. |
-| Cerberus `defacto_memory.lem:120,478`, `fresh_allocation_id`, `impl_sequencePoint` | Likewise preserve their ND construction stage and captured fuel; no model-state action runs at initialization. |
+| Test 1: `test_fuel_param.lem:64`, `spun_value` | Preserve the source and `TestFuelParamCheck.lean:60–62` results: environments at fuel 100 and 7 project 0 and 999. The latter is a successful declared sentinel. |
+| Test 2: `parity/probes/p_fuel.lem:41`, `results` | Keep the parity row and OCaml bytes. The Lean driver initializes explicitly at 200 and 100000, checks success, then prints the existing two blocks without changing the pinned output. |
+| Test 3: `test_instance_reader.lem:64`, `sw_plus_one` | At `Sw=5` the projection is 6; migrate both the kernel and compiled reader tests using the supplied equation. |
+| Test 4: `test_instance_reader.lem:68`, `(sw_a,sw_b)` | One RHS evaluation; separate projection equations retain 5 and 6 at `Sw=5`, including signature and compiled checks. These four cases occupy three source files. |
+| Cerberus `driver.lem:138`, `get_thread_states` | Initialize the suspension at the chosen context. Migrate the direct SL binds and `ndRun_get_thread_states` via its projection equation, then the new ND/runner contracts. |
+| Cerberus `defacto_memory.lem:120`, `fresh_allocation_id` | Initialize the suspension; do not draw its model-state allocation counter until forcing. Supply the projection equation even though the external consumers do not reference it. |
+| Cerberus `defacto_memory.lem:478`, `impl_sequencePoint` | Initialize the suspension; do not clear the model-state access log until forcing. Supply its projection equation as well. |
 
-The last three names are confirmed consumer occurrences at `049eb9a0a`:
-`generated/Driver.lean:247` and `Defacto_memory.lean:168,463`. A text scan of
-context-bound, nonfunction result headers found these three; source inspection
-confirmed their parameterless definitions. This is not a census of every
-partial application, opaque representation or cross-context use.
+The three consumer definitions are confirmed at Cerberus `049eb9a0a` in
+`generated/Driver.lean:247` and `Defacto_memory.lean:168,463`. The earlier
+nonfunction-header scan was not a complete implementation census; any additional
+case discovered later is reported rather than silently migrated or refused.
+SL `68832d9` references `get_thread_states` in
+`CerberusIris/CerberusIris/DriverGlobals.lean` (including :92, :154–157) and
+`DriverLoop.lean:723` (explicit budget `m+2` after unfolding). Retain the precise
+context in each rewrite. Executing under a new initialization context requires
+explicit initialization even if a proof can show that some values agree.
+Equality rewriting is not permission to skip that operation or to trigger it
+through seeding or proof simplification. Tracked Lean source searches found no SL references to
+the two Defacto values and no references to any of the three in caesium
+`bb751136`; the note records these bounded searches and the pre-re-pin obligation.
 
-The unsettled point is **which initialization context owns a value when
-existing Lean callers change readers/fuel or use `reader_seed` later**. Today's
-lifting re-evaluates a value under the context of each use. The proposal freezes
-it in the supplied environment; a seed must not silently rerun initializers.
-The operator must accept that explicit environment migration (recommended), or
-choose a narrower supported profile with named regressions. Keeping today's
-per-use execution for potentially failing initializers would violate source
-initialization timing. Converting source values to unit functions is not a
-neutral fix. No positive test is deleted or reclassified by this design pass.
-Until this ruling, the initializer and cross-context correspondence contract
-remains unfinished; the old baseline is historical, not its acceptance claim.
+The prototype proves context-quantified projection equations for its fuel and
+reader fields, a consumer rewrite, and preservation of an initialized value
+under a new reader seed. It also pins successful and exhausted-value contexts
+and a construction error before access. Those examples validate the interface;
+the implementation must supply the actual per-value equations listed above.
 
 ## 6. Proof interfaces and claim preservation
 
@@ -461,9 +582,10 @@ Trace, multiplicity and list order belong to `OutcomeRel`. These contracts
 neither prove absence of new failures nor relate an error to the old logical
 default. Failure/order correspondence remains differential evidence until
 separately formalized. Never transfer total adequacy through a vacuous success
-premise. The reference environment needed for §5's initialization policy is
-also pending: old per-use-context theorems cannot be reused for frozen exports
-without the corresponding context/environment hypothesis and proof.
+premise. Initialization compatibility uses §5's same-context projection
+equalities and corresponding initialization hypotheses; old per-use-context
+theorems are rewritten with those supplied facts before effect representations
+change. Cross-context reuse requires an additional proved equation.
 
 A migrated measure obligation compares complete computations at the relevant
 stage, including error and supply state, e.g.
@@ -503,9 +625,13 @@ obligation. Merely quantifying over successful-list membership would weaken the
 claim by dropping error executions. If the stronger theorem cannot be proved,
 report the claim blocked; do not publish the conditional version as equivalent.
 
-Migration order: signatures/primitive replacements → generated type and twin
-packages → ND/state/runner API and certificates → measure carriers → caesium
-program/theorems and SL no-abort adequacy → executable pins and boundary removal.
+Migration order: census against the fixed initialization scope → contracts and
+initialization-only projection equations at legacy types → generated type/twin
+packages and executable field certificates → ND/state/runner API and certificates
+→ measure carriers → consumer notice, caesium program/theorems and SL no-abort
+adequacy → executable pins and boundary removal. The compatibility stage is an
+implementation proof dependency, not a request to re-pin consumers to an
+intermediate implementation.
 Estimate **XL, cross-repository API/proof migration**. The 268 generated sites,
 two handwritten references, and 63 declarations/15 carriers are inventories,
 not an edit estimate. New function/data relations, ND forcing, runner coverage
@@ -520,7 +646,12 @@ The revised pair uses the same list-of-functions interface and per-iteration
 lookup. Fresh generated C inspection confirms `List.get!Internal` followed by
 `lean_apply_1` in both loops (`CurrentMain.c:111–112`, `PrototypeMain.c:115–116`),
 not just in the terminal call. The executable recipe prints these sites.
-The controlled run used 30,000,000 checks and six alternating pairs per mode;
+`f_let_unused` was selected because the same discarded check has a successful
+positive-input path and a zero-input failure, while its later output exposes
+incorrect sequencing. Its last callback is the timed workload; the other
+probes cover control shapes without entering the timed loop. Both binaries
+receive identical count, seed and terminal-input arguments. The controlled run
+used 30,000,000 checks and six alternating pairs per mode;
 all exits, checksums and messages passed. Derived summaries (seconds), emitted
 by the commands in the short note:
 
@@ -554,7 +685,7 @@ the owner; this design pass neither reproduces their wording nor edits them.
 | 3 | §3 specifies the actual threshold-dependent map schedule and strict Boolean partial application; OCaml/prototype traces match at lengths 3, 5001, 5002 and 5003, with the two distinguishing failures. |
 | 4 | §4 gives forcing/bind/lift/runner interfaces, state/trace policies and the explicit retained C-TF1 exception. |
 | 5 | §6 gives related-input certificates and concrete stronger consumer obligations; no claim is transferred merely by discarding errors. |
-| 6 | §5 supplies staged zero/wrapper equations and explicit staged-measure limits; initializer compatibility is now an operator ruling, following independent finding 3. |
+| 6 | §5 supplies staged zero/wrapper equations, explicit staged-measure limits and the approved selective initializer contract with mandatory projection equations. |
 | 7 | Prior comparison withdrawn; generated C confirms matching list lookup/indirect application in both loops. Controlled measurements and noise ranges are recorded above; whole-Cerberus cost remains unmeasured. |
 | 8 | Inherited quotation location reported above; no consumer edit or reproduced wording. |
 
@@ -567,7 +698,7 @@ This is not a claim of independent re-review or implementation correctness.
 |---|---|
 | 1, high | Accept. The old relation is invalid. §6 replaces it; the small application/composition and recursive suspension witnesses are kernel checked. Full generated certificates and runner correspondence remain implementation obligations. |
 | 2, medium | Accept. §1/§2 seed translated fuel zero stages before closure, retain supply dependencies and prohibit erasure/reordering based on failure freedom alone. Discarded exhaustion and draw-before-error equations are proved. |
-| 3, medium | Accept; operator ruling pending. §5 identifies existing tests and three concrete consumer values, withdraws the blanket refusal, and proposes explicit per-environment initialization with test/API migrations. The charter's fuel/reader stop rule applies to the remaining cross-context policy. |
+| 3, medium | Accept. §5 records the approved selective initialization policy, fixed migration set, required projection equations and consumer notice. Ineligible-module APIs remain unchanged by initialization; additional transport requirements are new findings, not inferred scope. |
 
 Reproduce the new witnesses independently of the measured spike (from the
 worktree root, with the project toolchain available):
@@ -588,12 +719,12 @@ EOF
 ```
 
 Validation: the new module built successfully without warnings. Derived tally:
-19 theorem axiom lists were empty. `leanchecker --fresh FailureMonadContracts`
-exited 0. Review `f91761f`'s original `RelationCounterexample` was also rebuilt:
+23 theorem axiom lists were empty, including four context/projection witnesses
+added after the ruling. `leanchecker --fresh FailureMonadContracts` exited 0.
+At `50ab017`, review `f91761f`'s original `RelationCounterexample` was also rebuilt:
 both theorem axiom lists were empty, and fresh kernel replay exited 0. These
 small checks ran sequentially under a 2G cap; no full dependency rebuild was
-needed. The measured spike is unchanged; its corrected timings were independently reproduced in
-`f91761f`, and are not rerun here. No comprehensive or consumer suite is rerun
-for these specification/proof witnesses. Their initial Lean elaboration failed;
-the corrected file builds without warnings. No `sorry`, extra axiom, runtime
+needed. The measured spike is unchanged; its corrected timings were independently
+reproduced in `f91761f`, and are not rerun here. No comprehensive or consumer suite is rerun
+for these specification/proof witnesses. No `sorry`, extra axiom, runtime
 override, or generation/linter suppression is added.

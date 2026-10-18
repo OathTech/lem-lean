@@ -185,6 +185,33 @@ def spin : Nat → Nat → Nat
 
 def init (ctx : Context) : C Env := .ok ⟨spin ctx.fuel 7, ctx.reader + 1⟩
 
+/- Initialization-only compatibility uses the legacy value types. Each
+   projection equation quantifies over the context; concrete pins alone would
+   not give consumers a rewrite rule for an arbitrary ambient budget. -/
+theorem spun_projection_eq (ctx : Context) (env : Env) (h : init ctx = .ok env) :
+    env.spun = spin ctx.fuel 7 := by
+  cases h
+  rfl
+
+theorem reader_projection_eq (ctx : Context) (env : Env) (h : init ctx = .ok env) :
+    env.swPlusOne = ctx.reader + 1 := by
+  cases h
+  rfl
+
+theorem consumer_rewrite (ctx : Context) (env : Env) (h : init ctx = .ok env) :
+    env.spun + env.swPlusOne = spin ctx.fuel 7 + (ctx.reader + 1) := by
+  rw [spun_projection_eq ctx env h, reader_projection_eq ctx env h]
+
+/- A seed affects subsequent direct reads, not a value already initialized.
+   A caller wanting a differently initialized value must call init explicitly. -/
+def seededUse (env : Env) (seed : Nat) : Nat := env.swPlusOne + seed
+
+theorem seed_preserves_initialized_value (ctx : Context) (env : Env)
+    (h : init ctx = .ok env) (seed : Nat) :
+    seededUse env seed = (ctx.reader + 1) + seed := by
+  unfold seededUse
+  rw [reader_projection_eq ctx env h]
+
 theorem init_sufficient : init ⟨100, 5⟩ = .ok ⟨0, 6⟩ := rfl
 theorem init_sentinel : init ⟨7, 5⟩ = .ok ⟨999, 6⟩ := rfl
 
@@ -212,6 +239,10 @@ theorem init_error_precedes_access :
 #print axioms discarded_zero_call
 #print axioms discarded_draw
 #print axioms draw_before_error
+#print axioms spun_projection_eq
+#print axioms reader_projection_eq
+#print axioms consumer_rewrite
+#print axioms seed_preserves_initialized_value
 #print axioms init_sufficient
 #print axioms init_sentinel
 #print axioms init_error_precedes_access
