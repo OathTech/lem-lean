@@ -1,67 +1,61 @@
 # Failure as an explicit result — revised design, 2026-10-18
 
 [USER 2026-10-18] Design pass only; no production/consumer edits.
-[AGENT 2026-10-18] Supersedes `a331435` after review `9a9b409` found incomplete
-contracts and confounded timings. Backend base: `b25be8b`.
+[AGENT 2026-10-18] Review `f91761f` invalidated `d60581a`'s indexed relation.
+This revision replaces it and clarifies effects. Backend base: `b25be8b`.
+**STOPPED on the initializer ruling in §5; not ready for implementation.**
 
-## Translation
+## 1. Translation
 
-Normalize strict computations **before** target-specific transformations in
-`main.ml:transform_for_target`, preserving explicit binds through inlining,
-representation expansion, patterns and record updates. The old
-`lean_analysis_prepass_all` hook runs too late. The inline witness demonstrates
-the erased argument; scanning the surviving tree cannot recover it.
+Normalize strict computations before target macros in `main.ml:transform_for_target`.
+Preserve binds through inlining, representation expansion, patterns and record
+updates; `lean_analysis_prepass_all` is too late to recover erased arguments.
 
-Use `Except Failure`, distinguishing model failure from exhaustion. Initially
-lift every function value uniformly: `V(A→B)=V(A)→Except Failure (V B)`.
-Pure callbacks receive recursive source translation, not an opaque higher-order
-coercion. A two-point immediate-effect analysis governs computations;
-stage signatures, canonical recursive data/dictionaries and versioned imported
-contracts determine types without effect polymorphism. See the proposed
-[contract appendix](2026-10-18_failure-monad-contracts.md), §§1–2, for rules,
-actual declaration syntax, primitive types and refusals.
+Use `Except Failure`, separating model failure from exhaustion. Initially lift
+function values uniformly: `V(A→B)=V(A)→Except Failure (V B)`. Stage contracts,
+canonical data/dictionaries and imported signatures determine types. See the
+[contract appendix](2026-10-18_failure-monad-contracts.md), §§1–3.
 
-Binds preserve discarded/unit/unused lets, selected matches and function-producing
-stages. Ordinary argument evaluation is right-to-left; source application groups
-and strict Boolean partial applications remain distinct from short-circuit forms.
-Library contracts additionally specify callback scheduling. In particular,
-`List.map` evaluates a short list backwards, but after 5001 elements evaluates the
-remaining suffix forwards before unwinding the prefix. A generic `mapM` is wrong.
+Resolve reader/supply demands and typed fuel stages before effect closure.
+Seed generated zero arms: exhaustion errors contribute failure; successful
+sentinels/kills do not. Track supply dependencies separately. Failure freedom
+never authorizes erasure/reordering; initially preserve all strict binds.
 
-Reader bindings and ambient/decremented fuel policies remain. A function-valued
-zero payload preserves its invocation stage. Initializer environments preserve
-unused top-level computations and dependency order. Existing supply composition
-refusals remain; additional staged-measure and context-dependent initializer
-refusals are explicit proposed support limits (§5). OCaml output stays unchanged;
-no new unsafe code, externs, implementation overrides or axioms are proposed.
+Preserve selected matches, unused/unit bindings and closure-construction stages.
+Ordinary arguments evaluate right-to-left; strict Boolean partial applications
+remain distinct from short-circuit forms. Library callback schedules are
+contracts: `List.map` traverses a short list backwards; beyond 5001 elements
+it evaluates the suffix forwards before unwinding the prefix.
 
-## Runners and proofs
+Reader binders, captured/decremented counters and unrelated calls' ambient fuel
+remain explicit. Retain existing supply-composition refusals; the staged-measure
+support limit remains proposed. OCaml output stays unchanged.
 
-ND suspensions return `Except Failure (Action'×State)`; supply separately retains
-its state on error. Runner signatures and equations in §4 distinguish action
-construction, forcing and traversal. NDnd siblings execute left-to-right while
-successful result lists accumulate in reverse branch order. First abort stops
-traversal and discards accumulated outcomes/final model state; trace interfaces
-retain their specified prefix. C-TF1 model-stop kills and typed fuel outcomes
-remain named compatibility exceptions, not ordinary UB or global aborts.
+## 2. Runners and proofs
 
-Reference/Exec packages stay separate. All-index logical relations cover related
-callbacks/data and successful ND observations (§6). Success certificates alone
-cannot transfer unconditional consumer claims. Migrate complete-result measure
-equations; make caesium's program execute the discarded `step_ctx` work and prove
-new full-result coverage; prove no-global-abort alongside SL adequacy. A missing
-proof blocks the claim rather than filtering errors out of outcomes. TODO 13 stays
-open. Kernel replay and axiom censuses remain proof gates.
+ND forcing returns failure or an action/state pair. Construction, forcing and
+traversal have separate contracts. NDnd visits siblings left-to-right but
+accumulates successful lists in reverse. First abort discards outcomes/final
+model state; supply retains consumed state and trace interfaces retain their
+specified prefix. C-TF1 model-stop kills and typed fuel outcomes stay disclosed
+compatibility exceptions (§4).
 
-Churn estimate: **XL**, including ND/state/runner APIs, relations and consumer
-theorems. Recount at Cerberus `049eb9a0a`: 268 generated `lemSeq` occurrences/34
-modules, two copied proof references, 63 sufficiency declarations/15 carriers.
-These are inventories, not measured edits. Migration order: contracts → twins/
-types → seams/runners/certificates → carriers → consumers → pins/seam removal.
+Replace indexed arrows with ordinary related-input success relations and
+mutually inductive relations for strictly positive recursive data. Application,
+bind, twice-invoked callbacks, returned higher-order closures and recursive ND
+suspensions have small kernel witnesses. Complete runner correspondence remains
+unproved (§6). A Lean recursive-result representation issue and its checked
+conversion are disclosed in §4.
 
-## Evidence
+Keep Reference/Exec separate. Migrate complete-result measure equations; make
+caesium execute discarded `step_ctx` work and prove full-result coverage; require
+SL no-abort adequacy. Never weaken claims by omitting errors. TODO 13 stays open.
+Churn: XL. Cerberus `049eb9a0a` inventory: 268 generated `lemSeq` sites/34 modules,
+two copied proof references, 63 sufficiency declarations/15 carriers.
 
-After sourcing the container environment:
+## 3. Evidence
+
+After sourcing the project environment, baseline/spike reproduction commands:
 
 ```sh
 CERB_MEM_MAX=16G scripts/capped make
@@ -70,36 +64,44 @@ python3 doc/lean-backend/failure-monad-spike.py build
 CERB_MEM_MAX=16G scripts/capped python3 doc/lean-backend/failure-monad-spike.py measure --count 30000000 --repeats 6
 ```
 
-Original unchanged-backend baseline, not rerun during revision:
+Historical unchanged-backend baseline; not rerun for this revision:
 ```text
 === Generation: 74 passed, 0 failed, 0 skipped ===
 parity: 49 probes: 38 OK, 11 XFAIL (registered, Lean side pinned), 0 FAIL
 ```
 
-Derived seconds:
+Corrected spike's derived seconds, unchanged since `d60581a`:
 ```text
 success current: wall median=2.714583 range=2.698971..2.758259; cpu median=2.705; max_rss_kb=8628
 success prototype: wall median=1.792342 range=1.768152..1.830307; cpu median=1.780; max_rss_kb=8732
 failure current: wall median=3.819506 range=3.802355..4.407558; cpu median=2.735; max_rss_kb=8620
 failure prototype: wall median=1.794701 range=1.765485..1.842109; cpu median=1.785; max_rss_kb=8656
 ```
-Zero-work success medians: 0.002835/0.002828; failure: 1.073542/0.003380 (current/prototype).
-Both C loops select/apply callback 2 each iteration. Six alternating pairs/mode,
-generation/compilation excluded, zero-work success/failure controls. This is a
-shallow microbenchmark, not whole-Cerberus or deep-propagation cost. The old
-comparison is withdrawn. Compiled witnesses reproduce inline erasure and
-OCaml map order around the threshold. Six proofs passed axiom census and fresh
-`leanchecker --fresh FailureMonadSpike` replay (exit 0).
+Both loops select/apply callback 2 each iteration. Six alternating pairs/mode;
+compilation excluded. Zero-work success medians: 0.002835/0.002828; failure:
+1.073542/0.003380. Abort latency is noisy. Review `f91761f` independently
+reproduced the corrected benchmark. Whole-driver cost remains unmeasured.
 
-## Operator decisions and limitations
+New contract witnesses: 19 empty axiom lists and fresh kernel replay, exit 0.
+Source, commands and scope are in appendix §8.
 
-- Approve uniform function-value lifting and explicit boundary contracts?
-  Recommend yes initially; optimize only after correspondence.
-- Approve the named initial refusals? Recommend yes rather than moving effects.
-- Move C-TF1 kills to aborts? Recommend preserving the accepted behavior separately.
-- Preserve consumer claim strength? Require complete-result coverage and no-abort proofs.
+## 4. Remaining limits
 
-Inherited quotation locations: consumer `VALIDATION.md:292` and LemLib's seam
-comments. Existing baseline warnings remain out of scope. The separate consumer
-agent list remains unlocated. §7 of the appendix dispositions all eight findings;
-the revision still needs fresh independent review.
+Full backend correspondence, runner proofs and consumer migrations are not
+implemented. Other proposed rulings remain uniform lifting, explicit boundary
+contracts, staged-measure refusals, retained C-TF1 exceptions and preserved claim
+strength. Inherited quotation locations and baseline warnings remain disclosed
+in appendix §7; the separate consumer-agent list remains unlocated.
+
+## 5. Operator ruling needed: initialization
+
+The blanket reader/fuel initializer refusal would reject existing positive
+tests and three confirmed Cerberus module values. Withdraw that proposal.
+Recommend explicit context-parameterized initialization, once per environment:
+retain sources, migrate Lean exports/tests to projections, initialize a fresh
+environment for a new context, and never silently reinitialize at `reader_seed`.
+
+This changes today's per-use context lifting. Approve that compatibility policy,
+or choose a narrower profile with named regressions? Appendix §5 gives concrete
+cases and migrations. Charter §3 requires stopping here for this fuel/reader
+ruling; further design work waits for the operator.

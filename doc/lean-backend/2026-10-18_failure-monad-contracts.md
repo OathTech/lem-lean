@@ -8,6 +8,12 @@ base `b25be8b` and Cerberus `049eb9a0a` unless stated.
 [USER 2026-10-18] The deliverable may include a detailed contract appendix alongside
 the short design note. This scope approval does not settle the open design choices.
 
+[AGENT 2026-10-18] Review `f91761f` invalidated the indexed relation in §6.
+Replace it with unindexed arrow relations and strictly positive inductive data
+relations, and make generated fuel/supply effects explicit. **STOPPED ON AN
+INITIALIZATION RULING:** §5 exposes the compatibility choice; its proposed
+resolution is not accepted policy. The design is not ready for implementation.
+
 ## 1. Preserve computations before target rewriting
 
 Insert a Lean-only entry in `main.ml:transform_for_target` before its target
@@ -27,10 +33,11 @@ generation and for the unchanged OCaml pipeline. The executable Lean path is:
    remains. Pattern compilation preserves a single scrutinee evaluation and the
    selected arm. Do not run today's raw `inline_exp_macro` or record-update
    macros over unnormalized executable expressions.
-3. Solve effects over the resulting IR and imported contracts; add reader/fuel
-   contexts and supply state; emit staged definitions and certificates. Existing
-   backend scans supply dependency/traversal infrastructure, not the new effect
-   solver. Reader/supply analyses must consume the preserved IR too.
+3. Resolve reader/fuel/supply demands on the preserved IR, insert typed fuel
+   stages (including zero payloads) and explicit supply operations, then solve
+   effects over that IR and imported contracts. Any later effect-introducing
+   lowering must re-solve before emission. Existing backend scans supply
+   dependency/traversal infrastructure, not the new failure-effect solver.
 
 For an inline constant function, `constant (checked n)` becomes
 `let v ← checked' n; pure 42`, even when `v` is unused. A later optimization may
@@ -69,8 +76,9 @@ the pure lambda is translated recursively, including its nested arguments and
 results. There is no attempt to wrap an opaque higher-order function in `.ok`
 and pretend its callback types changed. Such functions need a replacement.
 
-The effect solver still determines which *computations* may be reordered or
-erased and which primitive calls need error propagation. Judgments are
+The failure solver classifies computations and identifies calls requiring
+error propagation. It provides only one input to any future optimization proof;
+failure freedom alone never authorizes erasure or reordering. Judgments are
 `Γ ⊢ expression : T ! e`. Literals/variables/lambda construction have effect 0;
 a lambda's body is separately checked and translated. Failure has effect F.
 Let joins RHS/body effects. Match joins its scrutinee and possible arms, while
@@ -78,8 +86,31 @@ emission evaluates only the selected arm. Application joins operand evaluation
 effects with the invoked stage's effect; unknown function values have F.
 Constructors join field-expression effects; stored callback invocation is F,
 not an effect of merely constructing the data. Recursive SCC constraints are
-monotone over `{0,F}`; initialize known bodies at 0, unknown calls at F, and
-iterate to closure. Computations with effect 0 enter `C` through `.ok`.
+monotone over `{0,F}`. Seed every invocation stage with the effect of its
+**translated zero payload**, body and callees, then iterate to closure. A
+`fuelExhausted` payload contributes F even if the source body only recurses;
+a successful value sentinel or typed exhaustion kill contributes 0. A returned
+closure contributes 0 now and its body's effect when invoked. Unspecified
+native fuel consumers contribute F until their stage contracts prove otherwise.
+Computations with effect 0 enter `C` through `.ok`.
+
+Keep the existing reader/supply dependency sets alongside this failure bit.
+A `tick` draw has failure bit 0 and a nonempty supply-effect set. Any dependent
+caller inherits that set; unsupported supply/HOF forms still refuse. A proposed
+no-observable-effect certificate must establish totality at **every allowed
+budget**, failure bit 0 after lowering, no supply mutation or diagnostic output,
+and unchanged reader/environment dependencies. Unknown dependencies preclude
+that certificate. Initially retain every strict computation node: there is no
+bind-erasure/reordering optimization to justify with the failure bit alone.
+No reader read may move across a context change.
+
+Concrete obligations from `test_fuel_param.lem:42–44` and `test_supply.lem:34`:
+`let _ ← loudSpin 0 n; pure 42` is an exhaustion error; from supply `s`,
+`tick; tick` returns `(.ok (s+1), s+2)`. With transformer
+`Supply → (Except Failure A × Supply)`, `tick; error; tick` returns
+`(.error failure, s+1)`: retain the first draw and never perform the last.
+`FailureMonadContracts.lean` proves these equations for the proposed emission;
+these are specification witnesses, not evidence that a new analyzer exists.
 
 Proposed declaration grammar (new syntax, not accepted by today's parser):
 
@@ -248,6 +279,16 @@ ordinary UB or claim they implement global OCaml abort. Moving C-TF1 into
 global failure would change sibling exploration and requires a separate ruling;
 recommend deferring that change and retaining its boundary disclosure.
 
+A small Lean 4.32.2 realization exposed a representation issue: a mutually
+recursive ND function field returning nested `Except` failed automatic `SizeOf`
+specification generation (and hiding it behind an abbreviation also failed the
+kernel's nested-datatype check). The witness uses an explicit mutual result type
+with error/ok constructors and a total conversion at the forcing interface;
+both conversion round trips are proved. No generation option is disabled.
+This is an implementation option for the recursive representation, not a new
+observable outcome or runtime override. The full six-constructor, stateful
+production representation still needs its own kernel check.
+
 ## 5. Fuel stages and module initialization
 
 Do not use `lean_hoist_tail_binders` (:4732) across a computation stage. Example
@@ -299,10 +340,54 @@ entrypoint initializes each dependency once and passes its environment handle;
 imports provide types/initializers, not eager global executable values. Exported
 functions receive the environment plus their existing explicit/implicit reader
 and fuel binders, in their existing order. No hidden context is created.
-Retain the existing refusal of supply-drawing top-level values; initially refuse
-reader/fuel-dependent top-level values as well. Function declarations with
-context parameters are allowed because initialization does not execute their
-bodies. Cyclic value initialization refuses.
+Retain the existing refusal of supply-drawing top-level values. Cyclic value
+initialization refuses. **Withdraw the blanket proposed reader/fuel refusal:**
+it removes supported inputs. The following compatibility decision needs an
+operator ruling under charter §3; do not implement either policy by default.
+
+[AGENT 2026-10-18] Recommend retaining those source inputs with explicit
+context-parameterized initialization, evaluated once per environment. The
+entrypoint supplies the ambient fuel and readers before initialization, using
+the existing binder order; dependency initializers receive that same context
+and their predecessors' environments. Context is explicit data, never a new
+default instance. A fresh context requires a fresh explicit initialization;
+export access only projects from the resulting environment. Failure prevents
+access and later dependency initialization. ND-valued initializers construct
+suspensions without forcing them; forcing keeps its captured fuel/reader stage.
+
+For example, `Test.init fuel sw : C Test.Env` stores `spin fuel 7` and `sw+1`.
+It yields `.ok ⟨0,6⟩` at `(100,5)` and `.ok ⟨999,6⟩` at `(7,5)`; 999 remains
+that test's declared successful sentinel. A discarded loud call during
+initialization aborts before either export can be read. The witness proves
+these cases. This preserves the cited positive cases across separate explicit
+environments, but changes their Lean API from per-use implicit parameters to
+initialized environment projections.
+
+| Existing accepted input | Proposed migration and test disposition |
+|---|---|
+| `test_fuel_param.lem:64`, `spun_value` | Retain the source; initialize separately at fuels 100 and 7 and pin the existing 0/999 results through the environment. Update `TestFuelParamCheck.lean:60–62` and signature pins. |
+| `parity/probes/p_fuel.lem:41`, `results` | Retain the source and OCaml bytes; the Lean driver explicitly initializes twice (200 and 100000), checks each result, then prints the same two blocks. Preserve the parity row. |
+| `test_instance_reader.lem:64–68`, `sw_plus_one`, `(sw_a,sw_b)` | Retain sources; initialize at `Sw=5`, pin 6/5/6, evaluate the destructuring RHS once. Migrate both kernel and compiled reader tests to projections. |
+| Cerberus `driver.lem:138`, `get_thread_states` | Store the initialized ND suspension in the module environment; migrate its uses, including :493, :1599 and :1619, without executing its state read during initialization. |
+| Cerberus `defacto_memory.lem:120,478`, `fresh_allocation_id`, `impl_sequencePoint` | Likewise preserve their ND construction stage and captured fuel; no model-state action runs at initialization. |
+
+The last three names are confirmed consumer occurrences at `049eb9a0a`:
+`generated/Driver.lean:247` and `Defacto_memory.lean:168,463`. A text scan of
+context-bound, nonfunction result headers found these three; source inspection
+confirmed their parameterless definitions. This is not a census of every
+partial application, opaque representation or cross-context use.
+
+The unsettled point is **which initialization context owns a value when
+existing Lean callers change readers/fuel or use `reader_seed` later**. Today's
+lifting re-evaluates a value under the context of each use. The proposal freezes
+it in the supplied environment; a seed must not silently rerun initializers.
+The operator must accept that explicit environment migration (recommended), or
+choose a narrower supported profile with named regressions. Keeping today's
+per-use execution for potentially failing initializers would violate source
+initialization timing. Converting source values to unit functions is not a
+neutral fix. No positive test is deleted or reclassified by this design pass.
+Until this ruling, the initializer and cross-context correspondence contract
+remains unfinished; the old baseline is historical, not its acceptance claim.
 
 ## 6. Proof interfaces and claim preservation
 
@@ -314,33 +399,71 @@ inlined as the second thunk. Reference modules have no executable targets or
 new native implementations, and neither package imports the other. Shared
 total scalar helpers are permitted; accidental cross-package calls are not.
 
-Retain the accepted one-way success relation, with explicit related inputs.
-For bases use equality; for products/positive data use matching constructors
-and related fields. Use step-indexed relations for callback-bearing recursive
-data: index zero is unconstrained, and observing an arrow or forcing ND consumes
-an index. For an arrow at index `k+1`:
+Retain one-way success correspondence, with explicit related inputs, but
+**discard the earlier finite-index relation**. Review `f91761f` proves it rejects
+`applyZero f = f 0`; quantification over all indices does not repair that error.
+Use ordinary, unindexed value relations and a separate computation relation:
 
 ```text
-R(A→B,k+1) f f' :=
-  ∀ x x', R(A,k) x x' → ∀ y', f' x' = .ok y' → R(B,k) (f x) y'
+CR R v m'       := ∀ v', m' = .ok v' → R v v'
+R(base)        := equality
+R(A→B) f f'    := ∀ x x', R(A) x x' → CR R(B) (f x) (f' x')
 ```
 
-An exported certificate quantifies over all indices and related arguments.
-An `.ok` closure alone is insufficient: its returned value must satisfy this
-arrow relation for subsequent invocations. ND's relation quantifies over related
-states and successful forcing, relates the action/state pair, and relates every
-suspended continuation at the smaller index. The runner consequence is:
+Products relate their fields. Generate mutually **inductive** relations for
+strictly positive recursive datatypes, with one rule per matching constructor;
+expand arrow-field relations into quantifiers when checking positivity.
+Recursive relation occurrences may appear in result positions, never in the
+antecedent for a callback argument. A function-valued payload uses its complete
+ordinary arrow relation, even when stored in recursive data. Accepted source
+strict positivity must be rechecked for the translated datatype and generated
+relation; an abstract boundary needing some other relation must provide a
+kernel-checked package, not an unproved indexed fallback.
+
+For ND, `ActionRel` has one matching-constructor rule per action, and `NDRel`
+has the suspension rule below. The mutual recursive occurrences are positive:
 
 ```text
-NDRel∞ m m' → StateRel∞ s s' → runAll d (.ok m') s' = .ok os' →
-  ListRel OutcomeRel∞ (Reference.runAll d m s) os'
+(∀ s s', StateRel s s' →
+   CR (ActionRel × StateRel) (Reference.force m s) (Exec.force m' s')) →
+NDRel m m'
 ```
 
-Here `R∞` means all indices, not just the runner's depth budget. Trace,
-multiplicity and list order are included in `OutcomeRel`. This neither
-proves absence of new failures nor relates an error to the old logical default.
-Failure/order correspondence remains differential evidence until separately
-formalized. Do not use a vacuous success premise to transfer total adequacy.
+These are relations over the actual inductive ND values, including their
+function fields; they do not assume a coinductive infinite object. The state
+relation is a parameter independent of this mutual block. Reference induction
+provides hypotheses for all results of a suspension's function field. An ND
+constructor's successors use the same relation, without losing information
+about higher-order payloads at an arbitrary index. Generated nested relation
+auxiliaries (e.g. lists of continuations) must also pass kernel positivity.
+
+The two composition obligations are ordinary application and bind:
+
+```text
+R(A→B) f f' → R(A) x x' → CR R(B) (f x) (f' x')
+CR R(A) x m' → (∀ a a', R(A) a a' → CR R(B) (k a) (k' a')) →
+  CR R(B) (k x) (m' >>= k')
+```
+
+`FailureMonadContracts.lean` proves these, `applyZero`, two consecutive callback
+invocations, a returned closure that accepts a callback, and a recursive ND
+suspension carrying that closure. It also proves that callbacks returning
+0/1 are unrelated. The ND witness has active/next constructors and unit state;
+it validates the recursive/higher-order shape, not the full production runner.
+The target full-runner theorem, still to be proved, is:
+
+```text
+NDRel m m' → StateRel s s' → runAll d (.ok m') s' = .ok os' →
+  ListRel OutcomeRel (Reference.runAll d m s) os'
+```
+
+Trace, multiplicity and list order belong to `OutcomeRel`. These contracts
+neither prove absence of new failures nor relate an error to the old logical
+default. Failure/order correspondence remains differential evidence until
+separately formalized. Never transfer total adequacy through a vacuous success
+premise. The reference environment needed for §5's initialization policy is
+also pending: old per-use-context theorems cannot be reused for frozen exports
+without the corresponding context/environment hypothesis and proof.
 
 A migrated measure obligation compares complete computations at the relevant
 stage, including error and supply state, e.g.
@@ -431,8 +554,46 @@ the owner; this design pass neither reproduces their wording nor edits them.
 | 3 | §3 specifies the actual threshold-dependent map schedule and strict Boolean partial application; OCaml/prototype traces match at lengths 3, 5001, 5002 and 5003, with the two distinguishing failures. |
 | 4 | §4 gives forcing/bind/lift/runner interfaces, state/trace policies and the explicit retained C-TF1 exception. |
 | 5 | §6 gives related-input certificates and concrete stronger consumer obligations; no claim is transferred merely by discarding errors. |
-| 6 | §5 supplies staged zero/wrapper and initialization equations, with explicit initial refusals for unsupported combinations. |
+| 6 | §5 supplies staged zero/wrapper equations and explicit staged-measure limits; initializer compatibility is now an operator ruling, following independent finding 3. |
 | 7 | Prior comparison withdrawn; generated C confirms matching list lookup/indirect application in both loops. Controlled measurements and noise ranges are recorded above; whole-Cerberus cost remains unmeasured. |
 | 8 | Inherited quotation location reported above; no consumer edit or reproduced wording. |
 
 This is not a claim of independent re-review or implementation correctness.
+
+
+## 8. Independent review dispositions and bounded proof check
+
+| Finding in `f91761f` | Disposition |
+|---|---|
+| 1, high | Accept. The old relation is invalid. §6 replaces it; the small application/composition and recursive suspension witnesses are kernel checked. Full generated certificates and runner correspondence remain implementation obligations. |
+| 2, medium | Accept. §1/§2 seed translated fuel zero stages before closure, retain supply dependencies and prohibit erasure/reordering based on failure freedom alone. Discarded exhaustion and draw-before-error equations are proved. |
+| 3, medium | Accept; operator ruling pending. §5 identifies existing tests and three concrete consumer values, withdraws the blanket refusal, and proposes explicit per-environment initialization with test/API migrations. The charter's fuel/reader stop rule applies to the remaining cross-context policy. |
+
+Reproduce the new witnesses independently of the measured spike (from the
+worktree root, with the project toolchain available):
+
+```sh
+mkdir -p .tmp/failure-monad-contracts
+cp lean-lib/lean-toolchain .tmp/failure-monad-contracts/
+cp doc/lean-backend/FailureMonadContracts.lean .tmp/failure-monad-contracts/
+cat > .tmp/failure-monad-contracts/lakefile.lean <<'EOF'
+import Lake
+open Lake DSL
+package FailureContracts
+lean_lib Contracts where
+  roots := #[`FailureMonadContracts]
+EOF
+(cd .tmp/failure-monad-contracts && CERB_MEM_MAX=2G ../../scripts/capped lake build +FailureMonadContracts:olean)
+(cd .tmp/failure-monad-contracts && CERB_MEM_MAX=2G ../../scripts/capped lake env leanchecker --fresh FailureMonadContracts)
+```
+
+Validation: the new module built successfully without warnings. Derived tally:
+19 theorem axiom lists were empty. `leanchecker --fresh FailureMonadContracts`
+exited 0. Review `f91761f`'s original `RelationCounterexample` was also rebuilt:
+both theorem axiom lists were empty, and fresh kernel replay exited 0. These
+small checks ran sequentially under a 2G cap; no full dependency rebuild was
+needed. The measured spike is unchanged; its corrected timings were independently reproduced in
+`f91761f`, and are not rerun here. No comprehensive or consumer suite is rerun
+for these specification/proof witnesses. Their initial Lean elaboration failed;
+the corrected file builds without warnings. No `sorry`, extra axiom, runtime
+override, or generation/linter suppression is added.
