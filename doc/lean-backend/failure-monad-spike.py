@@ -9,6 +9,7 @@ Builds are sequential through the repository's scripts/capped. Measurement
 invokes ONLY the already compiled binaries, alternates their order, and checks
 every exit, checksum and failure message. It uses GNU time plus perf_counter;
 startup/terminal-failure controls use count=0. No raw measurement output is committed.
+Both variants select index 2 from a list of functions on EVERY iteration.
 The workload has count successful checked calls and one terminal call, so it
 measures propagation checks on the success path and terminal failure, not an
 error-heavy service that recovers from many failures.
@@ -38,10 +39,10 @@ def run(cmd, cwd=ROOT):
 
 
 def driver(prototype):
-    get = ("match FailureMonadSpike.unused n with\n"
+    get = ("match (FailureMonadSpike.steps[2]!) n with\n"
            "    | .error msg => throw (IO.userError msg)\n"
            "    | .ok s => pure s" if prototype else "pure ((steps[2]!) n)")
-    terminal = ("match FailureMonadSpike.unused terminal with\n"
+    terminal = ("match (FailureMonadSpike.steps[2]!) terminal with\n"
                 "  | .error msg => IO.eprintln msg; return 2\n"
                 "  | .ok s => IO.println s; return 0" if prototype else
                 "IO.println ((steps[2]!) terminal)\n  return 0")
@@ -70,15 +71,35 @@ def build():
     for probe in PROBES:
         run([ROOT / "lem", "-wl", "ign", "-i", ROOT / "library/pervasives_extra.lem",
              "-lean", "-outdir", OUT, ROOT / f"tests/comprehensive/parity/probes/{probe}.lem"])
+    for target in ("-lean", "-ocaml"):
+        run([ROOT / "lem", "-wl", "ign", "-i", ROOT / "library/pervasives_extra.lem",
+             target, "-outdir", OUT, HERE / "failure_monad_inline.lem"])
     (OUT / "CurrentMain.lean").write_text(driver(False))
     (OUT / "PrototypeMain.lean").write_text(driver(True))
+    (OUT / "WitnessMain.lean").write_text('''import FailureMonadSpike
+import Failure_monad_inline
+open FailureMonadSpike
+def resultText {a : Type} [ToString a] : Result a → String
+  | .error msg => "error:" ++ msg
+  | .ok x => "ok:" ++ toString x
+def main : IO Unit := do
+  IO.println s!"inline current:{run0 0}"
+  IO.println ("inline proposed:" ++ resultText (inlineWitness 0))
+  for n in [3, 5001, 5002, 5003] do
+    IO.println (s!"order {n}:" ++ String.intercalate "," ((orderWitness n).map toString))
+  for (n, l, r) in [(3, 1, 3), (5003, 5002, 5003)] do
+    match firstFailure n l r with
+    | .error msg => IO.println s!"failure {n}:{msg}"
+    | .ok _ => throw (IO.userError "failure witness unexpectedly succeeded")
+''')
     lake = ('import Lake\nopen Lake DSL\npackage FailureMonadDesign\n'
             'require LemLib from "../../../lean-lib"\n'
             'lean_lib Spike where\n  roots := #[`FailureMonadSpike, '
             '`F_let_unused, `F_let_float_branch, `F_let_float_closure, '
-            '`F_let_seq, `F_let_unit]\n'
+            '`F_let_seq, `F_let_unit, `Failure_monad_inline]\n'
             'lean_exe current where\n  root := `CurrentMain\n'
-            'lean_exe prototype where\n  root := `PrototypeMain\n')
+            'lean_exe prototype where\n  root := `PrototypeMain\n'
+            'lean_exe witnesses where\n  root := `WitnessMain\n')
     for probe, fun in zip(PROBES, FUNS):
         module = probe[0].upper() + probe[1:]
         name = "Probe_" + probe
@@ -103,7 +124,7 @@ def main (args : List String) : IO Unit := steps.forM fun f => do
         lake += f'lean_exe "old-{probe}" where\n  root := `{name_old}\n'
     (OUT / "lakefile.lean").write_text(lake)
     cap = ROOT / "scripts/capped"
-    run([cap, "lake", "build", "Spike", "current", "prototype", *PROBES,
+    run([cap, "lake", "build", "Spike", "current", "prototype", "witnesses", *PROBES,
          *("old-" + p for p in PROBES)], OUT)
     run([cap, "lake", "env", "leanchecker", "--fresh", "FailureMonadSpike"], OUT)
     for probe in PROBES:
@@ -122,6 +143,52 @@ def main (args : List String) : IO Unit := steps.forM fun f => do
             assert old.returncode == new.returncode == 0, (old, new)
             assert old.stdout == new.stdout and not old.stderr and not new.stderr, (old, new)
         print(f"{probe}: prototype failure prefix matches oracle pin; success controls 1,7 match current")
+    check_order_witnesses(cap)
+    for module in ("CurrentMain", "PrototypeMain"):
+        c = (OUT / f".lake/build/ir/{module}.c").read_text()
+        sites = [f"{i}: {line.strip()}" for i, line in enumerate(c.splitlines(), 1)
+                 if "List_get" in line or "lean_apply_1(" in line]
+        print(f"{module} dispatch sites (inspect loop before timing):\n" + "\n".join(sites))
+
+
+def check_order_witnesses(cap):
+    (OUT / "OracleWitness.ml").write_text('''let () =
+  (try ignore (Failure_monad_inline.run 0);
+       failwith "inline witness unexpectedly succeeded"
+   with Failure msg -> Printf.printf "inline proposed:error:%s\\n" msg);
+  List.iter (fun n ->
+    let seen = ref [] in
+    ignore (Lem_list.map (fun x -> seen := x :: !seen; x)
+      (List.init n (fun i -> i + 1)));
+    Printf.printf "order %d:%s\\n" n
+      (String.concat "," (List.map string_of_int (List.rev !seen)))) [3;5001;5002;5003];
+  List.iter (fun (n,l,r) ->
+    let msg = try
+      ignore (Lem_list.map (fun x -> if x=l || x=r then failwith (string_of_int x) else x)
+        (List.init n (fun i -> i + 1)));
+      "UNEXPECTED_SUCCESS"
+    with Failure msg -> msg in
+    Printf.printf "failure %d:%s\\n" n msg) [(3,1,3);(5003,5002,5003)]
+''')
+    lib = ROOT / "ocaml-lib/_build_zarith"
+    run([cap, "ocamlfind", "ocamlopt", "-package", "zarith", "-linkpkg",
+         "-I", lib, "-I", OUT, lib / "extract.cmxa", OUT / "failure_monad_inline.ml",
+         OUT / "OracleWitness.ml", "-o", OUT / "oracle-witness"], OUT)
+    oracle = subprocess.run([str(OUT / "oracle-witness")], capture_output=True,
+                            text=True, check=True, timeout=60)
+    lean = execute("witnesses", [])
+    assert lean.returncode == 0 and not lean.stderr, lean
+    assert not oracle.stderr, oracle
+    expected = ["inline proposed:error:inline check failed"]
+    for n in (3, 5001, 5002, 5003):
+        order = list(range(5002, n + 1)) + list(range(min(n, 5001), 0, -1))
+        expected.append(f"order {n}:" + ",".join(map(str, order)))
+    expected += ["failure 3:3", "failure 5003:5002"]
+    transcript = "\n".join(expected) + "\n"
+    assert oracle.stdout == transcript, oracle.stdout
+    assert lean.stdout == "inline current:42\n" + transcript, lean.stdout
+    print("Inline erasure reproduced; prototype preserves failure. OCaml/prototype map traces "
+          "match at lengths 3,5001,5002,5003; first failures are 3 and 5002.")
 
 
 def no_core():

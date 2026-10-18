@@ -1,0 +1,12 @@
+(* Design witness: Lean-specific inlining must preserve a strict actual. *)
+open import Pervasives_extra
+
+val constant_result : nat -> nat
+let constant_result _x = 42
+let inline {lean} constant_result _x = 42
+
+val validate_input : nat -> nat
+let validate_input n = if n = 0 then failwith "inline check failed" else n
+
+val run : nat -> nat
+let run _n = constant_result (validate_input _n)

@@ -49,8 +49,60 @@ def arguments (left right : Nat) : Result Nat := do
   let _l ← checkedPred "left" left
   pure 42
 
+/- The strict computation is retained BEFORE substituting an inline body. -/
+def inlineWitness (n : Nat) : Result Nat := do
+  let _x ← if n == 0 then .error "inline check failed" else .ok n
+  pure 42
+
+/- Library callback scheduling follows library/list.lem, including its
+   counter transition. The monad parameter permits both failure and trace
+   witnesses without instrumenting either timed binary. -/
+def mapTrM {m : Type → Type} [Monad m] {a b : Type}
+    (acc : List b) (f : a → m b) (xs : List a) : m (List b) :=
+  match xs with
+  | [] => pure acc.reverse
+  | x :: tail => do
+    let y ← f x
+    mapTrM (y :: acc) f tail
+
+def countMapM {m : Type → Type} [Monad m] {a b : Type}
+    (f : a → m b) (xs : List a) (counter : Nat) : m (List b) :=
+  match xs with
+  | [] => pure []
+  | x :: tail => do
+    let ys ← if counter < 5000 then countMapM f tail (counter + 1)
+              else mapTrM [] f tail
+    let y ← f x
+    pure (y :: ys)
+
+def mapOracleM {m : Type → Type} [Monad m] {a b : Type}
+    (f : a → m b) (xs : List a) : m (List b) := countMapM f xs 0
+
+def orderWitness (n : Nat) : List Nat :=
+  let callback : Nat → StateM (List Nat) Nat := fun x => do
+    modify (x :: ·)
+    pure x
+  ((mapOracleM callback ((List.range n).map (· + 1))).run []).2.reverse
+
+def firstFailure (n left right : Nat) : Result (List Nat) :=
+  mapOracleM (fun x => if x == left || x == right then .error (toString x) else .ok x)
+    ((List.range n).map (· + 1))
+
+/- Keep the source list-of-functions interface in both timed variants.
+   Selecting the callback in every iteration is intentional and symmetric. -/
+def steps : List (Nat → Result String) :=
+  [fun n => .ok (String.append "before: " (Lem_String_extra.stringFromNat n)),
+   fun n => .ok (String.append "tuple used: " (Lem_String_extra.stringFromNat ((n + 1) + (n + 2)))),
+   unused]
+
 theorem error_absorbs (msg : String) (k : Nat → Result String) :
     (Except.error msg >>= k) = Except.error msg := rfl
+
+theorem inline_failure : inlineWitness 0 = .error "inline check failed" := rfl
+
+theorem map_short_order : orderWitness 3 = [3, 2, 1] := rfl
+
+theorem map_short_failure : firstFailure 3 1 3 = .error "3" := rfl
 
 theorem probe_failures :
     unused 0 = .error "let_unused: discarded e1 failed" ∧
@@ -62,14 +114,17 @@ theorem probe_failures :
     arguments 0 0 = .error "right" := ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem unused_success (n : Nat) (s : String) (h : unused n = .ok s) :
-    (steps[2]!) n = s := by
+    (_root_.steps[2]!) n = s := by
   simp only [unused, checkedPred] at h
   split at h
   · cases h
   · change Except.ok (String.append "after (must not print): " (Lem_String_extra.stringFromNat n)) = Except.ok s at h
-    simpa [steps, lemSeq] using Except.ok.inj h
+    simpa [_root_.steps, lemSeq] using Except.ok.inj h
 
 #print axioms error_absorbs
+#print axioms inline_failure
+#print axioms map_short_order
+#print axioms map_short_failure
 #print axioms probe_failures
 #print axioms unused_success
 

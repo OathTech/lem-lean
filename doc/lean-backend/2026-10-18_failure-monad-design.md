@@ -1,24 +1,65 @@
-# Failure as an explicit result — design, 2026-10-18
+# Failure as an explicit result — revised design, 2026-10-18
 
-[USER 2026-10-18] authorized design/measurement only. Base: `b25be8b`. Recommendations: [AGENT 2026-10-18]. Keep OCaml byte-identical.
+[USER 2026-10-18] Design pass only; no production/consumer edits.
+[AGENT 2026-10-18] Supersedes `a331435` after review `9a9b409` found incomplete
+contracts and confounded timings. Backend base: `b25be8b`.
 
-## 1. Analysis and representation
+## Translation
 
-Use `Except Failure α`, distinguishing model-failure/exhaustion, preserving messages. Infer immediate/latent arrow, callback and field effects by monotone constraints over recursive components/imported libraries. Seeds: failwith-mapped constants, undefined/incomplete matches, partial primitives, comparison residuals, failure sentinels. Unknown callbacks are fallible. Reuse `lean_thread_scan_exp` (:3387), `lean_analysis_prepass_all` (:3727), reader/fuel fixed points (:1193/:1243/:1540); constant-reference sets miss callback effects. References: `src/lean_backend.ml` at base.
+Normalize strict computations **before** target-specific transformations in
+`main.ml:transform_for_target`, preserving explicit binds through inlining,
+representation expansion, patterns and record updates. The old
+`lean_analysis_prepass_all` hook runs too late. The inline witness demonstrates
+the erased argument; scanning the surviving tree cannot recover it.
 
-Proposed Lean-only declarations: `failure_signature val f = <arrow-effects>` classifies `target_rep`/`ground_rep`; `failure_rep val f = <typed-name>` supplies its lifted implementation. Pure contracts require total, seam-free dependencies; unclassified raw/infix reps refuse. Fallible comparisons need effectful dictionaries/set/map operations. Diagnostics need trace/state or refusal. No new unsafe/extern/implementation overrides/axioms.
+Use `Except Failure`, distinguishing model failure from exhaustion. Initially
+lift every function value uniformly: `V(A→B)=V(A)→Except Failure (V B)`.
+Pure callbacks receive recursive source translation, not an opaque higher-order
+coercion. A two-point immediate-effect analysis governs computations;
+stage signatures, canonical recursive data/dictionaries and versioned imported
+contracts determine types without effect polymorphism. See the proposed
+[contract appendix](2026-10-18_failure-monad-contracts.md), §§1–2, for rules,
+actual declaration syntax, primitive types and refusals.
 
-Translate data structurally and arrows recursively: `V(A→εB)=V(A)→Cε(V(B))`, `Cpure(T)=T`, `Cfail(T)=Except Failure T`. Join effects conservatively; adapt pure callbacks with `.ok`. Preserve application stages: effectful function-producing bodies return `Except Failure (…→…)`, preventing A3 eta-delaying failure. Partial recursion needs structural/fuel totality or refusal in the executable cone; otherwise divergence can disappear.
+Binds preserve discarded/unit/unused lets, selected matches and function-producing
+stages. Ordinary argument evaluation is right-to-left; source application groups
+and strict Boolean partial applications remain distinct from short-circuit forms.
+Library contracts additionally specify callback scheduling. In particular,
+`List.map` evaluates a short list backwards, but after 5001 elements evaluates the
+remaining suffix forwards before unwinding the prefix. A generic `mapM` is wrong.
 
-## 2. Emission and composition
+Reader bindings and ambient/decremented fuel policies remain. A function-valued
+zero payload preserves its invocation stage. Initializer environments preserve
+unused top-level computations and dependency order. Existing supply composition
+refusals remain; additional staged-measure and context-dependent initializer
+refusals are explicit proposed support limits (§5). OCaml output stays unchanged;
+no new unsafe code, externs, implementation overrides or axioms are proposed.
 
-Replace `lem_seq_out` (:7449; uses :7684/:7952) with binds, including discarded/unit/unused patterns. Bind scrutinees once; match only afterward; evaluate only the selected arm. Sequence application arguments right-to-left, then the head; preserve parenthesized application boundaries. Reuse `supply_thread_list` (:7038) and `supply_shortcircuit` (:6991): tuples/lists/constructors reverse positional order, records reverse declaration order; short-circuit operands stay conditional. Explicit module initialization binds top-level computations in source/dependency order, including unused ones; exports require its successful environment.
+## Runners and proofs
 
-Fuse failure and supply sequencing into one traversal: `S→(Except Failure A×S)`, retaining state at failure. Readers keep their existing binder order and lexical seeding. Mutual workers retain decremented counters; unrelated calls retain ambient fuel. Classify zero payloads explicitly: panic exhaustion becomes `.error exhausted`; existing typed domain outcomes retain their semantics; unknown snippets refuse. Measures/hypotheses remain pure, with existing supply/measure refusals. Preserve source stages around `lean_hoist_tail_binders` (:4732); emit staged adapters around workers, not earlier evaluation.
+ND suspensions return `Except Failure (Action'×State)`; supply separately retains
+its state on error. Runner signatures and equations in §4 distinguish action
+construction, forcing and traversal. NDnd siblings execute left-to-right while
+successful result lists accumulate in reverse branch order. First abort stops
+traversal and discards accumulated outcomes/final model state; trace interfaces
+retain their specified prefix. C-TF1 model-stop kills and typed fuel outcomes
+remain named compatibility exceptions, not ordinary UB or global aborts.
 
-Do not automatically merge failures into `Exception` or ND kills: handlers could recover, and ND could continue siblings after an oracle abort. Keep construction errors outside, and translate suspended callbacks/runner forcing to propagate the global error. Existing domain errors stay distinct. Monad-specific fusion requires a proved, explicitly accepted observation-preserving adapter.
+Reference/Exec packages stay separate. All-index logical relations cover related
+callbacks/data and successful ND observations (§6). Success certificates alone
+cannot transfer unconditional consumer claims. Migrate complete-result measure
+equations; make caesium's program execute the discarded `step_ctx` work and prove
+new full-result coverage; prove no-global-abort alongside SL adequacy. A missing
+proof blocks the claim rather than filtering errors out of outcomes. TODO 13 stays
+open. Kernel replay and axiom censuses remain proof gates.
 
-## 3. Evidence
+Churn estimate: **XL**, including ND/state/runner APIs, relations and consumer
+theorems. Recount at Cerberus `049eb9a0a`: 268 generated `lemSeq` occurrences/34
+modules, two copied proof references, 63 sufficiency declarations/15 carriers.
+These are inventories, not measured edits. Migration order: contracts → twins/
+types → seams/runners/certificates → carriers → consumers → pins/seam removal.
+
+## Evidence
 
 After sourcing the container environment:
 
@@ -29,32 +70,36 @@ python3 doc/lean-backend/failure-monad-spike.py build
 CERB_MEM_MAX=16G scripts/capped python3 doc/lean-backend/failure-monad-spike.py measure --count 30000000 --repeats 6
 ```
 
-Baseline (exit 0):
+Original unchanged-backend baseline, not rerun during revision:
 ```text
 === Generation: 74 passed, 0 failed, 0 skipped ===
 parity: 49 probes: 38 OK, 11 XFAIL (registered, Lean side pinned), 0 FAIL
 ```
-Lean 4.32.2; derived timing summaries, seconds:
+
+Derived seconds:
 ```text
-success current: wall median=2.688894 range=2.666341..2.732412; cpu median=2.680; max_rss_kb=8704
-success prototype: wall median=1.676661 range=1.652639..1.686582; cpu median=1.670; max_rss_kb=8660
-failure current: wall median=3.783501 range=3.738998..3.864842; cpu median=2.705; max_rss_kb=8744
-failure prototype: wall median=1.683629 range=1.653687..1.705898; cpu median=1.675; max_rss_kb=8588
+success current: wall median=2.714583 range=2.698971..2.758259; cpu median=2.705; max_rss_kb=8628
+success prototype: wall median=1.792342 range=1.768152..1.830307; cpu median=1.780; max_rss_kb=8732
+failure current: wall median=3.819506 range=3.802355..4.407558; cpu median=2.735; max_rss_kb=8620
+failure prototype: wall median=1.794701 range=1.765485..1.842109; cpu median=1.785; max_rss_kb=8656
 ```
-Zero-work success medians: 0.002985/0.002797; failure: 1.076637/0.003223 (current/prototype). Abort latency contributes substantially.
+Zero-work success medians: 0.002835/0.002828; failure: 1.073542/0.003380 (current/prototype).
+Both C loops select/apply callback 2 each iteration. Six alternating pairs/mode,
+generation/compilation excluded, zero-work success/failure controls. This is a
+shallow microbenchmark, not whole-Cerberus or deep-propagation cost. The old
+comparison is withdrawn. Compiled witnesses reproduce inline erasure and
+OCaml map order around the threshold. Six proofs passed axiom census and fresh
+`leanchecker --fresh FailureMonadSpike` replay (exit 0).
 
-[Source](FailureMonadSpike.lean)/[recipe](failure-monad-spike.py): `f_let_unused` exercises discarded fallible binds; six alternating binary pairs/mode, compilation excluded. Workload: successful checks then terminal success/failure, not repeated recovery. Five prototype probes match failure pins/success controls; A5 repairs would be XPASS. Three proofs passed axiom census/fresh replay. Delete `lemSeq`/`lemSeqImpl` after all uses/hidden effects migrate.
+## Operator decisions and limitations
 
-## 4. Proof migration
+- Approve uniform function-value lifting and explicit boundary contracts?
+  Recommend yes initially; optimize only after correspondence.
+- Approve the named initial refusals? Recommend yes rather than moving effects.
+- Move C-TF1 kills to aborts? Recommend preserving the accepted behavior separately.
+- Preserve consumer claim strength? Require complete-result coverage and no-abort proofs.
 
-At Cerberus `049eb9a0a`, derived textual counts: 268 generated `lemSeq` occurrences/34 modules; two staged proof references; 63 measure-sufficiency declarations/15 carriers. Reproduce using `rg -n -o '\blemSeq\b' lean_frontend/generated` and `rg -n '^theorem .*measure_sufficient' lean_frontend/*lemMeasureProofs.lean`; distinguish generated headers from copied seams.
-
-Retain reference twins and success correspondence ([USER 2026-09-05], consumer `docs/2026-09-05_orchestrator-handoff.md:132`): `f_exc xs=.ok v→f xs=v`, generalized structurally for transformed functions/data. Reference-only twins inline logical `lemSeq`; never execute them. Failure correspondence needs differential checks. Sufficiency compares complete results; preserve wrapper `rfl` pins. Replace `lemSeq` simplifications with bind equations/reachability facts. Order: library contracts → twins/certificates → seams/runner → carriers → consumer theorems → pins/boundary removal. Kernel replay/axiom censuses gate proofs. Churn: L, potentially all 15 carriers plus consumer exports; no measured edit count. TODO 13 remains open.
-
-## 5. Operator decisions
-
-- Effect policy? Recommend staged `Except`, explicit contracts and totality refusals.
-- Domain monads? Keep aborts distinct from UB/refusal/kills; fusion requires proved adapters.
-- Migration? Require success certificates, failure differentials and consumer migration before seam deletion.
-
-Unresolved: separate consumer-agent list unlocated (published disclosure read); inherited quotations/warnings unchanged under scope.
+Inherited quotation locations: consumer `VALIDATION.md:292` and LemLib's seam
+comments. Existing baseline warnings remain out of scope. The separate consumer
+agent list remains unlocated. §7 of the appendix dispositions all eight findings;
+the revision still needs fresh independent review.
