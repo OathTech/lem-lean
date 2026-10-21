@@ -163,6 +163,8 @@ let lean_syntax_keywords = [
   "lem_if";  (* LemLib's Bool-conditional token *)
   (* Lean 4.32.2 additions (toolchain move, scripts/lean_keyword_probe.sh) *)
   "builtin_cbv_simproc"; "builtin_cbv_simproc_decl"; "cbv_eval"; "cbv_simproc"; "cbv_simproc_decl"; "deprecated_module"; "deprecated_syntax"; "idbg"; "inferInstanceAs"; "register_sym_dsimp"; "register_sym_simp"; "unlock_limits";
+  (* Lean 4.35.0 additions (toolchain move 2026-10-21, the same probe) *)
+  "monotonicity_by"; "recall";
   (* every identifier-shaped core-grammar token that fails as a binder on
      the pinned toolchain (linksem's `matches` was one);
      derived and checked by scripts/lean_keyword_probe.sh, which fails if
@@ -4244,7 +4246,13 @@ let lean_structure_generated_names =
    admits exactly the widths that cannot reach the limit (over-refusing a
    wide record of one-byte fields, loudly). Not a magic value in DESIGN's
    sense: it mirrors a limit of the Lean runtime, not a choice about the
-   semantics. *)
+   semantics.
+   Re-measured at the 4.35.0 toolchain move (2026-10-21, the same probes:
+   a 128-field Nat structure built with and without `@[noinline]`, run with
+   arguments): 4.32.2 exits 139 on both, 4.35.0 prints on both — the
+   runtime limit is gone on 4.35.0. The refusal is kept as is (fail-closed;
+   lifting it is a ruling, doc/lean-backend/TODO.md item 55) and the message
+   below still states the 4.32.2 fact it was measured on. *)
 let lean_max_constructor_fields = 127
 
 let lean_check_constructor_width l (kind : string) (type_name : string) (ctor : string option) (n : int) =
@@ -5658,7 +5666,14 @@ type pat_style = FunParam | MatchArm
                    RHS def plus per-name projections; single-name lets
                    keep the historical shape byte-for-byte. A user val
                    colliding with the synthesized 'lemLetRhs_*' name
-                   fails loudly at Lean compile time (duplicate def). *)
+                   fails loudly at Lean compile time (duplicate def).
+                   The RHS def is `@[noinline]` (Lean 4.35.0 move,
+                   2026-10-21): 4.35.0's code generator inlines a private
+                   nullary def into each use site, which re-ran the RHS
+                   once per projection (the m7 pin `lean-tuple-once` bound
+                   (3, 6) instead of (1, 2); with the attribute (1, 2) on
+                   4.35.0 and 4.32.2, `never_extract` alone does not help —
+                   measured in plain Lean with the pin's extern). *)
                 let rhs_binding = match name_map with
                   | [] | [_] -> None
                   | _ ->
@@ -5679,7 +5694,7 @@ type pat_style = FunParam | MatchArm
                       else base in
                     Some (rhs_def_name, Output.flat [
                       from_string "\n";
-                      from_string "private def "; from_string rhs_def_name;
+                      from_string "@[noinline] private def "; from_string rhs_def_name;
                       fuel_binder_output (); ireader_binder_output (); reader_binder_output (); supply_binder_output (); constraints; rhs_thread;
                       from_string "  : "; rhs_typ;
                       from_string " :="; exp_out

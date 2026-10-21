@@ -195,6 +195,17 @@ describe a design that is no longer current.
   the consumer census, options (a)–(d) and the recommendation the
   operator adopted.
 
+## Toolchain
+
+- 2026-10-21 [Lean 4.35 record](2026-10-21_lean-4.35-record.md): the move
+  from Lean 4.32.2 to 4.35.0 (lem-lean half, plan A of Cerberus's scoping
+  record): the toolchain pins, the two new reserved words and two new root
+  names, the `toList_bal` proof, the `#synth BEq UInt64` pin, the
+  deprecations; every gate quoted, the kernel replay, the output-identity
+  evidence; findings beyond the scoping (the 128-field limit lifted on
+  4.35.0, TODO item 55; `tests/backends` `leantests` red since
+  2026-08-21, TODO item 56).
+
 ## When the front documents were checked
 
 - 2026-09-25: the public-readiness work checked README.md end to end
@@ -227,6 +238,12 @@ describe a design that is no longer current.
   (the `termination_argument … = automatic` limit and the priority table)
   were updated with them. README.md was checked against the change list;
   none of its claims moved.
+- 2026-10-21, Lean 4.35.0 move: README.md (the toolchain sentence, the
+  check list), DESIGN.md (the `#synth BEq` pin sentence), TODO.md (54
+  re-measured; 55 and 56 added), the manual chapter's toolchain sentence
+  and the root README's version table were updated for the
+  [Lean 4.35 record](2026-10-21_lean-4.35-record.md); the gate run is
+  quoted there.
 
 ## Elsewhere
 

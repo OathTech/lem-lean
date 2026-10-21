@@ -40,7 +40,7 @@ theorem spin_completes_mono (n x : Nat) (h : spin_completes n x = true) :
     simp only [spin_completes] at h ⊢
     split
     · rfl
-    · rename_i hx; rw [if_neg hx] at h; exact ih _ h
+    · rename_i hx; rw [ite_eq_right hx] at h; exact ih _ h
 
 /-- the per-function monotonicity theorem, in the shape a generator would
     emit: the SAME case split as the body, one `ih` application per
@@ -54,7 +54,7 @@ theorem spin_mono (n x : Nat) (h : spin_completes n x = true) :
     simp only [spin_lemFuel]
     split
     · rfl
-    · rename_i hx; rw [if_neg hx] at h; exact ih _ h
+    · rename_i hx; rw [ite_eq_right hx] at h; exact ih _ h
 
 /-- completion is upward closed -/
 theorem spin_completes_le (n m x : Nat) (hnm : n ≤ m) (h : spin_completes n x = true) :

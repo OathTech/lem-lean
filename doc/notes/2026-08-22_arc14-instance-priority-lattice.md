@@ -104,7 +104,7 @@ except the two marked.
 | Slot | Priority | Who lives here |
 |------|----------|----------------|
 | model/override, derived BEq/Ord | 1000 | unchanged (the `[Eq0 a] : BEq a` bridge has LEFT this row) |
-| core `BEq` | 500 | `instBEqOfDecidableEq` — core's structural equality at Nat, Int, String, Char, Bool, Unit, the fixed-width `IntN`/`UIntN`/`ISize`/`USize`, `BitVec n`; NOT LemLib's to set, listed so the table is complete |
+| core `BEq` | 500 | `instBEqOfDecidableEq` — core's structural equality at Nat, Int, String, Char, Bool, Unit, the fixed-width `IntN`/`UIntN`/`ISize`/`USize`, `BitVec n`; NOT LemLib's to set, listed so the table is complete. Lean 4.35.0 (2026-10-21): at `Int` and the fixed-width types core's `Std.LinearOrderPackage` instances (`….toBEq`, above 500) win instead; still core's, `LawfulBEq` found (`Std.LawfulBEqOrd.lawfulBEq`); the bridges below are unaffected |
 | auto trio | 500 | the backend's automatic SetType/Eq0/Ord0 trio, unchanged (`lean_instance_auto_priority`); the comparator BEq bridges have LEFT this row |
 | **Eq0 bridge** | **450** | `[Eq0 a] : BEq a` (`lean_instance_eq0_bridge_priority`): below core, so a base type's `==` is core's; above the comparator bridges, so polymorphic `[Eq0 a] [SetType a]` code and a model-only type still get the finer `isEqual` route |
 | **comparator bridges** | **400** | `[SetType a] : BEq a`, `[MapKeyType a] : BEq a` (`lean_instance_comparator_bridge_priority`): a comparator can be coarser than the type's equality, so every other `BEq` source beats them by priority |

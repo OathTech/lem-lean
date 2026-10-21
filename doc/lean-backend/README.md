@@ -36,9 +36,9 @@ Use this fork explicitly: the upstream opam release does not contain the
 Lean backend. The measured platform is Linux x86_64; other platforms are
 unverified. Prerequisites are Git, Bash, GNU make/coreutils/diffutils,
 a C toolchain, opam 2, and elan with the toolchain in `lean-lib/lean-toolchain` installed
-(Lean 4.32.2, the toolchain Cerberus uses; record:
-[linksem findings](2026-09-28_linksem-findings.md), "Toolchain move to
-Lean 4.32.2"). Package constraints are in `opam`. Public repository/ref
+(Lean 4.35.0; record: [Lean 4.35 record](2026-10-21_lean-4.35-record.md);
+the earlier move to 4.32.2: [linksem findings](2026-09-28_linksem-findings.md),
+"Toolchain move to Lean 4.32.2"). Package constraints are in `opam`. Public repository/ref
 availability and a fresh dependency download remain operator checks in
 the cleanup evidence; offline tests used preinstalled dependencies.
 
@@ -244,14 +244,15 @@ hash must reject that fallback.
 
 ## Known limits
 
-The parity suite has ten registered expected failures
+The parity suite has eleven registered expected failures
 (`tests/comprehensive/parity/expected_failures.txt`; the runner pins the
 exact Lean output of each):
 - awaiting a planned fix: `p_str_bytes` and `p_str_escapes`, OCaml byte
   strings versus Lean Unicode strings (TODO item 31);
 - ruled OCaml-target deviations, where Lean follows Lem's own semantics:
   `f_int_of_big_num`, `f_int32_overflow`, `p_mword_width`,
-  `p_word_bitwise_wide`, `p_word_bitwise_wide_mul` (see DESIGN.md);
+  `p_word_bitwise_wide`, `p_word_bitwise_wide_mul`, `p_user_ord_minmax`
+  (see DESIGN.md);
 - open discrepancies awaiting an operator decision: `f_let_float_branch`
   and `f_let_float_closure` (Lean's compiler moves a `let` whose value
   fails into a branch or closure that never runs, so the failure is lost;
@@ -295,6 +296,13 @@ same-typed swaps need value tests (see DESIGN).
 - `grep -rn "^axiom " lean-lib/ --include="*.lean"` — zero hits;
   `#print axioms` on any downstream theorem shows what its proof
   actually rests on.
+- `cd lean-lib && ../scripts/capped lake env leanchecker <modules>` —
+  the kernel replays the named modules' `.olean` files (every LemLib
+  module at the 4.35.0 move; exit 0 and silence is a pass). Lean 4.35's
+  `lake check` replays the whole closure in a fresh kernel and rejects
+  non-standard axioms; it needs a working `bwrap` sandbox
+  (`--inadvisably-no-sandbox` where there is none; `--paranoid` adds
+  five independent checkers).
 - Downstream, cerberus-lean's differential lanes are this backend's
   largest consumer test.
 

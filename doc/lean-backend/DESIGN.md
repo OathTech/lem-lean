@@ -432,7 +432,10 @@ at the cut), readers and `reader_seed` compose (binder order is
 `[Inhabited]`, readers, supply; instance-implicit readers' `[Cls]`
 binders precede `[Inhabited]`, below), and multi-name destructuring lets
 ride the single-RHS emitter so a drawing RHS is evaluated exactly
-once per projection call. Tests: `tests/comprehensive/test_supply.lem`
+once per projection call (the synthesized `lemLetRhs_*` def is
+`@[noinline]` since the Lean 4.35.0 move: that toolchain's code generator
+inlines a private nullary def into each use site, which re-ran the RHS
+once per projection; [Lean 4.35 record](2026-10-21_lean-4.35-record.md)). Tests: `tests/comprehensive/test_supply.lem`
 / `test_supply_multi.lem`, the hand-written pins
 `lean-test/TestSupplyCheck.lean`, the compiled draw-sequence binary
 `lean-test/TestSupplyDraws.lean` (suite phase `lean-supply-draws`),
@@ -756,7 +759,10 @@ comparison-binder threading above, and the backend emits no priority 50
 (checked by grep of `src/lean_backend.ml`, 2026-10-03). A build-failing
 resolution probe, `tests/comprehensive/test_instance_priority.lem` with
 `lean-test/TestInstancePriorityCheck.lean`, pins the table, including
-`#synth BEq Nat ⟶ instBEqOfDecidableEq`.
+`#synth BEq Nat ⟶ instBEqOfDecidableEq` (on Lean 4.35.0 core's `BEq` at
+`Int` and the fixed-width types is the `Std.LinearOrderPackage` instance,
+`#synth BEq UInt64 ⟶ instLinearOrderPackageUInt64✝.toBEq`, still core's,
+still above the bridges; [Lean 4.35 record](2026-10-21_lean-4.35-record.md)).
 
 **Sets and maps translate the OCaml AVL algorithms.** Lem `set`/`map`
 use LemLib's `Pset`/`Pmap`, translated from `ocaml-lib/pset.ml` and

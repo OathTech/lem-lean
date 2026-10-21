@@ -1,12 +1,16 @@
 /-
   Generate lean_constants from the current Lean environment.
 
-  Usage (the committed file is the UNION over the deployed toolchains —
-  the suite's lean-lib toolchain and the cerberus consumer's; run under
-  each and `sort -u` the outputs; a root name present in either must be
-  avoided, since generated code may be built by either):
+  Usage (the committed file is the UNION over every toolchain the output
+  has been built with — names a later toolchain dropped are KEPT, so the
+  rename pass stays stable and generated output does not change at a bump;
+  run under the current `lean-lib/lean-toolchain` and ADD the names new to
+  it; a root name present in any of them must be avoided):
     cd lean-lib && lake env lean --run ../library/gen_lean_constants.lean
-    ~/.elan/bin/lean +leanprover/lean4:v4.32.2 --run library/gen_lean_constants.lean
+    ~/.elan/bin/lean +leanprover/lean4:v4.35.0 --run library/gen_lean_constants.lean
+  2026-10-21 (4.35.0): 2 new root names (`Erased`, `repeatM`) and 2 new
+  tokens (`monotonicity_by`, `recall`, from scripts/lean_keyword_probe.sh);
+  117 committed names are absent from 4.35.0's Init and kept.
 
   This extracts all top-level names from Lean's Init library (auto-imported)
   that could conflict with Lem-generated identifiers. The output is used by

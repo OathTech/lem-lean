@@ -64,7 +64,14 @@ open Lem_Basic_classes
 #guard_msgs in #synth BEq Nat
 /-- info: instBEqOfDecidableEq -/
 #guard_msgs in #synth BEq String
-/-- info: instBEqOfDecidableEq -/
+-- Lean 4.35.0 (toolchain move 2026-10-21): core's `BEq` at `Int` and the
+-- fixed-width types comes from the `Std.LinearOrderPackage` instances
+-- (`Int.instLinearOrderPackage.toBEq`, `instLinearOrderPackageUInt64✝.toBEq`,
+-- …), which outrank `instBEqOfDecidableEq`; `Nat`/`String`/`Char`/`Bool`
+-- still resolve to it. Still core's instance, still above the bridges, and
+-- `LawfulBEq UInt64` below is `Std.LawfulBEqOrd.lawfulBEq`. On 4.32.2 this
+-- line read `instBEqOfDecidableEq`; the pin tracks the toolchain's name.
+/-- info: instLinearOrderPackageUInt64✝.toBEq -/
 #guard_msgs in #synth BEq UInt64
 example : LawfulBEq Nat := inferInstance
 example : LawfulBEq String := inferInstance

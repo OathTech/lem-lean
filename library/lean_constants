@@ -591,6 +591,10 @@ idbg
 register_sym_dsimp
 register_sym_simp
 unlock_limits
+monotonicity_by
+recall
+Erased
+repeatM
 lemChr
 lemFunctionalBeq
 lemFunctionalCompare
