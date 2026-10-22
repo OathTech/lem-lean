@@ -228,7 +228,14 @@ def defaultGreaterEq [Ord α] (x y : α) : Bool := isGreaterEqual (defaultCompar
    type is otherwise lifted by the compiler's closed-term extraction into
    a module-initialisation constant, so the panic fired at INIT of every
    importing binary under LEAN_ABORT_ON_PANIC=1 instead of at the failing
-   program point — which is where the OCaml reference raises. -/
+   program point — which is where the OCaml reference raises. That is the
+   4.28–4.32 behaviour; Lean 4.35.0 initialises extracted closed terms
+   lazily (a `lean_once_cell_t`, at first use), so on 4.35.0 what the
+   attribute buys is "once per SITE, not once per process": without it a
+   reached closed failure would be cached after its first evaluation and a
+   second reach would be silent. The attribute is necessary on both
+   (doc/lean-backend/2026-10-21_lean-4.35-record.md §3 (d); the suite's
+   `lean-untaken-failure` leg 4 guards it). -/
 @[implemented_by failwithIImpl, never_extract]
 opaque failwithI {α : Type} [Inhabited α] (msg : String) : α := default
 
@@ -339,7 +346,10 @@ end Vector
    are suppressed during initialisation), so a sufficient-fuel run could
    abort on the sentinel it never reached. Regression: the strict native
    parity probe `tests/comprehensive/parity` `p_lem_size` under
-   LEAN_ABORT_ON_PANIC=1. -/
+   LEAN_ABORT_ON_PANIC=1. On Lean 4.35.0 extraction is lazy (a once-cell at
+   first use), so the eager-abort failure mode is gone there and the
+   attribute's purpose becomes once-per-site rather than once-per-process
+   (see `failwithI` above); it stays. -/
 @[never_extract] def fuelExhausted {α : Type} (witness : α) : α :=
   fuelExhaustedWith "lem: fuel exhausted" witness
 

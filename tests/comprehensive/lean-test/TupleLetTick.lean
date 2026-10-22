@@ -23,7 +23,16 @@
    duplicated RHS gives the second binding (3, 4) — plant-verified
    red-green against the reverted m7 emitter (see the L2 record
    addendum). This models exactly the class of hand-written impure
-   externs that the retirement leaves to consumers' own armour. -/
+   externs that the retirement leaves to consumers' own armour.
+
+   Lean 4.35.0 (toolchain move 2026-10-21): extracted closed terms are
+   initialised lazily (a once-cell at first use), not at module init, so
+   "runs once at init" above reads "runs once, at first use" there — the
+   armour is still what keeps the draws per site; and 4.35.0's code
+   generator inlines a nullary def whose body mentions a never_extract
+   constant into every consumer (the generated `lemLetRhs_*` RHS def is
+   `@[noinline]` for that reason; doc/lean-backend/2026-10-21_lean-4.35-record.md
+   §3 (d)). -/
 
 namespace TupleLetTick
 

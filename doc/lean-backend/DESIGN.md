@@ -434,8 +434,15 @@ binders precede `[Inhabited]`, below), and multi-name destructuring lets
 ride the single-RHS emitter so a drawing RHS is evaluated exactly
 once per projection call (the synthesized `lemLetRhs_*` def is
 `@[noinline]` since the Lean 4.35.0 move: that toolchain's code generator
-inlines a private nullary def into each use site, which re-ran the RHS
-once per projection; [Lean 4.35 record](2026-10-21_lean-4.35-record.md)). Tests: `tests/comprehensive/test_supply.lem`
+inlines a nullary def whose body is small and not extractable as a closed
+term — one that mentions a `never_extract` constant — into every consumer,
+private or public, across modules, projections and function bodies alike,
+so the body is re-evaluated per use; a pure closed constant is not inlined.
+The attribute fixes this one emitted site; for a pure body the class is a
+cost change, for an impure extern seam a semantics change — whether every
+synthesized nullary def that mentions a `never_extract` constant should
+carry it is TODO item 57; [Lean 4.35 record](2026-10-21_lean-4.35-record.md)
+§3 (d), [pre-merge review](2026-10-22_lem-lean-4.35-premerge-review.md)). Tests: `tests/comprehensive/test_supply.lem`
 / `test_supply_multi.lem`, the hand-written pins
 `lean-test/TestSupplyCheck.lean`, the compiled draw-sequence binary
 `lean-test/TestSupplyDraws.lean` (suite phase `lean-supply-draws`),

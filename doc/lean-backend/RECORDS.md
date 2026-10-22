@@ -204,7 +204,14 @@ describe a design that is no longer current.
   deprecations; every gate quoted, the kernel replay, the output-identity
   evidence; findings beyond the scoping (the 128-field limit lifted on
   4.35.0, TODO item 55; `tests/backends` `leantests` red since
-  2026-08-21, TODO item 56).
+  2026-08-21, TODO item 56). Its §12 lists the pre-merge review's
+  dispositions.
+- 2026-10-22 [Pre-merge review of the Lean 4.35 move](2026-10-22_lem-lean-4.35-premerge-review.md):
+  the independent review of `469e086` (mergeable with fixes): the 4.35.0
+  inlining class measured on eight def shapes (P2-1, TODO item 57 and the
+  plan-B census/cost deliverables), the commit over the red `leantests`
+  gate (P2-2), the version-bound `never_extract` rationale, the recipe,
+  the paranoid-run wording.
 
 ## When the front documents were checked
 
@@ -244,6 +251,10 @@ describe a design that is no longer current.
   and the root README's version table were updated for the
   [Lean 4.35 record](2026-10-21_lean-4.35-record.md); the gate run is
   quoted there.
+- 2026-10-22, after the pre-merge review: DESIGN.md (the inlining class
+  behind the `@[noinline]` RHS def), TODO.md (57 added), this index and the
+  record's §3 (d), §8, §9, §11, §12 were corrected per the review's
+  dispositions; no code moved.
 
 ## Elsewhere
 

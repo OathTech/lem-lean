@@ -5668,12 +5668,22 @@ type pat_style = FunParam | MatchArm
                    colliding with the synthesized 'lemLetRhs_*' name
                    fails loudly at Lean compile time (duplicate def).
                    The RHS def is `@[noinline]` (Lean 4.35.0 move,
-                   2026-10-21): 4.35.0's code generator inlines a private
-                   nullary def into each use site, which re-ran the RHS
-                   once per projection (the m7 pin `lean-tuple-once` bound
-                   (3, 6) instead of (1, 2); with the attribute (1, 2) on
-                   4.35.0 and 4.32.2, `never_extract` alone does not help —
-                   measured in plain Lean with the pin's extern). *)
+                   2026-10-21): 4.35.0's code generator inlines a nullary
+                   def whose body is small and not extractable as a closed
+                   term (it mentions a `never_extract` constant) into EVERY
+                   consumer — private or public, across modules, projections
+                   and function bodies alike — so the body is re-evaluated
+                   per use (the m7 pin `lean-tuple-once` bound (3, 6)
+                   instead of (1, 2); with the attribute (1, 2) on 4.35.0
+                   and 4.32.2; `never_extract` alone does not help — measured
+                   in plain Lean with the pin's extern, and the class in the
+                   2026-10-22 pre-merge review). The attribute fixes this one
+                   emitted site; the other nullary callers of never_extract
+                   constants (the B8 defs below, LemLib's failure leaves)
+                   are a cost change for pure bodies and a semantics change
+                   only for impure extern seams — whether every synthesized
+                   nullary def of that shape should carry it is TODO item 57
+                   (doc/lean-backend/TODO.md). *)
                 let rhs_binding = match name_map with
                   | [] | [_] -> None
                   | _ ->
