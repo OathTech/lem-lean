@@ -14,7 +14,7 @@ LAKE = "$(CAPPED)" lake
 
 TESTS = $(sort $(wildcard test_*.lem))
 
-.PHONY: all lean lean-wide-patterns lean-outdir-refusal lean-comments lean-layout lean-text-fidelity lean-multiclause lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-instance-reader lean-no-sorry-proofs lean-no-ireader-instances lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
+.PHONY: all lean lean-wide-patterns lean-outdir-refusal lean-comments lean-layout lean-text-fidelity lean-multiclause lean-unreferenced-binders lean-constants-required lean-generate lean-compile lean-negative lean-panic lean-untaken-failure lean-parity lean-fuel-param lean-fuel-mutual-reader lean-reader-multi lean-instance-reader lean-no-sorry-proofs lean-no-ireader-instances lean-no-fuel-numerals lean-version lean-parity-admission check-capped clean
 
 check-capped:
 	@test -x "$(CAPPED)" || { echo "FAIL: capped Lean runner '$(CAPPED)' not found or not executable (set CAPPED=...)"; exit 1; }
@@ -23,7 +23,7 @@ all: lean
 
 # === Lean Backend ===
 
-lean: lean-version lean-constants-required lean-parity-admission lean-wide-patterns lean-outdir-refusal lean-generate lean-comments lean-layout lean-text-fidelity lean-multiclause lean-compile lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-instance-reader lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-ireader-instances lean-no-fuel-numerals
+lean: lean-version lean-constants-required lean-parity-admission lean-wide-patterns lean-outdir-refusal lean-generate lean-comments lean-layout lean-text-fidelity lean-multiclause lean-compile lean-unreferenced-binders lean-panic lean-untaken-failure lean-tuple-once lean-supply-draws lean-reader-consumer lean-reader-multi lean-instance-reader lean-fuel-param lean-fuel-mutual-reader lean-negative lean-invariance lean-parity lean-no-sorry-proofs lean-no-ireader-instances lean-no-fuel-numerals
 
 # The reserved-name list is required (linksem 2026-09-28, B10): with the
 # library's lean_constants missing, lem must refuse to generate Lean (it used
@@ -436,6 +436,40 @@ lean-untaken-failure:
 	if [ $$st -ne 0 ] || [ "$$n" -ne 2 ] || ! echo "$$out" | grep -q "twice-2"; then \
 		echo "  FAIL (leg 4): expected 2 PANIC lines (one per reached Assert_extra.fail, B8 never_extract), got $$n, exit $$st: $$out"; exit 1; \
 	else echo "  OK (leg 4): each reached Assert_extra.fail panics (2 of 2; B8 never_extract)"; fi
+
+# The unreferenced-binder rule and the per-definition termination_by (TODO
+# item 54, 2026-11-07; record
+# doc/lean-backend/2026-11-07_unreferenced-binders-record.md). Three legs:
+#  1. the generated Test_unreferenced_binders.lean, by
+#     check_unreferenced_binders.py (every unreferenced pattern variable and
+#     parameter bound as `_<name>`, the referenced and the kept ones under
+#     their names, `termination_by structural` on exactly the derived
+#     comparison and size definitions that recurse; plants in its header);
+#  2. generation-only: a lem variable whose underscored name would sit in a
+#     synthesized binder namespace (`_lemReader_…`, `_lemSupply…`,
+#     `_lemIfTail…`) keeps its name, a plain one is underscored;
+#  3. the negative plant lean-test/TestWarningPlant.lean (not a default
+#     target) must FAIL to build under the package's -DwarningAsError=true
+#     with both warning kinds reported as errors — so the suite's
+#     zero-warning state is a gate (lean-compile fails on any warning), not
+#     a report.
+lean-unreferenced-binders: lean-generate check-capped
+	@echo "=== Unreferenced binders and the per-definition termination_by (TODO item 54) ==="
+	@python3 check_unreferenced_binders.py Test_unreferenced_binders.lean
+	@d=$$(mktemp -d); printf 'open import Pervasives\nlet keep_guard (lemReader_x : nat) (lemSupply_y : nat) (lemIfTail_z : nat) (plain : nat) : nat = 0\n' > $$d/keep_guard.lem; \
+	if ! $(LEM) $(LEMFLAGS) -lean -outdir $$d $$d/keep_guard.lem > $$d/log 2>&1; then \
+		echo "  FAIL (keep-guard leg): generation failed:"; head -5 $$d/log; rm -rf $$d; exit 1; fi; \
+	if ! grep -q '^def keep_guard (lemReader_x : Nat) (lemSupply_y : Nat) (lemIfTail_z : Nat) (_plain : Nat) : Nat := 0$$' $$d/Keep_guard.lean; then \
+		echo "  FAIL (keep-guard leg): expected the three synthesized-namespace names kept and the plain one underscored; got:"; \
+		grep '^def keep_guard' $$d/Keep_guard.lean; rm -rf $$d; exit 1; fi; \
+	rm -rf $$d; echo "  OK (keep-guard leg): names in the synthesized binder namespaces are kept; a plain unreferenced one is underscored"
+	@out=$$(cd lean-test && $(LAKE) build WarningPlant 2>&1); st=$$?; \
+	if [ $$st -eq 0 ]; then echo "  FAIL (plant): TestWarningPlant built under -DwarningAsError=true (the flag does not bite)"; exit 1; \
+	elif ! echo "$$out" | grep -qE 'error: TestWarningPlant\.lean:[0-9]+:[0-9]+: Variable name .y. is not explicitly referenced'; then \
+		echo "  FAIL (plant): no unreferenced-variable error:"; echo "$$out" | head -5; exit 1; \
+	elif ! echo "$$out" | grep -qE 'error: TestWarningPlant\.lean:[0-9]+:[0-9]+: unused .termination_by., function is not recursive'; then \
+		echo "  FAIL (plant): no inert-termination_by error:"; echo "$$out" | head -5; exit 1; \
+	else echo "  OK (plant): both warning kinds are build errors under -DwarningAsError=true (lake exit $$st)"; fi
 
 # Negative probes: each negative/neg_*.lem MUST be rejected, and with the
 # error fragment declared in its first-line "(* EXPECT: ... *)" header —

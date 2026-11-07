@@ -120,6 +120,8 @@ lean_lib LemComprehensiveTest where
     `TupleLetTick,  -- hand-written m7 single-evaluation counter
     `Test_types_basic, `Test_types_basic_auxiliary,
     `Test_tyvar_collision, `Test_tyvar_collision_auxiliary,  -- type variables renamed on collision (backend-hardening item 3)
+    `Test_unreferenced_binders, `Test_unreferenced_binders_auxiliary,  -- unreferenced binders underscored; termination_by per recursive definition (TODO item 54)
+    `TestUnreferencedBindersCheck,  -- hand-written name pins (named arguments on the rendered binders) and kernel pins
     `Test_wide_patterns, `Test_wide_patterns_auxiliary,  -- wide patterns generate in bounded time (backend-hardening item 5)
     `Test_vectors, `Test_vectors_auxiliary,
     `TestExtraImportHelper  -- hand-written helper for extra_import test
@@ -183,3 +185,10 @@ lean_exe «test-fuel-mutual-reader» where
 -- lean-instance-reader).
 lean_exe «test-instance-reader» where
   root := `TestInstanceReaderExec
+
+-- Negative plant for -DwarningAsError=true (TODO item 54, 2026-11-07): NOT a
+-- default target; the Makefile's lean-unreferenced-binders builds it and
+-- requires the failure.
+lean_lib WarningPlant where
+  srcDir := "."
+  roots := #[`TestWarningPlant]
