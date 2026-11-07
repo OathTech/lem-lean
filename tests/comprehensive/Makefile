@@ -183,7 +183,7 @@ lean-multiclause: lean-generate
 	@echo "=== Multi-clause definitions render as Lean equations (TODO item 39 pin) ==="
 	@f=Test_multiclause.lean; fail=0; \
 	for pat in '^def f : Nat → Nat$$' '^  | (0 : Nat) => 1$$' '^  | (n : Nat) => n$$' \
-	           '^partial def len2 : List Nat → Nat$$' '^  | (\[\] : List Nat) => 0$$' '^  | (x :: xs) => 1 + len2 xs$$' \
+	           '^partial def len2 : List Nat → Nat$$' '^  | (\[\] : List Nat) => 0$$' '^  | (_x :: xs) => 1 + len2 xs$$' \
 	           '^def g (m : Option Nat) : Nat :=$$' '^  match m with$$'; do \
 		if ! grep -q -- "$$pat" $$f; then echo "  FAIL: $$f lacks the line /$$pat/"; fail=1; fi; \
 	done; \

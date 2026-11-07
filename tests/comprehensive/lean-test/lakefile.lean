@@ -3,7 +3,12 @@ open Lake DSL
 
 package LemComprehensiveTest where
   version := v!"0.1.0"
-  moreLeanArgs := #["-DautoImplicit=false"]
+  -- Warnings are build failures (TODO item 54, 2026-11-07): lean-compile
+  -- fails on any warning in the generated modules or the hand-written
+  -- checks (the two linter kinds the backend used to emit — unreferenced
+  -- binders and inert `termination_by` — above all); the negative plant
+  -- lean-warning-plant proves the flag bites.
+  moreLeanArgs := #["-DautoImplicit=false", "-DwarningAsError=true"]
 
 require LemLib from "../../../lean-lib"
 

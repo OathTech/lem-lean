@@ -375,6 +375,24 @@ module St = struct
   (* [render] The hoisted binders of the fuel'd definition being rendered
      (from tail_hoisted; [] for every other definition). *)
   let tail_sentinel_args : string list ref = ref []
+  (* [render] The unreferenced-binder rule (TODO item 54; mechanism
+     comment at with_binder_scope): while ONE binding form's patterns
+     render, the names its scope references — the typed AST's free
+     variables of the scope's body plus the names other emitted text
+     refers to. A pattern variable outside the set is bound under its
+     source name with a leading underscore (`_err`). None = no scope
+     information: every name is kept (the fail-safe direction: a kept
+     name is at most a linter warning, a wrongly underscored one an
+     unknown identifier at the Lean build). *)
+  let binder_refs : NameSet.t option ref = ref None
+  (* [render] Names the definition being rendered must bind under their
+     own spelling whatever its body references, because emitted text
+     outside the body names them: the designated structural parameter
+     (the `termination_by structural <param>` clause). The reader_seed
+     parameters (reader_seed_param), the hoisted function-tail binders
+     (tail_sentinel_args) and the identifiers of a fuel sentinel's text
+     (fuel_emit) are read by with_binder_scope from their own state. *)
+  let keep_binders : string list ref = ref []
   (* [invocation] Derived-size census (mechanism comment at
      lean_size_shape): every generated type path of
      the invocation -> whether the backend emits `t.lemSize` for it (with
@@ -452,8 +470,6 @@ module St = struct
      signature rendering)). Persists across modules (dependency order —
      the reader_lifted precedent). *)
   let failwith_threaded : (int list * string list) Types.Cdmap.t ref = ref Types.Cdmap.empty
-  (* [invocation] Synthesized-name counter (generate_fresh_name: x<n>). *)
-  let fresh_name_counter = ref 0
   (* [file] The source comments already emitted, by physical identity.
      Transformations (pattern compilation above all) copy a skip list into
      several generated nodes; the comment is the same value in each copy,
@@ -499,6 +515,8 @@ module St = struct
     fuel_lifted := Types.Cdset.empty;
     fuel_binder := false;
     tail_sentinel_args := [];
+    binder_refs := None;
+    keep_binders := [];
     reader_seed_param := None;
     reader_params_cache := None;
     supply_lifted := Types.Cdset.empty;
@@ -510,7 +528,6 @@ module St = struct
     rendering_comment := false;
     failwith_threaded := Types.Cdmap.empty;
     size_census := [];
-    fresh_name_counter := 0;
     if_tail_counter := 0;
     tyvar_renames := [];
     Hashtbl.reset lean_cmp_bounds
@@ -3240,6 +3257,28 @@ let rec lean_seq_pattern (p : pat) : bool =
   | P_paren (_, p', _) | P_typ (_, p', _, _, _) -> lean_seq_pattern p'
   | _ -> false
 
+(* Whether definition [name] of an emitted mutual block recurses: it
+   reaches itself through the block's call graph [defs] = (name, _,
+   callees) — a self-call or a cycle through other members. Lean's
+   elaborator splits a `mutual` block into its strongly connected
+   components and warns `unused termination_by, function is not
+   recursive` on every member whose component is a non-recursive
+   singleton, a member that only CALLS into a cycle included (measured on
+   4.35.0: doc/lean-backend/2026-11-07_unreferenced-binders-record.md).
+   The derived comparison and size emitters attach `termination_by
+   structural` exactly to the members this returns true for. *)
+let lean_block_recursive (defs : (string * 'a * string list) list) (name : string) : bool =
+  let succs n = match List.find_opt (fun (m, _, _) -> m = n) defs with
+    | Some (_, _, cs) -> cs
+    | None -> [] in
+  let rec reach visited frontier = match frontier with
+    | [] -> false
+    | n :: rest ->
+      if n = name then true
+      else if List.mem n visited then reach visited rest
+      else reach (n :: visited) (succs n @ rest) in
+  reach [] (succs name)
+
 (* A bare `sorry` target representation is a proof
    hole, not a runtime boundary. Check declarations as well as uses, so
    an unused or partially applied constant cannot hide this escape.
@@ -4318,11 +4357,6 @@ let lean_format_op use_infix a x =
   else
     id a x
 
-
-let generate_fresh_name () =
-  let n = !St.fresh_name_counter in
-  St.fresh_name_counter := n + 1;
-  Stdlib.(^) "x" (string_of_int n)
 
 type variable
   = Tyvar of Output.t
@@ -5584,8 +5618,11 @@ type pat_style = FunParam | MatchArm
           | Let_def (skips, targets, (p, name_map, topt, sk, e)) ->
               if in_target targets then
                 (* Lean doesn't support destructuring in 'def' bindings.
-                   Emit one def per bound name: def x : T := let PAT := EXPR; x *)
-                let pat_out = def_pattern p in
+                   Emit one def per bound name: def x : T := let PAT := EXPR; x
+                   — the pattern rendered per bound name, since each def
+                   references only its own (with_binder_scope). *)
+                let pat_out_for (bound : Name.t) =
+                  with_binder_refs (NameSet.singleton bound) (fun () -> def_pattern p) in
                 let type_out = match topt with
                   | None -> emp
                   | Some (_, t) -> Output.flat [from_string " :"; pat_typ t]
@@ -5725,12 +5762,13 @@ type pat_style = FunParam | MatchArm
                                         Output.flat [from_string " "; from_string pname])
                                       (get_supply_params ()))
                                   else emp)] in
-                let defs = List.map (fun (_orig_name, cref) ->
+                let defs = List.map (fun (orig_name, cref) ->
                   let cd = c_env_lookup Ast.Unknown A.env.c_env cref in
                   let name_str = lean_name_of cref in
                   let var_type = pat_typ (C.t_to_src_t cd.const_type) in
                   let defn = if inside_instance then emp else from_string "def " in
                   let thread_out = thread_out_of cref in
+                  let pat_out = pat_out_for orig_name in
                   if supply_let_lifted then begin
                     (* threaded shape: bind the RHS pair, return the
                        bound name paired with the final supply *)
@@ -5900,19 +5938,24 @@ type pat_style = FunParam | MatchArm
                     else List.concat_map (fun g ->
                         if structural_for g then run [member_of g] else []) groups
                   end in
-                let structural_clause g =
+                (* the designated parameter's lem name (None: no clause) *)
+                let structural_param g : string option =
                   match group_cref g with
                   | Some c when any_structural && structural_for g ->
                     let i = List.assoc c structural_assign in
                     let pats = match g with [(_, _, pats, _, _, _)] -> pats | _ -> [] in
-                    let pname = match lean_strip_pat (List.nth pats i) with
-                      | P_var n | P_var_annot (n, _) ->
-                        lean_escape_keyword (Name.to_string (Name.strip_lskip n))
-                      | _ ->
-                        raise (Reporting_basic.err_general true (locn_of_clause_group g)
-                          "Lean backend: internal error — designated structural parameter is not a variable") in
-                    Output.flat [from_string "\ntermination_by structural "; from_string pname; from_string "\n"]
-                  | _ -> emp in
+                    (match lean_strip_pat (List.nth pats i) with
+                     | P_var n | P_var_annot (n, _) -> Some (Name.to_string (Name.strip_lskip n))
+                     | _ ->
+                       raise (Reporting_basic.err_general true (locn_of_clause_group g)
+                         "Lean backend: internal error — designated structural parameter is not a variable"))
+                  | _ -> None in
+                let structural_clause g =
+                  match structural_param g with
+                  | Some pname ->
+                    Output.flat [from_string "\ntermination_by structural ";
+                                 from_string (lean_escape_keyword pname); from_string "\n"]
+                  | None -> emp in
                 (* A POLYMORPHIC definition with no
                    explicit parameters (`def fail {a} [Inhabited a] : a :=
                    failwithI "fail"`, LemLib's Assert_extra.fail) compiles to a
@@ -5997,7 +6040,8 @@ type pat_style = FunParam | MatchArm
                     in
                     (* Render each clause as | pat1, pat2, ... => body *)
                     let render_equation ({term = _}, _, pats, _, skips, e) =
-                      let pat_out = concat_str ", " (List.map def_pattern pats) in
+                      let pat_out = with_binder_scope [e] (fun () ->
+                          concat_str ", " (List.map def_pattern pats)) in
                       let body =
                         if needs_parens (C.exp_to_term e) then
                           Output.flat [from_string "("; exp inside_instance e; from_string ")"]
@@ -6289,8 +6333,16 @@ type pat_style = FunParam | MatchArm
                           St.supply_binder := saved_sb;
                           St.fuel_binder := saved_fb)
                         (fun () ->
+                           (* the designated structural parameter keeps its
+                              name whatever the body references: the clause
+                              names it (with_binder_scope) *)
+                           let saved_keep = !St.keep_binders in
+                           St.keep_binders := (match structural_param g with Some p -> [p] | None -> []);
+                           let body =
+                             Fun.protect ~finally:(fun () -> St.keep_binders := saved_keep)
+                               (fun () -> render_group g) in
                            (def_keyword_for g,
-                            Output.flat [render_group g; structural_clause g], emp))
+                            Output.flat [body; structural_clause g], emp))
                     | Some (n, c, s) ->
                       let base_name = Name.to_string (Name.strip_lskip (B.const_ref_to_name n true c)) in
                       let worker = String.concat "" [base_name; "_lemFuel"] in
@@ -6769,7 +6821,9 @@ type pat_style = FunParam | MatchArm
           suffix
         ]
       ))
-    and let_body inside_instance i_ref_opt top_level tv_set ((lb, _):letbind) =
+    (* [scope]: the expressions in whose scope the binding's variables are
+       bound (the let's body), for the unreferenced-binder rule. *)
+    and let_body inside_instance i_ref_opt top_level tv_set (scope : exp list) ((lb, _):letbind) =
       match lb with
         | Let_val (p, topt, skips, e) ->
             (* In Lean 4, `let (x : T) := val; body` is parsed as a pattern-matching
@@ -6778,9 +6832,9 @@ type pat_style = FunParam | MatchArm
                extract the inner pattern and emit the type annotation separately. *)
             let p_out, typ_from_pat = match p.term with
               | P_typ (_skips, inner_p, _skips', t, _skips'') ->
-                  def_pattern inner_p, Some t
+                  with_binder_scope scope (fun () -> def_pattern inner_p), Some t
               | _ ->
-                  def_pattern p, None
+                  with_binder_scope scope (fun () -> def_pattern p), None
             in
             let tv_set_sep, tv_set =
               if Types.TNset.cardinal tv_set = 0 then
@@ -6909,7 +6963,7 @@ type pat_style = FunParam | MatchArm
              tv_set_sep; tv_set; constraints_sep; constraints;
              fuel_binder_output (); ireader_binder_output (); inhabited_binder_output ();
              from_string " (lemFuel : Nat)"; reader_binder_output (); supply_binder_output (); pat_skips;
-             fun_pattern_list inside_instance pats; ws skips; typ_opt;
+             with_binder_scope [e] (fun () -> fun_pattern_list inside_instance pats); ws skips; typ_opt;
              from_string " := match lemFuel with\n  | 0 => ";
              sentinel_out;
              (* the succ-arm body is parenthesized like the sentinel: a
@@ -6924,7 +6978,7 @@ type pat_style = FunParam | MatchArm
            Output.flat [
              ws name_skips; from_string " "; name; tv_set_sep; tv_set; constraints_sep; constraints;
              fuel_binder_output (); ireader_binder_output (); inhabited_binder_output (); reader_binder_output (); supply_binder_output (); pat_skips;
-             fun_pattern_list inside_instance pats; ws skips; typ_opt; from_string " := "; body
+             with_binder_scope [e] (fun () -> fun_pattern_list inside_instance pats); ws skips; typ_opt; from_string " := "; body
            ])
     and reader_binder_output () =
       if not !St.reader_binder then emp else
@@ -7092,9 +7146,9 @@ type pat_style = FunParam | MatchArm
              (* the P_typ unwrap of let_body: `let (x : T) := v` would
                 pattern-match, not bind *)
              | P_typ (_, inner_p, _, t, _) ->
-               def_pattern inner_p, Output.flat [from_string " :"; pat_typ t]
+               with_binder_scope [e2] (fun () -> def_pattern inner_p), Output.flat [from_string " :"; pat_typ t]
              | _ ->
-               def_pattern p,
+               with_binder_scope [e2] (fun () -> def_pattern p),
                (match topt with
                 | None -> emp
                 | Some (_, t) -> Output.flat [from_string " :"; pat_typ t])) in
@@ -7130,7 +7184,8 @@ type pat_style = FunParam | MatchArm
         if not (List.exists (fun (_, _, ea, _) -> exp_needs_supply ea) arm_list) then
           let arms = List.map (fun (p, _, ea, _) ->
               flatten_newlines (Output.flat
-                [from_string "\n      | "; def_pattern p; from_string " => "; pure_out ea]))
+                [from_string "\n      | "; with_binder_scope [ea] (fun () -> def_pattern p);
+                 from_string " => "; pure_out ea]))
             arm_list in
           (bs0,
            SPure (Output.flat ([from_string "(match "; v0; from_string " with"]
@@ -7138,8 +7193,8 @@ type pat_style = FunParam | MatchArm
            senv0)
         else begin
           let arms = List.map (fun (p, _, ea, _) ->
-              Output.flat [from_string "\n      | "; def_pattern p; from_string " => ";
-                           supply_arm inside_instance senv0 ea])
+              Output.flat [from_string "\n      | "; with_binder_scope [ea] (fun () -> def_pattern p);
+                           from_string " => "; supply_arm inside_instance senv0 ea])
             arm_list in
           let (bind, v, senv') = supply_join senv0
             (Output.flat ([from_string "match "; v0; from_string " with"] @ arms)) in
@@ -7526,12 +7581,18 @@ type pat_style = FunParam | MatchArm
               Ident.to_output (Term_const (false, true)) path_sep i
           | Lit l -> literal l
           | Do (skips, _mod_descr_id, do_line_list, _skips', e, _skips'', _type_int) ->
-              let lines = List.map (fun (Do_line (p, _s1, body, _s2)) ->
-                let (body', _) = Typed_ast.alter_init_lskips (fun sk -> (Typed_ast.no_lskips, sk)) body in
-                Output.flat [
-                  from_string "    let "; fun_pattern p; from_string " ← "; exp inside_instance body'; from_string "\n"
-                ]
-              ) do_line_list in
+              (* a line's pattern is bound in the later lines and the
+                 final expression (the unreferenced-binder rule's scope) *)
+              let rec lines_from = function
+                | [] -> []
+                | Do_line (p, _s1, body, _s2) :: rest ->
+                  let (body', _) = Typed_ast.alter_init_lskips (fun sk -> (Typed_ast.no_lskips, sk)) body in
+                  let scope = List.map (fun (Do_line (_, _, b, _)) -> b) rest @ [e] in
+                  Output.flat [
+                    from_string "    let "; with_binder_scope scope (fun () -> fun_pattern p);
+                    from_string " ← "; exp inside_instance body'; from_string "\n"
+                  ] :: lines_from rest in
+              let lines = lines_from do_line_list in
               let (e', _) = Typed_ast.alter_init_lskips (fun sk -> (Typed_ast.no_lskips, sk)) e in
               Output.flat [
                 ws skips; from_string "(do\n";
@@ -7708,7 +7769,7 @@ type pat_style = FunParam | MatchArm
             when (lean_seq_pattern p || lean_seq_unused_binding p e) && not (lean_seq_trivial e1) ->
               lem_seq_out inside_instance skips e1 e
           | Let (skips, bind, _skips', e) ->
-              let body = flatten_newlines (let_body inside_instance None false Types.TNset.empty bind) in
+              let body = flatten_newlines (let_body inside_instance None false Types.TNset.empty [e] bind) in
                 Output.flat [
                   ws skips; from_string "let "; body; from_string "; "; exp inside_instance e
                 ]
@@ -7801,7 +7862,7 @@ type pat_style = FunParam | MatchArm
                 default_const_output ()
               end
           | Fun (skips, ps, skips', e) ->
-              let ps = fun_pattern_list inside_instance ps in
+              let ps = with_binder_scope [e] (fun () -> fun_pattern_list inside_instance ps) in
                 Output.flat [
                   ws skips; from_string "fun"; ps; ws skips'; from_string "=> "; exp inside_instance e
                 ]
@@ -8148,12 +8209,18 @@ type pat_style = FunParam | MatchArm
                     from_string "; "])) in
                 Output.flat ([from_string "("] @ lets @ [block_out 0 (List.hd bs); from_string ")"])
               end
-          | Quant (quant, quant_binding_list, skips, e) ->
+          | Quant (quant, quant_binding_list, skips, qbody) ->
             let quant =
               match quant with
                 | Ast.Q_forall _ -> from_string "∀"
                 | Ast.Q_exists _ -> from_string "∃"
             in
+            (* a restriction pattern's variables are bound in the body and
+               in the later restrictions (the unreferenced-binder rule's
+               scope; every restriction is taken — a kept name is harmless) *)
+            let restr_exps = List.filter_map (function
+                | Typed_ast.Qb_restr (_, _, _, _, r, _) -> Some r
+                | Typed_ast.Qb_var _ -> None) quant_binding_list in
             let bindings =
               Output.concat (from_string " ") (
                 List.map (fun quant_binding ->
@@ -8167,7 +8234,7 @@ type pat_style = FunParam | MatchArm
                           ws skip; from_string name
                         ]
                     | Typed_ast.Qb_restr (_bool, skips, pat, skips', e, skips'') ->
-                      let pat_out = fun_pattern pat in
+                      let pat_out = with_binder_scope (qbody :: restr_exps) (fun () -> fun_pattern pat) in
                         Output.flat [
                           ws skips; pat_out; ws skips'; from_string " : ";
                           exp inside_instance e; ws skips''
@@ -8176,7 +8243,7 @@ type pat_style = FunParam | MatchArm
             in
               Output.flat [
                 quant; from_string " "; bindings; from_string ", ("; ws skips;
-                exp inside_instance e; from_string " : Prop)"
+                exp inside_instance qbody; from_string " : Prop)"
               ]
           | Comp_binding (_, _, _, _, _, _, _, _, _) ->
               (* Set-comprehension binding — not supported in Lean. Library
@@ -8276,7 +8343,7 @@ type pat_style = FunParam | MatchArm
           else exp inside_instance e
         in
         flatten_newlines (Output.flat [
-          from_string "| "; def_pattern p; from_string " => "; body
+          from_string "| "; with_binder_scope [e] (fun () -> def_pattern p); from_string " => "; body
         ])
     (* Multi-discriminant case line: unwrap P_tup pattern into comma-separated
        elements for match l1, l2, ... with | p1, p2, ... => body syntax.
@@ -8294,9 +8361,9 @@ type pat_style = FunParam | MatchArm
             Output.concat (from_string ", ") (List.init arity (fun _ -> from_string "_"))
           | _ -> def_pattern p
         in
-        let pat_out = match p.term with
+        let pat_out = with_binder_scope [e] (fun () -> match p.term with
           | P_paren (_, p', _) -> unwrap_tup p'
-          | _ -> unwrap_tup p
+          | _ -> unwrap_tup p)
         in
         flatten_newlines (Output.flat [
           from_string "| "; pat_out; from_string " => "; body
@@ -8397,17 +8464,19 @@ type pat_style = FunParam | MatchArm
         | P_var v ->
             (match style with
             | FunParam ->
-              let name = lskips_t_to_output v in
+              let name = match binder_underscore v with
+                | Some s -> from_string s
+                | None -> lskips_t_to_output v in
               let t = C.t_to_src_t p.typ in
               Output.flat [from_string "("; name; from_string " : "; pat_typ t; from_string ")"]
             | MatchArm ->
-              name_var_output v)
+              binder_name_output v)
         | P_lit l ->
             (match style, l.term with
             | FunParam, L_unit _ -> from_string "(_ : Unit)"
             | _ -> literal l)
         | P_as (skips, p, skips', (n, l), skips'') ->
-          let name = name_var_output n in
+          let name = binder_name_output n in
             Output.flat [
               ws skips; name; from_string "@("; self p; from_string ")"; ws skips''
             ]
@@ -8448,10 +8517,12 @@ type pat_style = FunParam | MatchArm
         | P_var_annot (n, t) ->
             (match style with
             | FunParam ->
-              let name = lskips_t_to_output n in
+              let name = match binder_underscore n with
+                | Some s -> from_string s
+                | None -> lskips_t_to_output n in
               Output.flat [from_string "("; name; from_string " : "; pat_typ t; from_string ")"]
             | MatchArm ->
-              name_var_output n)
+              binder_name_output n)
         | P_list (skips, ps, skips') ->
           let body = flat @@ Seplist.to_sep_list_last Seplist.Optional self (sep @@ from_string ", ") ps in
             Output.flat [
@@ -8507,6 +8578,87 @@ type pat_style = FunParam | MatchArm
               ]
     and fun_pattern p = pattern ~style:FunParam p
     and def_pattern p = pattern ~style:MatchArm p
+    (* ===== The unreferenced-binder rule (TODO item 54) =====
+       Lean's `linter.unusedVariables` warns on every pattern variable or
+       parameter bound by name and not referenced in its scope. The
+       renderer binds such a variable under its source name with a leading
+       underscore (`_err`, never a bare `_`: the name stays greppable
+       against the lem and the OCaml, and the linter accepts the prefix as
+       the declared intent). The decision is the typed AST's, never the
+       text's: a binding form renders its patterns under with_binder_scope
+       with the expressions in whose scope the variables are bound (a
+       match arm's body, a lambda's body, a let's body, a def clause's
+       body, the later lines of a do block, …); the referenced names are
+       the free variables of those expressions (C.exp_to_free —
+       substitutions resolved, shadowing respected) plus the names that
+       emitted text outside the AST refers to: the designated structural
+       parameter (St.keep_binders; the termination_by clause names it), a
+       reader_seed def's seed parameters (St.reader_seed_param; injected
+       at call sites by name), the hoisted function-tail binders
+       (St.tail_sentinel_args) and every identifier of a fuel sentinel's
+       text (St.fuel_emit; both are applied in the worker's exhaustion
+       arm). A binder referenced only from text the backend renders apart
+       from the body but derives from it (a hoisted let, a `lemLetRhs_`
+       helper, the fuel wrapper's call of the worker, the measure
+       obligation) is a free variable of the body or is passed
+       positionally, so the rule is exact there. The scope is installed
+       around the pattern rendering only (patterns contain no
+       expressions), so a nested binding form in the body never sees an
+       enclosing scope; a pattern rendered with no scope installed
+       (binder_refs = None) keeps every name — the fail-safe direction (a
+       kept name is at most a warning; a wrongly underscored one is an
+       unknown identifier at the Lean build, never a silent change). Not
+       applied while a definition renders as a block comment (dead text
+       keeps the source spelling), to a wildcard (already `_`), or when
+       the underscored name would fall into the backend's reserved
+       `_lem…` namespace (a lem variable `lemReader_x` stays as written:
+       `_lemReader_x` could shadow an injected reader binder in the body). *)
+    and with_binder_refs (refs : NameSet.t) (render : unit -> Output.t) : Output.t =
+      if !St.rendering_comment then render ()
+      else begin
+        let saved = !St.binder_refs in
+        St.binder_refs := Some refs;
+        Fun.protect ~finally:(fun () -> St.binder_refs := saved) render
+      end
+    and with_binder_scope (scope : exp list) (render : unit -> Output.t) : Output.t =
+      if !St.rendering_comment then render ()
+      else begin
+        let refs = List.fold_left (fun acc e ->
+            Nfmap.fold (fun acc n _ -> NameSet.add n acc) acc (C.exp_to_free e))
+          NameSet.empty scope in
+        let sentinel_idents = match !St.fuel_emit with
+          | None -> []
+          | Some s -> List.filter_map (function
+              | LM_ident id -> Some (List.hd (String.split_on_char '.' id))
+              | LM_num _ | LM_other _ -> None) (lean_measure_tokens s) in
+        let kept =
+          !St.keep_binders
+          @ (match !St.reader_seed_param with Some l -> List.map snd l | None -> [])
+          @ !St.tail_sentinel_args
+          @ sentinel_idents in
+        let refs = List.fold_left (fun acc s -> NameSet.add (Name.from_string s) acc) refs kept in
+        with_binder_refs refs render
+      end
+    (* The binder's rendered name when the rule underscores it; None when
+       it is referenced, kept, or no scope is installed — the caller then
+       renders the source name as before. *)
+    and binder_underscore (v : Name.lskips_t) : string option =
+      match !St.binder_refs with
+      | Some refs when not (NameSet.mem (Name.strip_lskip v) refs) ->
+        let s = String.concat "" ["_"; Name.to_string (Name.strip_lskip v)] in
+        (* the binder namespaces the backend synthesizes inside a body
+           (reader parameters, supply binders and values, the if-chain
+           continuations): a lem variable spelled like one of them keeps
+           its name (at most a warning) rather than shadow the synthesized
+           binder's injection sites (a silent wrong value) *)
+        if List.exists (fun pre -> lean_starts_with pre s)
+             ["_lemReader_"; "_lemSupply"; "_lemIfTail"]
+        then None else Some s
+      | _ -> None
+    and binder_name_output (v : Name.lskips_t) : Output.t =
+      match binder_underscore v with
+      | Some s -> Output.flat [ws (Name.get_lskip v); from_string s]
+      | None -> name_var_output v
     and src_t_has_fn (t : src_t) : bool =
       match t.term with
         | Typ_fn _ -> true
@@ -9371,9 +9523,11 @@ type pat_style = FunParam | MatchArm
         | Typ_paren (_, src_t, _)
         | Typ_with_sort (src_t, _) -> recurse src_t
         | Typ_fn (dom, _, rng) ->
-            let v = generate_fresh_name () in
+            (* the constant function: its parameter is never referenced,
+               so it is the wildcard (a named binder here was one of TODO
+               item 54's warnings) *)
             Output.flat [
-              from_string "(fun ("; from_string v; from_string " : "; pat_typ dom;
+              from_string "(fun (_ : "; pat_typ dom;
               from_string ") => "; recurse rng; from_string ")"
             ]
     and generate_default_value_texp (t: texp) =
@@ -9936,8 +10090,11 @@ type pat_style = FunParam | MatchArm
         (* Helper-def machinery: one specialized def per (kind, container
            type), memoized per block, emitted inside the same mutual block
            (classical structural recursion — the CerbStepInstances
-           beqLoadedValueList pattern, generated). *)
-        let helper_defs : string list ref = ref [] in
+           beqLoadedValueList pattern, generated). Every def of the block
+           is (Lean name, text without a termination clause, the block
+           members it calls): the clause is attached at assembly to the
+           members that recurse (lean_block_recursive). *)
+        let helper_defs : (string * string * string list) list ref = ref [] in
         let helper_memo : (string, string) Hashtbl.t = Hashtbl.create 16 in
         let helper_ctr = ref 0 in
         let first_name = match derived with (_, nm, _, _) :: _ -> nm | [] -> assert false in
@@ -9997,6 +10154,15 @@ type pat_style = FunParam | MatchArm
             | lf :: rest ->
               Printf.sprintf "(match %s with | .lt => Ordering.lt | .gt => Ordering.gt | .eq => %s)"
                 (cmp_leaf lf) (cmp_chain rest)
+        (* The block members these leaves call (the call graph behind the
+           termination_by decision); run AFTER the leaves' text, so helper
+           numbering follows the text's demand order. *)
+        and leaf_callees (kind : string) (leaves : (string * string * cmp_shape) list) : string list =
+          List.filter_map (fun (_, _, sh) -> match sh with
+            | CSsibling nm ->
+              Some (String.concat "" [nm; (if kind = "beq" then ".beq_derived" else ".compare_derived")])
+            | CSlist _ | CSoption _ | CSsum _ -> Some (helper kind sh)
+            | CSleaf | CSfn | CStuple _ | CSbad _ -> None) leaves
         (* Named helper for a container shape; generated on first demand. *)
         and helper (kind : string) (sh : cmp_shape) : string =
           let key = String.concat "" [kind; "|"; (match sh with
@@ -10014,60 +10180,71 @@ type pat_style = FunParam | MatchArm
               (* Elements destructure via build_pats, so tuple-shaped
                  elements (e.g. List ((pattern × pexpr))) compare
                  componentwise inside the helper's own arm. *)
+              (* (x-pattern, y-pattern, body text, the members the body
+                 calls); the text first, then the callees (memoized) *)
               let elem kind0 esh =
                 let ctr = ref 0 in
                 let (px, py, leaves) = build_pats ctr esh in
-                (px, py, (if kind0 = "beq" then beq_conj leaves else cmp_chain leaves))
+                let body = if kind0 = "beq" then beq_conj leaves else cmp_chain leaves in
+                (px, py, body, leaf_callees kind0 leaves)
               in
-              let def_text =
+              (* a list helper recurses on its own tail; the option and sum
+                 helpers only call their element's members *)
+              let (def_text, callees) =
                 match sh, kind with
                   | CSlist (et, esh), "beq" ->
                     let ety = lean_typ_render et in
-                    let (px, py, body) = elem "beq" esh in
-                    Printf.sprintf
-                      "def %s%s (cmpx_ cmpy_ : List (%s)) : Bool := match cmpx_, cmpy_ with\n  | [], [] => true\n  | %s :: xs0, %s :: ys0 => %s && %s xs0 ys0\n  | _, _ => false\ntermination_by structural cmpx_"
+                    let (px, py, body, cs) = elem "beq" esh in
+                    (Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : List (%s)) : Bool := match cmpx_, cmpy_ with\n  | [], [] => true\n  | %s :: xs0, %s :: ys0 => %s && %s xs0 ys0\n  | _, _ => false"
                       nm (tv_binders_of [et] "BEq") ety
-                      px py body nm
+                      px py body nm,
+                     nm :: cs)
                   | CSlist (et, esh), "cmp" ->
                     let ety = lean_typ_render et in
-                    let (px, py, body) = elem "cmp" esh in
-                    Printf.sprintf
-                      "def %s%s (cmpx_ cmpy_ : List (%s)) : Ordering := match cmpx_, cmpy_ with\n  | [], [] => Ordering.eq\n  | [], _ :: _ => Ordering.lt\n  | _ :: _, [] => Ordering.gt\n  | %s :: xs0, %s :: ys0 => (match %s with | .lt => Ordering.lt | .gt => Ordering.gt | .eq => %s xs0 ys0)\ntermination_by structural cmpx_"
+                    let (px, py, body, cs) = elem "cmp" esh in
+                    (Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : List (%s)) : Ordering := match cmpx_, cmpy_ with\n  | [], [] => Ordering.eq\n  | [], _ :: _ => Ordering.lt\n  | _ :: _, [] => Ordering.gt\n  | %s :: xs0, %s :: ys0 => (match %s with | .lt => Ordering.lt | .gt => Ordering.gt | .eq => %s xs0 ys0)"
                       nm (tv_binders_of [et] "Ord") ety
-                      px py body nm
+                      px py body nm,
+                     nm :: cs)
                   | CSoption (et, esh), "beq" ->
                     let ety = lean_typ_render et in
-                    let (px, py, body) = elem "beq" esh in
-                    Printf.sprintf
-                      "def %s%s (cmpx_ cmpy_ : Option (%s)) : Bool := match cmpx_, cmpy_ with\n  | none, none => true\n  | some %s, some %s => %s\n  | _, _ => false\ntermination_by structural cmpx_"
+                    let (px, py, body, cs) = elem "beq" esh in
+                    (Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : Option (%s)) : Bool := match cmpx_, cmpy_ with\n  | none, none => true\n  | some %s, some %s => %s\n  | _, _ => false"
                       nm (tv_binders_of [et] "BEq") ety
-                      px py body
+                      px py body,
+                     cs)
                   | CSoption (et, esh), "cmp" ->
                     let ety = lean_typ_render et in
-                    let (px, py, body) = elem "cmp" esh in
-                    Printf.sprintf
-                      "def %s%s (cmpx_ cmpy_ : Option (%s)) : Ordering := match cmpx_, cmpy_ with\n  | none, none => Ordering.eq\n  | none, some _ => Ordering.lt\n  | some _, none => Ordering.gt\n  | some %s, some %s => %s\ntermination_by structural cmpx_"
+                    let (px, py, body, cs) = elem "cmp" esh in
+                    (Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : Option (%s)) : Ordering := match cmpx_, cmpy_ with\n  | none, none => Ordering.eq\n  | none, some _ => Ordering.lt\n  | some _, none => Ordering.gt\n  | some %s, some %s => %s"
                       nm (tv_binders_of [et] "Ord") ety
-                      px py body
+                      px py body,
+                     cs)
                   | CSsum ((lt_, shl), (rt_, shr)), "beq" ->
                     let lty = lean_typ_render lt_ and rty = lean_typ_render rt_ in
-                    let (plx, ply, lbody) = elem "beq" shl in
-                    let (prx, pry, rbody) = elem "beq" shr in
-                    Printf.sprintf
-                      "def %s%s (cmpx_ cmpy_ : Sum (%s) (%s)) : Bool := match cmpx_, cmpy_ with\n  | Sum.inl %s, Sum.inl %s => %s\n  | Sum.inr %s, Sum.inr %s => %s\n  | _, _ => false\ntermination_by structural cmpx_"
+                    let (plx, ply, lbody, lcs) = elem "beq" shl in
+                    let (prx, pry, rbody, rcs) = elem "beq" shr in
+                    (Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : Sum (%s) (%s)) : Bool := match cmpx_, cmpy_ with\n  | Sum.inl %s, Sum.inl %s => %s\n  | Sum.inr %s, Sum.inr %s => %s\n  | _, _ => false"
                       nm (tv_binders_of [lt_; rt_] "BEq") lty rty
-                      plx ply lbody prx pry rbody
+                      plx ply lbody prx pry rbody,
+                     lcs @ rcs)
                   | CSsum ((lt_, shl), (rt_, shr)), "cmp" ->
                     let lty = lean_typ_render lt_ and rty = lean_typ_render rt_ in
-                    let (plx, ply, lbody) = elem "cmp" shl in
-                    let (prx, pry, rbody) = elem "cmp" shr in
-                    Printf.sprintf
-                      "def %s%s (cmpx_ cmpy_ : Sum (%s) (%s)) : Ordering := match cmpx_, cmpy_ with\n  | Sum.inl %s, Sum.inl %s => %s\n  | Sum.inl _, Sum.inr _ => Ordering.lt\n  | Sum.inr _, Sum.inl _ => Ordering.gt\n  | Sum.inr %s, Sum.inr %s => %s\ntermination_by structural cmpx_"
+                    let (plx, ply, lbody, lcs) = elem "cmp" shl in
+                    let (prx, pry, rbody, rcs) = elem "cmp" shr in
+                    (Printf.sprintf
+                      "def %s%s (cmpx_ cmpy_ : Sum (%s) (%s)) : Ordering := match cmpx_, cmpy_ with\n  | Sum.inl %s, Sum.inl %s => %s\n  | Sum.inl _, Sum.inr _ => Ordering.lt\n  | Sum.inr _, Sum.inl _ => Ordering.gt\n  | Sum.inr %s, Sum.inr %s => %s"
                       nm (tv_binders_of [lt_; rt_] "Ord") lty rty
-                      plx ply lbody prx pry rbody
+                      plx ply lbody prx pry rbody,
+                     lcs @ rcs)
                   | _ -> assert false
               in
-              helper_defs := def_text :: !helper_defs;
+              helper_defs := (nm, def_text, callees) :: !helper_defs;
               nm
         in
         (* Signature pieces per type. *)
@@ -10097,7 +10274,8 @@ type pat_style = FunParam | MatchArm
             "/- lem: constructor rank for OCaml's polymorphic compare: nullary\n   constructors (immediates) sort below non-nullary ones (blocks);\n   declaration order within each group. -/\ndef %s.ctor_rank_ocaml%s : %s%s → Nat\n%s"
             type_name binders type_name args (String.concat "\n" arms)
         in
-        let beq_def (type_name, tnvar_list, bounds, ctors) : string =
+        (* (Lean name, text without a termination clause, callees) *)
+        let beq_def (type_name, tnvar_list, bounds, ctors) : string * string * string list =
           let (binders, args) = sig_of tnvar_list bounds "BEq" in
           let arms = List.map (fun (cn, argtys) ->
             let ctr = ref 0 in
@@ -10106,13 +10284,16 @@ type pat_style = FunParam | MatchArm
             let py = String.concat " " (List.map (fun (_, b, _) -> b) parts) in
             let leaves = List.concat_map (fun (_, _, ls) -> ls) parts in
             let sp = if argtys = [] then "" else " " in
-            Printf.sprintf "  | .%s%s%s, .%s%s%s => %s" cn sp px cn sp py (beq_conj leaves)) ctors in
+            let arm = Printf.sprintf "  | .%s%s%s, .%s%s%s => %s" cn sp px cn sp py (beq_conj leaves) in
+            (arm, leaf_callees "beq" leaves)) ctors in
           let fallback = if List.length ctors > 1 then ["  | _, _ => false"] else [] in
-          Printf.sprintf "def %s.beq_derived%s (cmpx_ cmpy_ : %s%s) : Bool := match cmpx_, cmpy_ with\n%s\ntermination_by structural cmpx_"
-            type_name binders type_name args
-            (String.concat "\n" (arms @ fallback))
+          (String.concat "" [type_name; ".beq_derived"],
+           Printf.sprintf "def %s.beq_derived%s (cmpx_ cmpy_ : %s%s) : Bool := match cmpx_, cmpy_ with\n%s"
+             type_name binders type_name args
+             (String.concat "\n" (List.map fst arms @ fallback)),
+           List.concat_map snd arms)
         in
-        let cmp_def (type_name, tnvar_list, bounds, ctors) : string =
+        let cmp_def (type_name, tnvar_list, bounds, ctors) : string * string * string list =
           let (binders, args) = sig_of tnvar_list bounds "Ord" in
           let arms = List.filter_map (fun (cn, argtys) ->
             if argtys = [] then None  (* nullary pairs: rank fallback yields .eq *)
@@ -10122,15 +10303,18 @@ type pat_style = FunParam | MatchArm
               let px = String.concat " " (List.map (fun (a, _, _) -> a) parts) in
               let py = String.concat " " (List.map (fun (_, b, _) -> b) parts) in
               let leaves = List.concat_map (fun (_, _, ls) -> ls) parts in
-              Some (Printf.sprintf "  | .%s %s, .%s %s => %s" cn px cn py (cmp_chain leaves))
+              let arm = Printf.sprintf "  | .%s %s, .%s %s => %s" cn px cn py (cmp_chain leaves) in
+              Some (arm, leaf_callees "cmp" leaves)
             end) ctors in
           let fallback =
             if List.length ctors > 1 then
               [Printf.sprintf "  | xg, yg => Ord.compare (%s.ctor_rank_ocaml xg) (%s.ctor_rank_ocaml yg)" type_name type_name]
             else [] in
-          Printf.sprintf "def %s.compare_derived%s (cmpx_ cmpy_ : %s%s) : Ordering := match cmpx_, cmpy_ with\n%s\ntermination_by structural cmpx_"
-            type_name binders type_name args
-            (String.concat "\n" (arms @ fallback))
+          (String.concat "" [type_name; ".compare_derived"],
+           Printf.sprintf "def %s.compare_derived%s (cmpx_ cmpy_ : %s%s) : Ordering := match cmpx_, cmpy_ with\n%s"
+             type_name binders type_name args
+             (String.concat "\n" (List.map fst arms @ fallback)),
+           List.concat_map snd arms)
         in
         (* Render: rank defs (non-recursive, before the block), then the
            mutual block. Type-def bodies are rendered FIRST so helper
@@ -10141,7 +10325,14 @@ type pat_style = FunParam | MatchArm
           [beq_def (nm, tvs, bounds, ctors); cmp_def (nm, tvs, bounds, ctors)]) per_type in
         let rank_defs_text = List.filter_map (fun (_, nm, tvs, _, ctors) ->
           if List.length ctors > 1 then Some (rank_def nm tvs ctors) else None) per_type in
+        (* `termination_by structural cmpx_` on exactly the members that
+           recurse (a self-call or a cycle through the block): Lean warns
+           on the clause of a member outside every cycle *)
         let all_mutual = type_defs_text @ List.rev !helper_defs in
+        let all_mutual = List.map (fun (nm, body, _) ->
+            if lean_block_recursive all_mutual nm
+            then String.concat "" [body; "\ntermination_by structural cmpx_"]
+            else body) all_mutual in
         let text = String.concat "" [
           "\n/- lem: equality and comparison for these types, matching OCaml's\n";
           "   polymorphic (=) and compare: structural equality; nullary constructors\n";
@@ -10160,8 +10351,10 @@ type pat_style = FunParam | MatchArm
        member type and `<first>.lemSize_aux<k>` per container element
        shape (list/option/sum, memoized per block) — the derived-comparison
        machinery's shape, `termination_by structural` on every member that
-       makes a block call (a member with none is a plain def: Lean warns
-       on an unused clause). The census (lean_size_block) and this emitter
+       recurses — a self-call or a cycle through other members
+       (lean_block_recursive); a member outside every cycle is a plain
+       def, Lean warns on an unused clause there, a member that only
+       calls into a cycle included. The census (lean_size_block) and this emitter
        run the same analysis on the same block, so `lemSize x` in a
        measure resolves exactly to what is emitted. *)
     and generate_lem_size ts_list : Output.t =
@@ -10196,7 +10389,10 @@ type pat_style = FunParam | MatchArm
                         fnm tnm tnm tnm))) (Seplist.to_list fields)
             | _ -> ()) ts_list;
         let first_name = match members with (_, nm, _, _) :: _ -> nm | [] -> assert false in
-        let helper_defs : string list ref = ref [] in
+        (* every def of the block: (Lean name, text without a termination
+           clause, the block members it calls) — the clause is attached at
+           assembly to the members that recurse (lean_block_recursive) *)
+        let helper_defs : (string * string * string list) list ref = ref [] in
         let helper_memo : (string, string) Hashtbl.t = Hashtbl.create 16 in
         let helper_ctr = ref 0 in
         let tv_binders_of (tys : Types.t list) : string =
@@ -10209,18 +10405,23 @@ type pat_style = FunParam | MatchArm
               | Types.Nv _ -> Printf.sprintf "{%s : Nat}" nm)
             (Types.TNset.elements fvs) in
           (match bs with [] -> "" | _ -> merge_implicit_binders (String.concat "" [" "; String.concat " " bs])) in
-        (* pattern for one field + the size terms its subterms contribute *)
-        let rec build (ctr : int ref) (sh : cmp_shape) : string * string list =
+        (* pattern for one field + the size terms its subterms contribute
+           + the block members those terms call *)
+        let rec build (ctr : int ref) (sh : cmp_shape) : string * string list * string list =
           match sh with
-            | CSleaf -> ("_", [])
+            | CSleaf -> ("_", [], [])
             | CStuple shs ->
               let parts = List.map (build ctr) shs in
-              (Printf.sprintf "(%s)" (String.concat ", " (List.map fst parts)),
-               List.concat_map snd parts)
+              (Printf.sprintf "(%s)" (String.concat ", " (List.map (fun (p, _, _) -> p) parts)),
+               List.concat_map (fun (_, ts, _) -> ts) parts,
+               List.concat_map (fun (_, _, cs) -> cs) parts)
             | CSsibling nm ->
-              incr ctr; let x = Printf.sprintf "x%d" !ctr in (x, [Printf.sprintf "%s.lemSize %s" nm x])
+              incr ctr; let x = Printf.sprintf "x%d" !ctr in
+              (x, [Printf.sprintf "%s.lemSize %s" nm x], [String.concat "" [nm; ".lemSize"]])
             | CSlist _ | CSoption _ | CSsum _ ->
-              incr ctr; let x = Printf.sprintf "x%d" !ctr in (x, [Printf.sprintf "%s %s" (helper sh) x])
+              incr ctr; let x = Printf.sprintf "x%d" !ctr in
+              let h = helper sh in
+              (x, [Printf.sprintf "%s %s" h x], [h])
             | CSbad _ | CSfn ->
               (* lean_size_shape never produces either (a function-typed
                  field is a leaf of size 0 there) *)
@@ -10240,49 +10441,62 @@ type pat_style = FunParam | MatchArm
               incr helper_ctr;
               let nm = Printf.sprintf "%s.lemSize_aux%d" first_name !helper_ctr in
               Hashtbl.add helper_memo key nm;
-              let def_text =
+              (* a list helper recurses on its own tail; the option and sum
+                 helpers only call their element's members *)
+              let (def_text, callees) =
                 match sh with
                   | CSlist (et, esh) ->
-                    let (px, terms) = build (ref 0) esh in
-                    Printf.sprintf
-                      "def %s%s (sizex_ : List (%s)) : Nat := match sizex_ with\n  | [] => 0\n  | %s :: xs0 => 1%s + %s xs0\ntermination_by structural sizex_"
-                      nm (tv_binders_of [et]) (lean_typ_render et) px (sum_terms terms) nm
+                    let (px, terms, cs) = build (ref 0) esh in
+                    (Printf.sprintf
+                      "def %s%s (sizex_ : List (%s)) : Nat := match sizex_ with\n  | [] => 0\n  | %s :: xs0 => 1%s + %s xs0"
+                      nm (tv_binders_of [et]) (lean_typ_render et) px (sum_terms terms) nm,
+                     nm :: cs)
                   | CSoption (et, esh) ->
-                    let (px, terms) = build (ref 0) esh in
-                    Printf.sprintf
-                      "def %s%s (sizex_ : Option (%s)) : Nat := match sizex_ with\n  | none => 0\n  | some %s => 1%s\ntermination_by structural sizex_"
-                      nm (tv_binders_of [et]) (lean_typ_render et) px (sum_terms terms)
+                    let (px, terms, cs) = build (ref 0) esh in
+                    (Printf.sprintf
+                      "def %s%s (sizex_ : Option (%s)) : Nat := match sizex_ with\n  | none => 0\n  | some %s => 1%s"
+                      nm (tv_binders_of [et]) (lean_typ_render et) px (sum_terms terms),
+                     cs)
                   | CSsum ((lt_, shl), (rt_, shr)) ->
-                    let (plx, lterms) = build (ref 0) shl in
-                    let (prx, rterms) = build (ref 0) shr in
-                    Printf.sprintf
-                      "def %s%s (sizex_ : Sum (%s) (%s)) : Nat := match sizex_ with\n  | Sum.inl %s => 1%s\n  | Sum.inr %s => 1%s\ntermination_by structural sizex_"
+                    let (plx, lterms, lcs) = build (ref 0) shl in
+                    let (prx, rterms, rcs) = build (ref 0) shr in
+                    (Printf.sprintf
+                      "def %s%s (sizex_ : Sum (%s) (%s)) : Nat := match sizex_ with\n  | Sum.inl %s => 1%s\n  | Sum.inr %s => 1%s"
                       nm (tv_binders_of [lt_; rt_]) (lean_typ_render lt_) (lean_typ_render rt_)
-                      plx (sum_terms lterms) prx (sum_terms rterms)
+                      plx (sum_terms lterms) prx (sum_terms rterms),
+                     lcs @ rcs)
                   | _ -> assert false in
-              helper_defs := def_text :: !helper_defs;
+              helper_defs := (nm, def_text, callees) :: !helper_defs;
               nm
         in
-        let size_def (type_name, tnvar_list, ctors) : string =
+        (* (Lean name, text without a termination clause, callees) *)
+        let size_def (type_name, tnvar_list, ctors) : string * string * string list =
           let binders = String.concat "" (List.map (fun tv ->
               Printf.sprintf " {%s : %s}" (tnvar_to_string tv) (tnvar_kind tv)) tnvar_list) in
           let args = String.concat "" (List.map (fun tv -> String.concat "" [" "; tnvar_to_string tv]) tnvar_list) in
-          let recursive_here = ref false in
           let arms = List.map (fun (cn, argtys) ->
               let ctr = ref 0 in
               let parts = List.map (fun ty -> build ctr (shape_of ty)) argtys in
-              let terms = List.concat_map snd parts in
-              if terms <> [] then recursive_here := true;
+              let terms = List.concat_map (fun (_, ts, _) -> ts) parts in
               let sp = if argtys = [] then "" else " " in
-              Printf.sprintf "  | .%s%s%s => 1%s" cn sp (String.concat " " (List.map fst parts)) (sum_terms terms))
+              (Printf.sprintf "  | .%s%s%s => 1%s" cn sp
+                 (String.concat " " (List.map (fun (p, _, _) -> p) parts)) (sum_terms terms),
+               List.concat_map (fun (_, _, cs) -> cs) parts))
             ctors in
-          Printf.sprintf "def %s.lemSize%s (sizex_ : %s%s) : Nat := match sizex_ with\n%s%s"
-            type_name binders type_name args (String.concat "\n" arms)
-            (if !recursive_here then "\ntermination_by structural sizex_" else "")
+          (String.concat "" [type_name; ".lemSize"],
+           Printf.sprintf "def %s.lemSize%s (sizex_ : %s%s) : Nat := match sizex_ with\n%s"
+             type_name binders type_name args (String.concat "\n" (List.map fst arms)),
+           List.concat_map snd arms)
         in
-        (* type defs first (they populate the helper demand), helpers after *)
+        (* type defs first (they populate the helper demand), helpers after;
+           `termination_by structural sizex_` on exactly the members that
+           recurse *)
         let type_defs_text = List.map (fun (_, nm, tvs, ctors) -> size_def (nm, tvs, ctors)) members in
         let all_defs = type_defs_text @ List.rev !helper_defs in
+        let all_defs = List.map (fun (nm, body, _) ->
+            if lean_block_recursive all_defs nm
+            then String.concat "" [body; "\ntermination_by structural sizex_"]
+            else body) all_defs in
         let body = String.concat "\n" all_defs in
         let text = String.concat "" [
           "\n/- lem: computable structural size `lemSize x`, for fuel measures: one\n";

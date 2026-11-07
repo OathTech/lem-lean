@@ -3,6 +3,12 @@ open Lake DSL
 
 package LemLib where
   version := v!"0.1.0"
+  -- Warnings are build failures (TODO item 54, 2026-11-07): the generated
+  -- library and the hand-written modules compile at zero warnings; a
+  -- warning that cannot be removed for a project-level reason is
+  -- suppressed at its one declaration with the reason, and listed in
+  -- doc/lean-backend/README.md (expected: none).
+  moreLeanArgs := #["-DwarningAsError=true"]
 
 @[default_target]
 lean_lib LemLib where

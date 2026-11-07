@@ -36,7 +36,7 @@ open Lem_Assert_extra
 
 def head { a : Type } [Inhabited a] (l : List a) : a :=
   match l with
-  | x :: xs => x
+  | x :: _xs => x
   | [] => (failwithI "List_extra.head of empty list" : a)
 /- ------------------------- -/
 /- tail of non-empty list    -/
@@ -44,7 +44,7 @@ def head { a : Type } [Inhabited a] (l : List a) : a :=
 
 def tail { a : Type } (l : List a) : List a :=
   match l with
-  | x :: xs => xs
+  | _x :: xs => xs
   | [] => (failwithI "List_extra.tail of empty list" : List a)
 /- ------------------------- -/
 /- last                      -/

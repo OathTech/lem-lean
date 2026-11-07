@@ -194,7 +194,7 @@ def bitSeqFromInteger (len_opt : Option Nat) (i : Int) : bitSequence :=
   | (s, bl) => resizeBitSeq len_opt (BitSeq none s bl)
 def integerFromBitSeq (bs : bitSequence) : Int :=
   match cleanBitSeq bs with
-  | (BitSeq len s bl) => integerFromBoolList (s, bl)
+  | (BitSeq _len s bl) => integerFromBoolList (s, bl)
 /- Now we can via translation to integers map arithmetic operations to bitSequences -/
 
 def bitSeqArithUnaryOp (uop : Int → Int) (bs : bitSequence) : bitSequence :=

@@ -37,7 +37,7 @@ export Size (size)
 inductive itself (a : Type) : Type where
 open itself
 
-def size_itself { a : Type } [Size a] (x : itself a) : Nat := (@size a _)
+def size_itself { a : Type } [Size a] (_x : itself a) : Nat := (@size a _)
 
 /- ***************************************************************** -/
 /- Fixed bitwidths extracted from Anthony's models.                -/
