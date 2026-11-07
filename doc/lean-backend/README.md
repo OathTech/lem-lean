@@ -290,9 +290,13 @@ same-typed swaps need value tests (see DESIGN).
   pinned panic-path check (a reached panic aborts under
   `LEAN_ABORT_ON_PANIC=1`; the suite also checks default-return behavior without it), and a negative suite (programs the
   backend must *reject*, rejected for the declared reason).
-- Warnings are build failures: `lean-lib` and the suite's `lean-test` package
-  pass `-DwarningAsError=true` (both lakefiles), so a `lake build` that
-  completes is at zero warnings. A warning that cannot be removed for a
+- Warnings are build failures in the two packages the gates build:
+  `lean-lib/lakefile.lean` and `tests/comprehensive/lean-test/lakefile.lean`
+  pass `-DwarningAsError=true`, so a `lake build` of either that completes
+  is at zero warnings. The repository's other three lakefiles are outside
+  the rule and outside every gate: `tests/backends/lean-test` (red before
+  its build, TODO item 56) and the historical `examples/cpp` and
+  `examples/ppcmem-model`. A warning that cannot be removed for a
   project-level reason is suppressed at its one declaration with the reason
   stated there and listed here — currently none.
 - `cd lean-lib && ../scripts/capped lake build` — the runtime plus `LemLibTest.lean`

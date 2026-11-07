@@ -185,3 +185,51 @@ dance would have to undo. Land after: F1 fixed with its probe and the four docum
 (601/75/147), F2's recipe step added, the suite re-gated (`make -C tests/comprehensive lean` and the LemLib
 build under the flag, last lines quoted). F3–F7 may follow in the same fix round or be recorded as open in the
 record's §9.
+
+## Dispositions (worker [AGENT], 2026-11-07; the code fix is commit `c846d39`, the documents this commit)
+
+- **F1 — fixed.** `binder_underscore` leaves a source name already starting with `_` as it is (`src/lean_backend.ml`,
+  the guard before the synthesized-namespace check). Probes in `tests/comprehensive/test_unreferenced_binders.lem`:
+  `keep_us (_x : nat) (y : nat) = y` → `def keep_us (_x : Nat) (y : Nat) : Nat := y`, `use_us (_x : nat) = _x + 1` →
+  `def use_us (_x : Nat) : Nat := _x + 1`, `arm_us` → `| some _v => 0`; `check_unreferenced_binders.py` pins the three
+  lines (U1) and adds U2, no identifier in the module's code starting `__` (plant: a `__v` edited into an arm fails
+  U1 and U2); `TestUnreferencedBindersCheck.lean` pins `keep_us (_x := 1) (y := 2)` and `use_us (_x := 1)`. The
+  cerberus measurement redone with the fixed binary and joined against the stored warnings by module, line and
+  name: 601 renames + 75 Inhabited wildcards = 676, 147 clauses = 147, 0 double underscores, 0 unmatched either
+  way (record §4.2). The counts corrected in the record (§1, §4.1, §4.2, §9.1), the consumer note (§1, §3), the
+  TODO 54 row and the RECORDS row; §9.1's "a shape the linter does not report" withdrawn. LemLib regenerated and
+  unchanged (no such name in the library); `make lean-libs` left `git status` clean.
+- **F2 — fixed** in the consumer note's step 3: edit the `rev` of `lean_frontend/lakefile.toml`'s `[[require]]`
+  block for `LemLib` to the merged commit first, then `scripts/ce capped lake update LemLib` from each of the three
+  packages with a manifest (`lean_frontend/`, `lean_frontend/speclab/`, `tests/mem-scale-probes/micro/`; the latter
+  two carry the pin only in their manifests), with the reason for `scripts/ce` (the `deps/gitconfig` redirect;
+  Lake would try GitHub and fail offline) and `capped` stated.
+- **F3 — narrowed, not recorded.** `with_binder_scope` takes `~params`; the kept names (the structural parameter,
+  the seed parameters, the hoisted tail binders, the sentinel's identifiers) are added only at the three sites
+  where a clause head's parameters render (`funcl_aux`'s two assembly sites, `render_equation`); every pattern
+  inside a body is decided on the body alone. Why narrow: every text that names a kept name names a parameter,
+  so the wider set protected nothing, and the hole it left had no remedy under `-DwarningAsError=true` but a lem
+  rename; the change is three call sites. Both of the review's shapes are probes: `loop_arm` (a fuel'd def whose
+  sentinel names `tag`, with a nested arm binder `tag` → `| some _tag =>`, the worker's own `tag` kept) and `slen`
+  (`declare {lean} structural val`, a nested lambda binder `l` → `(fun (_l : List Nat) => 1)`, the clause
+  `termination_by structural l` kept), pinned in the checker and the Check file and compiled at zero warnings.
+  Record §2.1, §3 and §9.2 and DESIGN's paragraph say so; the `_lem…` guard is now the one remaining
+  standing-warning shape.
+- **F4 — restated honestly.** Record §4.1: 75 + 8 = 83 fixes against the 87 warnings of the 4.35 record, four
+  unaccounted for; the three double underscores named (`Test_target_reps.lean:55`, `Test_functions.lean:111`,
+  `Test_misc.lean:91`). Not reconciled from the base log: it is not available (the primary lem-lean checkout's
+  stored traces predate the 4.35 move, 2026-09-05, with the older message text), and a base rebuild for a P3 count
+  on a shared box was not made; the gate is the signal. Open in §9.1.
+- **F5 — fixed.** README ("How you check it") and DESIGN name the two lakefiles that carry the flag
+  (`lean-lib/lakefile.lean`, `tests/comprehensive/lean-test/lakefile.lean`) and say the other three are outside
+  the rule and every gate: `tests/backends/lean-test` (red before its build, TODO item 56), `examples/cpp` and
+  `examples/ppcmem-model` (historical). Not added there: none is a claim surface, and `tests/backends` cannot
+  build at all today. Record §9.5.
+- **F6 — fixed.** The record §4.2 and the consumer note's step 6 state the classification as token-level, say why
+  (the width-100 layout re-wraps lines one character longer), give the re-wrapped hunk count (13 by the worker's
+  heuristic, 15 by the reviewer's) and tell the re-pin slice to join each hunk's old and new lines and compare
+  tokens before filing anything.
+- **F7 — fixed.** The manual bullet is one sentence and a pointer to DESIGN's "What generated code looks like".
+
+Re-gated after the code fix (record §7.3, verbatim): LemLib under the flag, the full comprehensive suite, the
+cerberus OCaml byte-compare (86/86) and the Lean measurement.

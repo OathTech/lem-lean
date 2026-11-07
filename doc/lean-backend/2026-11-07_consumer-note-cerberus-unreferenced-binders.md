@@ -2,8 +2,9 @@
 
 Date 2026-11-07. Worker [AGENT]; for the cerberus re-pin slice the orchestrator charters after the three
 in-flight cerberus slices land. The lem-lean commits on `fix/unreferenced-binders` (base `b154377`): M1
-`4a2a72e` (the backend, LemLib, the gate flags), M2 `2d9b36f` (the probes, the measurement), M3 this commit
-(the record, the docs, this note); the commit to pin is the ff-merged mainline head after the operator's
+`4a2a72e` (the backend, LemLib, the gate flags), M2 `2d9b36f` (the probes, the measurement), M3 `5362006`
+(the record, the docs, this note), the pre-merge review `b8ba843` and its fix round `c846d39` (the code) plus
+the docs commit carrying this text; the commit to pin is the ff-merged mainline head after the operator's
 merge. The record: [2026-11-07_unreferenced-binders-record.md](2026-11-07_unreferenced-binders-record.md).
 
 ## 1. What changes for the consumer
@@ -11,10 +12,12 @@ merge. The record: [2026-11-07_unreferenced-binders-record.md](2026-11-07_unrefe
 - **Lean output only.** The generated OCaml is byte-identical (measured on the pinned sources: 86 of 86
   files, §3).
 - **The generated Lean tree:** 52 modules change, in exactly three shapes and nothing else (every hunk
-  classified): 147 `termination_by structural cmpx_`/`sizex_` lines removed (the derived comparison and
-  size definitions that do not recurse), 614 pattern variables and parameters renamed `_<name>` (the
-  source name kept under the underscore), 75 derived `Inhabited` constant-function binders `(fun (x<n> : T)
-  => …)` → `(fun (_ : T) => …)`. The per-module table is in §3.
+  classified at TOKEN level, §3): 147 `termination_by structural cmpx_`/`sizex_` lines removed (the derived
+  comparison and size definitions that do not recurse), 601 pattern variables and parameters renamed
+  `_<name>` (the source name kept under the underscore; a name already spelled `_x` is left as it is — no
+  identifier gains a second underscore), 75 derived `Inhabited` constant-function binders `(fun (x<n> : T)
+  => …)` → `(fun (_ : T) => …)`. These join the warnings Lake stored for the primary checkout's last build one
+  for one: 601 + 75 = 676, 147 = 147. The per-module table is in §3.
 - **Hand-written Lean:** none is expected to change. No hand-written file under `lean_frontend/`,
   `test/Unit/` or `speclab/` (171 files, read-only scan) passes a named argument to a parameter of a
   generated definition that the rule renamed; the fuel-forms tool finds `lemFuel`/`lemHyp` by NAME in the
@@ -33,19 +36,27 @@ merge. The record: [2026-11-07_unreferenced-binders-record.md](2026-11-07_unrefe
 1. From `cerberus-lean-proj/`: `git -C deps/lem-pinned reset --hard <merged lem-lean commit>`.
 2. From `cerberus-lean/`: `scripts/ce opam upgrade --switch=. --no-depexts lem` (the path form, the local
    switch; `--no-depexts` in the sandbox). `lem -v` must then show the new hash.
-3. The Lake pins: `lake update LemLib` in each of the three packages with a manifest —
-   `lean_frontend/lake-manifest.json`, `lean_frontend/speclab/lake-manifest.json`,
-   `tests/mem-scale-probes/micro/lake-manifest.json` (the `deps/gitconfig` redirect resolves `LemLib` to
-   the local lem-lean checkout; the `rev` in each manifest = the merged commit).
+3. The Lake pins. First edit the `rev` pinned in `lean_frontend/lakefile.toml`'s `[[require]]` block for
+   `LemLib` (today `rev = "e6d8db5680962f49060257d6c2bcb13c284b910f"`) to the merged commit — with the `rev`
+   pinned in the lakefile, `lake update` cannot move the manifest past it (review F2). Then, from each of
+   the three packages with a manifest — `lean_frontend/`, `lean_frontend/speclab/`,
+   `tests/mem-scale-probes/micro/` (the latter two carry no `rev` in their lakefiles, only in their
+   manifests) — run `scripts/ce capped lake update LemLib` (`scripts/ce` for the `deps/gitconfig` redirect
+   that resolves `LemLib` to the local lem-lean checkout — without it Lake tries GitHub and fails offline —
+   and `capped` as for every lake invocation); the `rev` in each `lake-manifest.json` must then be the merged
+   commit.
 4. `scripts/fork_drift_manifest.txt`: the `lem-pin` value = the full 40-hex merged commit (the fork-drift
    gate compares it as a prefix of `lem -v`).
 5. `scripts/ce make clean-prelude-src prelude-src lean-prelude-src` (the primary checkout follows the
    landing: regenerate from scratch, never over a stale tree).
 6. Confirm the expected delta before building: `git status --short ocaml_frontend/generated` empty (the
    OCaml is byte-identical); the Lean tree's diff against the pre-re-pin generation is §3's table and
-   nothing else (classify every hunk: a removed `termination_by structural (cmpx_|sizex_)` line, an
+   nothing else. Classify at TOKEN level, not line level (review F6): a `_` makes a binder one character
+   longer and the width-100 layout re-wraps lines, so a line diff shows re-flowed hunks (13–15 of them)
+   that are token-identical apart from the three shapes — join each hunk's old and new lines, tokenize,
+   and compare position by position: a removed `termination_by structural (cmpx_|sizex_)` line, an
    identifier that gained a leading underscore, or `x<n>` → `_` inside `fun (… : T) => default`; any
-   other hunk is a finding against this lem commit).
+   other token difference, or any identifier starting `__`, is a finding against this lem commit.
 7. Rebuild and gate: the OCaml side (`dune build backend/driver/main.exe cerberus-lib.install`, the
    install, `cerberus.install`), `capped lake build` in `lean_frontend/` and `speclab/`; the regenerated
    auxiliary modules import the hand-written measure proofs, which re-elaborate unchanged; run the named
@@ -74,13 +85,13 @@ Lean, 172 files generated (the reference set minus its 57 hand-written copies), 
 | `AilSyntax` | 4 | 0 | 0 |
 | `AilTypesAux` | 0 | 15 | 0 |
 | `AilTyping` | 0 | 1 | 0 |
-| `Annot` | 6 | 7 | 0 |
+| `Annot` | 6 | 3 | 0 |
 | `Cabs` | 8 | 0 | 0 |
 | `Cabs_to_ail` | 0 | 17 | 0 |
 | `Cabs_to_ail_aux` | 0 | 2 | 0 |
-| `Cabs_to_ail_effect` | 8 | 13 | 0 |
+| `Cabs_to_ail_effect` | 8 | 9 | 0 |
 | `Cmm_aux` | 0 | 1 | 0 |
-| `Cmm_csem` | 16 | 124 | 8 |
+| `Cmm_csem` | 16 | 120 | 8 |
 | `Cmm_op` | 0 | 22 | 0 |
 | `Cn` | 10 | 1 | 0 |
 | `Constraint` | 4 | 0 | 0 |
@@ -119,12 +130,12 @@ Lean, 172 files generated (the reference set minus its 57 hand-written copies), 
 | `Nondeterminism` | 5 | 9 | 1 |
 | `Scope_table` | 0 | 1 | 0 |
 | `Symbol` | 4 | 1 | 0 |
-| `Translation` | 2 | 25 | 0 |
+| `Translation` | 2 | 24 | 0 |
 | `Translation_aux` | 2 | 3 | 39 |
 | `TypingError` | 2 | 0 | 0 |
 | `Undefined` | 2 | 0 | 0 |
-| **total (52 modules)** | **147** (29 modules) | **614** (41 modules) | **75** (10 modules) |
+| **total (52 modules)** | **147** (29 modules) | **601** (41 modules) | **75** (10 modules) |
 
-The 147 clauses in 29 modules equal the warnings the charter counted in Lake's stored logs; the 689 binder
-changes exceed the 676 logged unreferenced-variable warnings by 13 with every differing module in the build —
-the re-pin's compile settles it (step 8).
+Every count joins the warnings Lake stored for the primary checkout's last build by module, line and name:
+147 clauses = the 147 inert-clause warnings (per module), 601 + 75 = the 676 unreferenced-variable warnings,
+nothing unmatched either way; the step-8 compile is the confirmation, not the resolution.

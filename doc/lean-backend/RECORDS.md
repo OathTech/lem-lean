@@ -170,9 +170,13 @@ describe a design that is no longer current.
   derived definitions that recurse (Lean's per-component rule, probed on
   4.35.0), the derived `Inhabited` constant function's binder a wildcard;
   the suite and LemLib at zero warnings, `-DwarningAsError=true` on both
-  packages; the cerberus expected delta (147 clauses, 689 binders in 52
-  modules, OCaml byte-identical) and the re-pin recipe in the
-  [consumer note](2026-11-07_consumer-note-cerberus-unreferenced-binders.md).
+  packages; the cerberus expected delta (147 clauses, 601 binders and 75
+  Inhabited wildcards in 52 modules — the stored warnings one for one; OCaml
+  byte-identical) and the re-pin recipe in the
+  [consumer note](2026-11-07_consumer-note-cerberus-unreferenced-binders.md);
+  the [pre-merge review](2026-11-07_unreferenced-binders-premerge-review.md)
+  (not as-is: F1, a name already spelled `_x` was prefixed again) with its
+  dispositions and the fix round.
 
 ## Correctness and fail-closed hardening
 
@@ -271,6 +275,12 @@ describe a design that is no longer current.
   failures), TODO.md (54 closed) and this index were updated for the
   [unreferenced-binders record](2026-11-07_unreferenced-binders-record.md),
   whose gate runs are quoted there.
+- 2026-11-07, after the pre-merge review of that branch: the record (§2.1,
+  §3, §4, §5, §7.3, §9, §11), the consumer note (§1–§3), TODO.md (the 54
+  row's counts), README.md and DESIGN.md (the two lakefiles that carry the
+  flag), the manual chapter (the bullet shortened to a pointer) and this
+  index were corrected per the review's dispositions, recorded in the
+  review file; the code fix and its gates are in the record §7.3.
 
 ## Elsewhere
 

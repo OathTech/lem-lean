@@ -62,22 +62,26 @@ termination_by structural l
 
 A pattern variable or parameter the body never references is bound under
 its source name with a leading underscore (`fun (_err : …) => 0`, `| some
-_v => 0`, `| (a, _b) => a`): Lean's `linter.unusedVariables` accepts the
+_v => 0`, `| (a, _b) => a`; a name already spelled `_x` is left as it is): Lean's `linter.unusedVariables` accepts the
 prefix as the declared intent, the name stays greppable against the lem and
 the OCaml, and the decision is the typed AST's — the free variables of the
 scope (`with_binder_scope`, installed around every binding form's pattern
 rendering), never the text's; a name that other emitted text refers to
 (the designated structural parameter, a `reader_seed` def's seed parameters,
-the identifiers of a fuel sentinel, the hoisted `function`-tail binders)
-keeps its spelling, and so does one whose underscored form would sit in a
+the identifiers of a fuel sentinel, the hoisted `function`-tail binders — all
+parameters, so the exception applies where a clause head's parameters
+render and nowhere inside the body) keeps its spelling, and so does one whose
+underscored form would sit in a
 synthesized binder namespace (`_lemReader_…`, `_lemSupply…`, `_lemIfTail…`).
 The derived comparison and size definitions carry `termination_by
 structural` exactly where they recurse — a self-call or a cycle through
 their `mutual` block, Lean's own rule per strongly connected component
 (`lean_block_recursive`) — and the derived `Inhabited` instance's constant
-function binds `_`. The generated tree builds at zero warnings, and both of
-the fork's Lean packages (`lean-lib`, the suite's `lean-test`) pass
-`-DwarningAsError=true`, so a warning is a build failure
+function binds `_`. The generated tree builds at zero warnings, and the two
+Lean packages the gates build (`lean-lib/lakefile.lean`, the suite's
+`tests/comprehensive/lean-test/lakefile.lean`) pass `-DwarningAsError=true`,
+so a warning is a build failure there; the three other lakefiles
+(`tests/backends/lean-test`, the historical examples) are outside every gate
 ([record](2026-11-07_unreferenced-binders-record.md)).
 
 With a fuel declare
