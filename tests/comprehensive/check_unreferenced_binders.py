@@ -4,13 +4,20 @@
 doc/lean-backend/2026-11-07_unreferenced-binders-record.md), over the
 generated Test_unreferenced_binders.lean (test_unreferenced_binders.lem):
 
+  U2  no identifier gains a second underscore: a source name already spelled
+      `_x` is left as it is (pre-merge review F1; Lean accepts `__x` silently,
+      so this is a text pin, not a compile one).
   U1  every binding form's unreferenced variable is bound as `_<name>` and
       every referenced or kept one under its source name — one exact line
       per form (def parameters, lambda, match arm, `function` arm, nested
       tuple pattern, let pattern, named pattern, local lambda, shadowing,
       a partial def's parameter, equation clauses, an instance method, a do
       line, a top-level destructuring let's per-name projections, a fuel'd
-      worker whose sentinel names an otherwise unreferenced parameter).
+      worker whose sentinel names an otherwise unreferenced parameter; a
+      name already spelled `_x`, unreferenced and referenced; a nested arm
+      binder spelled like the sentinel's parameter and a nested lambda
+      binder spelled like the structural parameter, both underscored — the
+      kept names protect the clause head only, pre-merge review F3).
   T1  `termination_by structural` is attached to exactly the derived
       comparison and size definitions that recurse (a self-call or a cycle
       through the emitted block): present on the recursive type, the
@@ -59,11 +66,30 @@ expected = [
     "  let (_ta, tb) : (Nat × Nat) := lemLetRhs_ta_tb",  # projection of tb
     "def loop_lemFuel (lemFuel : Nat) (tag : Nat) (n : Nat) : Nat :=",  # kept: the sentinel names tag
     "  | 0 => (fuelExhausted tag)",
+    # pre-merge review F1: a source name already spelled `_x` is left as it is
+    "def keep_us (_x : Nat) (y : Nat) : Nat := y",
+    "def use_us (_x : Nat) : Nat := _x + 1",
+    # pre-merge review F3: the kept names protect the clause head only
+    "def loop_arm_lemFuel (lemFuel : Nat) (tag : Nat) (o : Option Nat) : Nat :=",
+    "     | some _tag => (loop_arm_lemFuel lemFuel) 7 none",
+    "  | _ :: l2 => (fun (_l : List Nat) => 1) ([] : List Nat) + slen l2",
+    "termination_by structural l",
 ]
 for e in expected:
     if e not in lines:
         print(f"  FAIL (U1): {path} lacks the line: {e}")
         fail = 1
+# arm_us: the arm's `_v` stays `_v` (F1); pinned as a block since `| some _v => 0` also belongs to match_arm
+if not re.search(r"^def arm_us \(o : Option Nat\) : Nat :=\n  match o with\n  \| some _v => 0\n  \| none => 1$", text, re.M):
+    print(f"  FAIL (U1): {path} lacks the arm_us block (an arm binder already spelled `_v` left as it is)")
+    fail = 1
+# U2 (F1): no identifier anywhere in the module's code gains a second underscore
+# (the carried-over comments are stripped first: the probe's own comment quotes `__x`)
+code = re.sub(r"/-.*?-/", "", text, flags=re.S)
+dbl = [(i, l) for i, l in enumerate(code.split("\n"), 1) if re.search(r"(?<![A-Za-z0-9_'])__[A-Za-z0-9_']", l)]
+if dbl:
+    print(f"  FAIL (U2): {path} has a double-underscore identifier: line {dbl[0][0]}: {dbl[0][1].strip()}")
+    fail = 1
 # shadowed: the outer binder is `_x`, the inner let rebinds `x` and the body is `x`
 shadow = re.search(r"^def shadowed : Nat → Nat :=\n  fun \(_x : Nat\) =>\n\s+let x := \(5 : Nat\);\n\s+x$", text, re.M)
 if not shadow:
@@ -123,5 +149,6 @@ if "nonrec_t.lemSize" in defs:
 if fail:
     sys.exit(1)
 n_clause = sum(1 for v in defs.values() if v)
-print(f"  OK: {len(expected) + 1} binder lines as pinned; termination_by on {n_clause} of {len(defs)} definitions, "
-      f"exactly the {len(with_clause) + len(helpers)} that recurse; none on the {len(without_clause)} that do not")
+n_derived = len(with_clause) + len(helpers)
+print(f"  OK: {len(expected) + 2} binder lines as pinned, no double underscore; termination_by on exactly the {n_derived} derived "
+      f"definitions that recurse (plus {n_clause - n_derived} structural declare) of {len(defs)}; none on the {len(without_clause)} derived ones that do not")

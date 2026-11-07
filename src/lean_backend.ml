@@ -6040,7 +6040,7 @@ type pat_style = FunParam | MatchArm
                     in
                     (* Render each clause as | pat1, pat2, ... => body *)
                     let render_equation ({term = _}, _, pats, _, skips, e) =
-                      let pat_out = with_binder_scope [e] (fun () ->
+                      let pat_out = with_binder_scope ~params:true [e] (fun () ->
                           concat_str ", " (List.map def_pattern pats)) in
                       let body =
                         if needs_parens (C.exp_to_term e) then
@@ -6963,7 +6963,7 @@ type pat_style = FunParam | MatchArm
              tv_set_sep; tv_set; constraints_sep; constraints;
              fuel_binder_output (); ireader_binder_output (); inhabited_binder_output ();
              from_string " (lemFuel : Nat)"; reader_binder_output (); supply_binder_output (); pat_skips;
-             with_binder_scope [e] (fun () -> fun_pattern_list inside_instance pats); ws skips; typ_opt;
+             with_binder_scope ~params:true [e] (fun () -> fun_pattern_list inside_instance pats); ws skips; typ_opt;
              from_string " := match lemFuel with\n  | 0 => ";
              sentinel_out;
              (* the succ-arm body is parenthesized like the sentinel: a
@@ -6978,7 +6978,7 @@ type pat_style = FunParam | MatchArm
            Output.flat [
              ws name_skips; from_string " "; name; tv_set_sep; tv_set; constraints_sep; constraints;
              fuel_binder_output (); ireader_binder_output (); inhabited_binder_output (); reader_binder_output (); supply_binder_output (); pat_skips;
-             with_binder_scope [e] (fun () -> fun_pattern_list inside_instance pats); ws skips; typ_opt; from_string " := "; body
+             with_binder_scope ~params:true [e] (fun () -> fun_pattern_list inside_instance pats); ws skips; typ_opt; from_string " := "; body
            ])
     and reader_binder_output () =
       if not !St.reader_binder then emp else
@@ -8591,13 +8591,15 @@ type pat_style = FunParam | MatchArm
        body, the later lines of a do block, …); the referenced names are
        the free variables of those expressions (C.exp_to_free —
        substitutions resolved, shadowing respected) plus the names that
-       emitted text outside the AST refers to: the designated structural
-       parameter (St.keep_binders; the termination_by clause names it), a
-       reader_seed def's seed parameters (St.reader_seed_param; injected
-       at call sites by name), the hoisted function-tail binders
-       (St.tail_sentinel_args) and every identifier of a fuel sentinel's
-       text (St.fuel_emit; both are applied in the worker's exhaustion
-       arm). A binder referenced only from text the backend renders apart
+       emitted text outside the AST refers to — only where a clause head's
+       parameters render, since every such text names a parameter: the
+       designated structural parameter (St.keep_binders; the termination_by
+       clause names it), a reader_seed def's seed parameters
+       (St.reader_seed_param; injected at call sites by name), the hoisted
+       function-tail binders (St.tail_sentinel_args) and every identifier of
+       a fuel sentinel's text (St.fuel_emit; both are applied in the
+       worker's exhaustion arm). A source name already spelled `_name` is
+       left as it is. A binder referenced only from text the backend renders apart
        from the body but derives from it (a hoisted let, a `lemLetRhs_`
        helper, the fuel wrapper's call of the worker, the measure
        obligation) is a free variable of the body or is passed
@@ -8620,40 +8622,61 @@ type pat_style = FunParam | MatchArm
         St.binder_refs := Some refs;
         Fun.protect ~finally:(fun () -> St.binder_refs := saved) render
       end
-    and with_binder_scope (scope : exp list) (render : unit -> Output.t) : Output.t =
+    and with_binder_scope ?(params = false) (scope : exp list) (render : unit -> Output.t) : Output.t =
       if !St.rendering_comment then render ()
       else begin
         let refs = List.fold_left (fun acc e ->
             Nfmap.fold (fun acc n _ -> NameSet.add n acc) acc (C.exp_to_free e))
           NameSet.empty scope in
-        let sentinel_idents = match !St.fuel_emit with
-          | None -> []
-          | Some s -> List.filter_map (function
-              | LM_ident id -> Some (List.hd (String.split_on_char '.' id))
-              | LM_num _ | LM_other _ -> None) (lean_measure_tokens s) in
-        let kept =
-          !St.keep_binders
-          @ (match !St.reader_seed_param with Some l -> List.map snd l | None -> [])
-          @ !St.tail_sentinel_args
-          @ sentinel_idents in
-        let refs = List.fold_left (fun acc s -> NameSet.add (Name.from_string s) acc) refs kept in
+        (* The kept names protect the definition's PARAMETERS — the
+           termination clause, the seed injection, the sentinel's text and
+           its application to the hoisted binders all name parameters — so
+           they are added only where a clause head's parameters render
+           ([params]: funcl_aux, render_equation); a nested arm or lambda
+           binder spelled like one is decided on the body alone (pre-merge
+           review F3: the wider set left a warning standing with no remedy
+           but a lem rename). *)
+        let refs =
+          if not params then refs
+          else begin
+            let sentinel_idents = match !St.fuel_emit with
+              | None -> []
+              | Some s -> List.filter_map (function
+                  | LM_ident id -> Some (List.hd (String.split_on_char '.' id))
+                  | LM_num _ | LM_other _ -> None) (lean_measure_tokens s) in
+            let kept =
+              !St.keep_binders
+              @ (match !St.reader_seed_param with Some l -> List.map snd l | None -> [])
+              @ !St.tail_sentinel_args
+              @ sentinel_idents in
+            List.fold_left (fun acc s -> NameSet.add (Name.from_string s) acc) refs kept
+          end in
         with_binder_refs refs render
       end
     (* The binder's rendered name when the rule underscores it; None when
-       it is referenced, kept, or no scope is installed — the caller then
-       renders the source name as before. *)
+       it is referenced, kept, already spelled with the underscore, or no
+       scope is installed — the caller then renders the source name as
+       before. *)
     and binder_underscore (v : Name.lskips_t) : string option =
       match !St.binder_refs with
       | Some refs when not (NameSet.mem (Name.strip_lskip v) refs) ->
-        let s = String.concat "" ["_"; Name.to_string (Name.strip_lskip v)] in
-        (* the binder namespaces the backend synthesizes inside a body
-           (reader parameters, supply binders and values, the if-chain
-           continuations): a lem variable spelled like one of them keeps
-           its name (at most a warning) rather than shadow the synthesized
-           binder's injection sites (a silent wrong value) *)
-        if List.exists (fun pre -> lean_starts_with pre s)
-             ["_lemReader_"; "_lemSupply"; "_lemIfTail"]
-        then None else Some s
+        let name = Name.to_string (Name.strip_lskip v) in
+        (* a source name already spelled with the leading underscore (the
+           OCaml convention cerberus's lem uses for the variables it does
+           not use) is left as it is: Lean accepts it, and `__name` would
+           not be the lem's name (pre-merge review F1) *)
+        if lean_starts_with "_" name then None
+        else begin
+          let s = String.concat "" ["_"; name] in
+          (* the binder namespaces the backend synthesizes inside a body
+             (reader parameters, supply binders and values, the if-chain
+             continuations): a lem variable spelled like one of them keeps
+             its name (at most a warning) rather than shadow the synthesized
+             binder's injection sites (a silent wrong value) *)
+          if List.exists (fun pre -> lean_starts_with pre s)
+               ["_lemReader_"; "_lemSupply"; "_lemIfTail"]
+          then None else Some s
+        end
       | _ -> None
     and binder_name_output (v : Name.lskips_t) : Output.t =
       match binder_underscore v with

@@ -13,6 +13,12 @@ example : def_params (x := 1) (_y := 2) = 1 := rfl
 -- the fuel'd worker keeps `tag` (the sentinel's text names it) and `n`
 example : loop_lemFuel (lemFuel := 3) (tag := 9) (n := 2) = 0 := rfl
 example : loop_lemFuel 0 9 2 = fuelExhausted 9 := loop_lemFuel_zero 9 2
+-- a source name already spelled `_x` is left as it is, unreferenced or referenced (review F1)
+example : keep_us (_x := 1) (y := 2) = 2 := rfl
+example : use_us (_x := 1) = 2 := rfl
+-- the kept names protect the clause head only (review F3): the nested binders are underscored
+example : loop_arm_lemFuel (lemFuel := 2) (tag := 9) (o := some 4) = 0 := rfl
+example : slen [1, 2, 3] = 3 := by decide
 -- values through the renamed binders
 example : match_arm (some 5) = 0 := rfl
 example : match_arm none = 1 := rfl
