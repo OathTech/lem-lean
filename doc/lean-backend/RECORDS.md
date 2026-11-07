@@ -164,6 +164,15 @@ describe a design that is no longer current.
   `lem:` marker, the layout pass, mutual records as structures, the
   printer cleanup; package A (layout engine, §11; TODO item 42, closed); packages C and D deferred (TODO items 27, 28); the
   upstream report tray scope.
+- 2026-11-07 [Unreferenced-binders record](2026-11-07_unreferenced-binders-record.md):
+  TODO item 54, the lem-lean half — unreferenced pattern variables and
+  parameters bound as `_<name>`, `termination_by structural` only on the
+  derived definitions that recurse (Lean's per-component rule, probed on
+  4.35.0), the derived `Inhabited` constant function's binder a wildcard;
+  the suite and LemLib at zero warnings, `-DwarningAsError=true` on both
+  packages; the cerberus expected delta (147 clauses, 689 binders in 52
+  modules, OCaml byte-identical) and the re-pin recipe in the
+  [consumer note](2026-11-07_consumer-note-cerberus-unreferenced-binders.md).
 
 ## Correctness and fail-closed hardening
 
@@ -255,6 +264,13 @@ describe a design that is no longer current.
   behind the `@[noinline]` RHS def), TODO.md (57 added), this index and the
   record's §3 (d), §8, §9, §11, §12 were corrected per the review's
   dispositions; no code moved.
+- 2026-11-07, unreferenced binders (TODO item 54, lem-lean half): DESIGN.md
+  (the binder rule and the per-component clause, under "What generated code
+  looks like"; the `lemSize` sentence), the manual chapter (the emitted-code
+  bullet, the comparison-instances paragraph), README.md (warnings are build
+  failures), TODO.md (54 closed) and this index were updated for the
+  [unreferenced-binders record](2026-11-07_unreferenced-binders-record.md),
+  whose gate runs are quoted there.
 
 ## Elsewhere
 

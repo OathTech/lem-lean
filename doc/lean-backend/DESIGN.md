@@ -60,6 +60,26 @@ def len (l : List Nat) : Nat :=
 termination_by structural l
 ```
 
+A pattern variable or parameter the body never references is bound under
+its source name with a leading underscore (`fun (_err : …) => 0`, `| some
+_v => 0`, `| (a, _b) => a`): Lean's `linter.unusedVariables` accepts the
+prefix as the declared intent, the name stays greppable against the lem and
+the OCaml, and the decision is the typed AST's — the free variables of the
+scope (`with_binder_scope`, installed around every binding form's pattern
+rendering), never the text's; a name that other emitted text refers to
+(the designated structural parameter, a `reader_seed` def's seed parameters,
+the identifiers of a fuel sentinel, the hoisted `function`-tail binders)
+keeps its spelling, and so does one whose underscored form would sit in a
+synthesized binder namespace (`_lemReader_…`, `_lemSupply…`, `_lemIfTail…`).
+The derived comparison and size definitions carry `termination_by
+structural` exactly where they recurse — a self-call or a cycle through
+their `mutual` block, Lean's own rule per strongly connected component
+(`lean_block_recursive`) — and the derived `Inhabited` instance's constant
+function binds `_`. The generated tree builds at zero warnings, and both of
+the fork's Lean packages (`lean-lib`, the suite's `lean-test`) pass
+`-DwarningAsError=true`, so a warning is a build failure
+([record](2026-11-07_unreferenced-binders-record.md)).
+
 With a fuel declare
 (``declare {lean} fuel val fuel_countdown = `fuelExhausted n` `` —
 the backtick payload is the expression returned at fuel exhaustion)
@@ -318,7 +338,8 @@ measure may be the BACKEND-DERIVED structural size of a parameter's type
 (`lemSize x` ↦ `t.lemSize x`): for every recursive block of generated
 inductive types in a user module the backend emits, right after the block,
 computable `t.lemSize : t → Nat` functions (one mutual block per type
-block, list/option/sum helpers, `termination_by structural`; 1 per
+block, list/option/sum helpers, `termination_by structural` on the members
+that recurse; 1 per
 constructor node and per non-nullary container constructor, tuples
 transparent, every other field a leaf 0 — a leaf's weight never affects
 the bound: what makes a derived size INSUFFICIENT is a field under an
